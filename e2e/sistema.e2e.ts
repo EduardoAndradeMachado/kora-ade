@@ -344,8 +344,20 @@ test('R50 engrenagem abre Configurações com logo, versão e estado da atualiza
   await expect(dialog).toContainText('só funciona no app instalado')
   await expect(dialog.getByRole('button', { name: 'Buscar atualização' })).toBeDisabled()
 
+  const statusColor = () => dialog.getByRole('status').evaluate((e) => getComputedStyle(e).color)
+  const destructive = () =>
+    page.evaluate(() => {
+      const probe = document.createElement('span')
+      probe.className = 'text-destructive'
+      document.body.append(probe)
+      const color = getComputedStyle(probe).color
+      probe.remove()
+      return color
+    })
+
   await sendUpdateStatus(run, { state: 'current', checkedAt: Date.now() })
   await expect(dialog).toContainText('versão mais recente')
+  expect(['rgb(88, 124, 12)', 'rgb(115, 201, 145)'], '"em dia" em verde').toContain(await statusColor())
   await dialog.getByRole('button', { name: 'Buscar atualização' }).click()
   await expect.poll(() => updateCalls(run)).toEqual(['check'])
 
@@ -355,6 +367,7 @@ test('R50 engrenagem abre Configurações com logo, versão e estado da atualiza
 
   await sendUpdateStatus(run, { state: 'error', message: 'sem internet' })
   await expect(dialog).toContainText('Não foi possível consultar: sem internet')
+  expect(await statusColor(), 'erro em vermelho').toBe(await destructive())
   await dialog.getByRole('button', { name: 'Tentar de novo' }).click()
   await expect.poll(() => updateCalls(run)).toEqual(['check', 'check'])
 

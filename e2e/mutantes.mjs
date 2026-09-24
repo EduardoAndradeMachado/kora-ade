@@ -262,6 +262,22 @@ const MUTANTS = [
     bug: 'Atualizar agora instala sem perguntar pelos arquivos não salvos',
     find: "    if (!(await resolveUnsaved('quit'))) return false\n",
     replace: ''
+  },
+  {
+    id: 'M50e',
+    grep: 'R50 ',
+    file: 'src/renderer/src/components/SettingsDialog.tsx',
+    bug: '"em dia" sem o verde',
+    find: "  current: 'text-[#587c0c] dark:text-[#73c991]'",
+    replace: "  current: ''"
+  },
+  {
+    id: 'M50f',
+    grep: 'R50 ',
+    file: 'src/renderer/src/components/SettingsDialog.tsx',
+    bug: 'erro da atualização sem o vermelho',
+    find: "  error: 'text-destructive',",
+    replace: "  error: 'text-muted-foreground',"
   }
 ]
 
