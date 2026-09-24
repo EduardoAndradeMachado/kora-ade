@@ -672,3 +672,45 @@ test('R45 tema: o seletor chama o modo que segue o sistema de "Sistema"', async 
   await expect(ui.menuItem(page, '● Sistema')).toBeVisible()
   await expect(page.getByText('Seguir o Windows')).toHaveCount(0)
 })
+
+test('R53 voltar para um projeto onde uma aba foi renomeada antes não reabre a edição do nome (clique vai para a aba, não para o título)', async ({ kora }) => {
+  const env = kora.env()
+  const other = join(env.root, 'outro')
+  mkdirSync(other)
+  writeState(env, {
+    version: 2,
+    projects: [
+      { id: 'p1', name: 'proj-teste', path: env.project },
+      { id: 'p2', name: 'outro', path: other }
+    ],
+    tabs: [
+      { id: 'a1', projectId: 'p1', title: 'A1', titleLocked: true, agent: null },
+      { id: 'a2', projectId: 'p1', title: 'A2', titleLocked: true, agent: null },
+      { id: 'b1', projectId: 'p2', title: 'B1', titleLocked: true, agent: null },
+      { id: 'b2', projectId: 'p2', title: 'B2', titleLocked: true, agent: null }
+    ]
+  })
+  const run = await kora.launch(env)
+  const page = run.page
+  const editing = ui.tabBar(page).locator('input')
+
+  await ui.sideTab(page, 'A1').click()
+  await page.keyboard.press('F2')
+  await expect(editing).toBeVisible()
+  await editing.fill('A1 renomeada')
+  await editing.press('Enter')
+  await expect(editing).toHaveCount(0)
+  await waitFor(() => readState(env).tabs.find((t) => t.title === 'A1 renomeada'), 'nome novo salvo')
+
+  await ui.sideTab(page, 'B1').click()
+  await expect(ui.barTab(page, 'B1')).toBeVisible()
+  await ui.sideTab(page, 'A2').click()
+  await expect(ui.barTab(page, 'A2')).toBeVisible()
+  await page.waitForTimeout(300)
+  await expect(editing, 'nenhum título em edição depois de voltar ao projeto').toHaveCount(0)
+
+  await ui.sideTab(page, 'B2').click()
+  await ui.sideTab(page, 'A1 renomeada').click()
+  await page.waitForTimeout(300)
+  await expect(editing).toHaveCount(0)
+})

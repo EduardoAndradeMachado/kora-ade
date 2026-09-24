@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -12,8 +12,13 @@ interface Props {
 
 export function EditableTitle({ value, editable, className, editRequest, onCommit }: Props): React.JSX.Element {
   const [draft, setDraft] = useState<string | null>(null)
+  // O pedido fica guardado no App depois de atendido; a aba que volta a ser desenhada (ex.: ao trocar de
+  // projeto) nasce com esse pedido antigo e não pode tratá-lo como novo.
+  const seenRequest = useRef(editRequest)
 
   useEffect(() => {
+    if (editRequest === seenRequest.current) return
+    seenRequest.current = editRequest
     if (editRequest && editable) setDraft(value)
     // Só o pedido de edição dispara; `value` mudando sozinho não reabre o campo.
     // eslint-disable-next-line react-hooks/exhaustive-deps

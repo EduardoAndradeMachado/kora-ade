@@ -311,6 +311,14 @@ const MUTANTS = [
     find: '  agentFolders.start()\n',
     replace: '',
     expect: { 'R51 ': 'failed', 'R52 ': 'failed' }
+  },
+  {
+    id: 'M53',
+    grep: 'R53 ',
+    file: 'src/renderer/src/components/EditableTitle.tsx',
+    bug: 'pedido de renomear já atendido reabre a edição quando a aba volta a ser desenhada',
+    find: '    if (editRequest === seenRequest.current) return\n',
+    replace: ''
   }
 ]
 
