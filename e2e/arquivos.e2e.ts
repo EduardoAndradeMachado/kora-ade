@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect } from './harness'
 import {
@@ -472,4 +472,27 @@ test('R43 texto dos arquivos: tamanho próprio no painel Aa e no Ctrl + roda sob
   await expect.poll(markdownFont).toBe('16px')
   expect(await zoomFactor()).toBeCloseTo(1)
   await waitFor(() => readState(env).settings?.fileFontSize === 16, 'Ctrl + roda sobre o arquivo salvo')
+})
+
+test('R46 explorador sem trocar de aba: .gitignore editado por fora deixa o item opaco na hora; cor do git chega antes do polling', async ({ kora }) => {
+  const env = kora.env()
+  seedRepo(env)
+  writeFileSync(join(env.project, 'segredo.env'), 'x=1\n')
+  const run = await kora.launch(env)
+  const opacity = (rel: string) => row(run, rel).locator('span.truncate').evaluate((e) => getComputedStyle(e).opacity)
+
+  await expect(row(run, 'segredo.env')).toBeVisible()
+  await expect(row(run, 'segredo.env').locator('span.font-semibold')).toHaveText('U')
+  await expect.poll(() => opacity('segredo.env')).toBe('1')
+
+  appendFileSync(join(env.project, '.gitignore'), 'segredo.env\n')
+  await expect.poll(() => opacity('segredo.env'), { timeout: 4000 }).toBe('0.45')
+
+  // O polling do status é de 5 s: três viradas seguidas, cada uma em até 1,5 s, só passam pelo aviso do watcher.
+  const tracked = row(run, 'tracked.txt').locator('span.font-semibold')
+  await expect(tracked).toHaveCount(0)
+  for (const [content, letter] of [['mudou\n', 1], ['original\n', 0], ['de novo\n', 1]] as const) {
+    writeFileSync(join(env.project, 'tracked.txt'), content)
+    await expect(tracked).toHaveCount(letter, { timeout: 1500 })
+  }
 })

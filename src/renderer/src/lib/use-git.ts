@@ -3,6 +3,8 @@ import type { GitBranch, GitStatus, GitWorktree } from '@shared/git-types'
 import { ipcErrorMessage } from '@/lib/ipc-error'
 
 const POLL_MS = 5000
+// Salvar em sequência (agente editando vários arquivos) gera um aviso atrás do outro; um status por segundo basta.
+const CHANGE_THROTTLE_MS = 1000
 
 export interface GitState {
   status: GitStatus | null
@@ -15,7 +17,8 @@ export interface GitState {
   run(action: () => Promise<void>): void
 }
 
-// O Claude/Codex mexem no repositório o tempo todo; sem polling o painel mentiria sobre o que mudou.
+// O Claude/Codex mexem no repositório o tempo todo: o aviso do watcher atualiza na hora, e o polling
+// cobre o que ele não vê (ex.: commit feito fora, com a janela sem foco).
 export function useGit(projectId: string, reloadKey: number, withBranches: boolean): GitState {
   const [status, setStatus] = useState<GitStatus | null>(null)
   const [branches, setBranches] = useState<GitBranch[]>([])
@@ -46,6 +49,29 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
       cancelled = true
     }
   }, [projectId, reloadKey, tick, withBranches])
+
+  useEffect(() => {
+    let last = 0
+    let trailing: ReturnType<typeof setTimeout> | undefined
+    const off = window.kora.onFilesChanged((changedProject, change) => {
+      if (changedProject !== projectId || !change.git) return
+      const wait = last + CHANGE_THROTTLE_MS - Date.now()
+      if (wait <= 0) {
+        last = Date.now()
+        refresh()
+      } else if (!trailing) {
+        trailing = setTimeout(() => {
+          trailing = undefined
+          last = Date.now()
+          refresh()
+        }, wait)
+      }
+    })
+    return () => {
+      off()
+      clearTimeout(trailing)
+    }
+  }, [projectId, refresh])
 
   useEffect(() => {
     const timer = setInterval(() => document.visibilityState === 'visible' && refresh(), POLL_MS)

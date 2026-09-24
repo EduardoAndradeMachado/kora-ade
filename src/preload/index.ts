@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { KoraApi } from '../shared/ipc'
+import type { FilesChange, KoraApi } from '../shared/ipc'
 import type { AgentSession } from '../shared/agent'
 
 function subscribe<A extends unknown[]>(channel: string, listener: (...args: A) => void): () => void {
@@ -20,7 +20,7 @@ const api: KoraApi = {
   saveLayout: (layout) => ipcRenderer.invoke('project:layout', layout),
 
   listDir: (projectId, rel) => ipcRenderer.invoke('fs:list', projectId, rel),
-  onFilesChanged: (listener) => subscribe<[string, string[]]>('fs:changed', listener),
+  onFilesChanged: (listener) => subscribe<[string, FilesChange]>('fs:changed', listener),
   readText: (projectId, rel) => ipcRenderer.invoke('fs:read', projectId, rel),
   writeText: (projectId, rel, content, mtime) => ipcRenderer.invoke('fs:write', projectId, rel, content, mtime),
   openFile: (projectId, rel) => ipcRenderer.invoke('fs:open', projectId, rel),

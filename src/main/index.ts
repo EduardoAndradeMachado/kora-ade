@@ -85,7 +85,7 @@ const terminals = new Terminals({
   }
 })
 
-const watchers = new ProjectWatchers((projectId, dirs) => mainWindow?.webContents.send('fs:changed', projectId, dirs))
+const watchers = new ProjectWatchers((projectId, change) => mainWindow?.webContents.send('fs:changed', projectId, change))
 
 const detector = new AgentDetector({
   claudeSessionsDir: join(homedir(), '.claude', 'sessions'),

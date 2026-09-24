@@ -14,6 +14,16 @@ export interface TextFile {
   mtimeMs: number
 }
 
+// O que mudou no disco de um projeto, por quem quer que seja: pastas cuja listagem mudou ('' = raiz),
+// status do Git possivelmente diferente, regras de ignorados (.gitignore) alteradas, ou "releia tudo"
+// quando não dá para saber (buffer do watcher estourado, watcher perdido).
+export interface FilesChange {
+  dirs: string[]
+  git: boolean
+  ignoreRules: boolean
+  rescan: boolean
+}
+
 export type CreateResult = { ok: true; rel: string } | { ok: false; message: string }
 
 export type SaveResult = { ok: true; mtimeMs: number } | { ok: false; conflict: boolean; message: string }
@@ -54,8 +64,7 @@ export interface KoraApi {
   }): Promise<KoraState>
 
   listDir(projectId: string, rel: string): Promise<FileEntry[]>
-  // Pastas (relativas ao projeto, '' = raiz) cuja listagem mudou no disco, por quem quer que seja.
-  onFilesChanged(listener: (projectId: string, dirs: string[]) => void): () => void
+  onFilesChanged(listener: (projectId: string, change: FilesChange) => void): () => void
   readText(projectId: string, rel: string): Promise<TextFile>
   writeText(projectId: string, rel: string, content: string, expectedMtimeMs: number): Promise<SaveResult>
   openFile(projectId: string, rel: string): Promise<void>

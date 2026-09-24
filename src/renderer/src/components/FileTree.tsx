@@ -117,11 +117,13 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
     for (const rel of expandedRef.current) void load(rel)
   }, [load, reloadKey])
 
-  // Só relê o que já foi aberto: pasta nunca expandida é lida quando o usuário abrir.
+  // Só relê o que já foi aberto: pasta nunca expandida é lida quando o usuário abrir. Regra de ignorados nova
+  // pode mudar qualquer item já mostrado, então tudo o que está aberto é relido (e reconsultado no git).
   useEffect(
     () =>
-      window.kora.onFilesChanged((changedProject, dirs) => {
+      window.kora.onFilesChanged((changedProject, change) => {
         if (changedProject !== projectId) return
+        const dirs = change.rescan || change.ignoreRules ? [...loadedRef.current] : change.dirs
         for (const dir of dirs) if (loadedRef.current.has(dir)) void load(dir)
       }),
     [projectId, load]

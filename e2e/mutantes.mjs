@@ -139,6 +139,22 @@ const MUTANTS = [
     bug: 'tema segue com o nome antigo',
     find: "label: 'Sistema'",
     replace: "label: 'Seguir o Windows'"
+  },
+  {
+    id: 'M46',
+    grep: 'R46 ',
+    file: 'src/renderer/src/components/FileTree.tsx',
+    bug: 'árvore só relê as pastas listadas no aviso; .gitignore novo não reconsulta os ignorados',
+    find: 'const dirs = change.rescan || change.ignoreRules ? [...loadedRef.current] : change.dirs',
+    replace: 'const dirs = change.dirs'
+  },
+  {
+    id: 'M46b',
+    grep: 'R46 ',
+    file: 'src/renderer/src/lib/use-git.ts',
+    bug: 'status do git ignora o aviso do watcher e só atualiza no polling',
+    find: "if (changedProject !== projectId || !change.git) return",
+    replace: 'return'
   }
 ]
 
