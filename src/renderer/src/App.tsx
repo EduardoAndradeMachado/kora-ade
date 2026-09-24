@@ -13,6 +13,7 @@ import { MarkdownView } from '@/components/MarkdownView'
 import { PdfView } from '@/components/PdfView'
 import { ImageView } from '@/components/ImageView'
 import { ipcErrorMessage } from '@/lib/ipc-error'
+import { cn } from '@/lib/utils'
 import { ModeToggle } from '@/components/ModeToggle'
 import { useZoomShortcuts } from '@/lib/use-zoom-shortcuts'
 import { useCloseTabShortcut } from '@/lib/use-close-tab-shortcut'
@@ -306,7 +307,9 @@ export function App(): React.JSX.Element {
   const stateRef = useRef(state)
   stateRef.current = state
 
+  const [rings, setRings] = useState(0)
   const notifyFinished = useCallback((projectId: string, tab: Extract<Tab, { kind: 'terminal' }>) => {
+    setRings((n) => n + 1)
     const alerts = stateRef.current?.settings.alerts
     if (alerts?.sound) playChime()
     if (!alerts?.windowsNotification || document.hasFocus() || !tab.agent) return
@@ -863,6 +866,7 @@ export function App(): React.JSX.Element {
 
           {selected && projectTabs.length === 0 && (
             <EmptyState
+              ring={rings}
               title={selected.name}
               detail={selected.path}
               actions={[
@@ -874,6 +878,7 @@ export function App(): React.JSX.Element {
           )}
           {!selected && (
             <EmptyState
+              ring={rings}
               title="Nenhum projeto selecionado"
               detail="Adicione uma pasta na barra lateral para começar."
               actions={[{ label: 'Adicionar projeto', onClick: () => void addProject() }]}
@@ -951,10 +956,14 @@ function EmptyState(props: {
   title: string
   detail: string
   actions: { label: string; onClick(): void }[]
+  // Muda a cada sino tocado em outra sessão: a chave nova recria o símbolo e ele balança uma vez.
+  ring: number
 }): React.JSX.Element {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
-      <SymbolMark size={104} body="var(--brand-ghost)" arm="var(--brand-ghost)" className="mb-3" />
+      <span key={props.ring} data-empty-symbol className={cn('mb-3 inline-flex', props.ring > 0 && 'kora-balanca')}>
+        <SymbolMark size={104} body="var(--brand-ghost)" arm="var(--brand-ghost)" />
+      </span>
       <div className="text-sm font-medium">{props.title}</div>
       <div className="max-w-full truncate text-xs text-muted-foreground">{props.detail}</div>
       <div className="mt-1 flex gap-2">

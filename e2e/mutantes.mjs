@@ -401,6 +401,14 @@ const MUTANTS = [
     find: 'if (tab.live && tab.alert) {',
     replace: 'if (false) {',
     expect: { 'R56 ': 'failed', 'R57 ': 'failed' }
+  },
+  {
+    id: 'M58',
+    grep: 'R58 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'sino não mexe o símbolo da tela vazia',
+    find: '    setRings((n) => n + 1)\n',
+    replace: ''
   }
 ]
 

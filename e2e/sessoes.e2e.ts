@@ -474,3 +474,31 @@ test('R57 aviso de sessão parada também no Codex: símbolo e sino na aba e som
   await ui.sideTab(page, /Codex/).click()
   await expect(codexAlert).toHaveCount(0)
 })
+
+test('R58 easter egg: sino tocando em outra sessão faz o símbolo da tela vazia balançar', async ({ kora }) => {
+  const env = kora.env()
+  const other = join(env.root, 'vazio')
+  mkdirSync(other)
+  writeState(env, {
+    version: 2,
+    projects: [
+      { id: 'p1', name: 'proj-teste', path: env.project },
+      { id: 'p2', name: 'vazio', path: other }
+    ],
+    tabs: []
+  })
+  const run = await kora.launch(env)
+  const page = run.page
+  await installAlertSpies(page)
+  const emptySymbol = page.locator('main [data-empty-symbol]')
+
+  await newTab(page, 'Codex')
+  await waitFor(() => starts(env, 'codex')[0], 'codex falso subiu')
+  await typeLine(page, 'trabalhe 7')
+  await expect(ui.barTab(page, /Codex/).locator('[data-activity]')).toHaveAttribute('data-activity', 'working', { timeout: 5000 })
+  await page.locator('aside nav div[title]').filter({ hasText: 'vazio' }).click()
+  await expect(emptySymbol).toBeVisible()
+  await expect(emptySymbol).not.toHaveClass(/kora-balanca/)
+
+  await expect(emptySymbol).toHaveClass(/kora-balanca/, { timeout: 15_000 })
+})
