@@ -1,7 +1,7 @@
 {
   "name": "kora",
   "productName": "Kora ADE",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {
@@ -61,5 +61,13 @@
     ]
   },
   "description": "Ambiente de desenvolvimento com agentes (Claude Code e Codex) por projeto",
-  "author": "Eduardo Andrade Machado"
+  "author": "Eduardo Andrade Machado",
+  "homepage": "https://kora-ade.vercel.app/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EduardoAndradeMachado/kora-ade.git"
+  },
+  "bugs": {
+    "url": "https://github.com/EduardoAndradeMachado/kora-ade/issues"
+  }
 }
