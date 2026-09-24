@@ -93,6 +93,22 @@ const MUTANTS = [
     replace: ''
   },
   {
+    id: 'M42',
+    grep: 'R42 ',
+    file: 'src/renderer/src/components/CodeView.tsx',
+    bug: 'botão Salvar aparece mas o clique não grava',
+    find: 'onClick={() => void save()}',
+    replace: 'onClick={() => {}}'
+  },
+  {
+    id: 'M42b',
+    grep: 'R42 ',
+    file: 'src/renderer/src/components/CodeView.tsx',
+    bug: 'salvamento automático a cada edição',
+    find: 'loaded.onDidChangeContent(() => refreshDirty(loaded))',
+    replace: 'loaded.onDidChangeContent(() => (refreshDirty(loaded), void saveRef.current()))'
+  },
+  {
     id: 'M44',
     grep: 'R44 ',
     file: 'src/renderer/src/components/Sidebar.tsx',

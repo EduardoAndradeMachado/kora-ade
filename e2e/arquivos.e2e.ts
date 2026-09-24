@@ -406,3 +406,31 @@ test('R21 Git: branch atual, locais, remotas e worktrees; criar branch e trocar 
   expect(await run.nativeDialogs()).toEqual([])
   void page
 })
+
+test('R42 editor: botão Salvar no topo grava o arquivo; sem alteração fica desabilitado; nada é salvo sozinho', async ({ kora }) => {
+  const env = kora.env()
+  const file = join(env.project, 'config.json')
+  writeFileSync(file, '{\n  "a": 1\n}\n')
+  const run = await kora.launch(env)
+  const page = run.page
+
+  await row(run, 'config.json').click()
+  const editor = page.locator('.monaco-editor').filter({ visible: true })
+  await expect(editor.locator('.view-lines')).toContainText('"a": 1')
+  const saveButton = ui.visibleButton(page, 'Salvar')
+  await expect(saveButton).toBeDisabled()
+
+  await editor.locator('.view-lines').click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type('// x')
+  await expect(page.getByText('Não salvo').filter({ visible: true })).toBeVisible()
+  await expect(saveButton).toBeEnabled()
+  // Janela maior que qualquer autosave razoável: o disco não pode mudar sem Ctrl+S ou o botão.
+  await page.waitForTimeout(2500)
+  expect(readFileSync(file, 'utf8')).toBe('{\n  "a": 1\n}\n')
+
+  await saveButton.click()
+  await expect.poll(() => readFileSync(file, 'utf8')).toContain('// x')
+  await expect(page.getByText('Não salvo').filter({ visible: true })).toHaveCount(0)
+  await expect(saveButton).toBeDisabled()
+})

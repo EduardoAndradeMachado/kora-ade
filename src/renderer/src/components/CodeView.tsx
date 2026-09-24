@@ -227,6 +227,15 @@ export function CodeView({ projectId, path, visible, onDirtyChange, headerExtra,
             </span>
           )
         )}
+        <button
+          type="button"
+          title="Salvar (Ctrl+S)"
+          disabled={!dirty || busy || load.status !== 'ready'}
+          onClick={() => void save()}
+          className="shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-default disabled:text-muted-foreground disabled:opacity-60 disabled:hover:bg-transparent"
+        >
+          Salvar
+        </button>
         {headerExtra}
       </ViewerHeader>
 
