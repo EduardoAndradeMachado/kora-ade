@@ -1,0 +1,45 @@
+/* Identidade B ("kora com cabaça"): anel creme, braço âmbar, grafite de fundo.
+   Toda cor de marca sai daqui; componentes usam só os nomes semânticos. */
+:root {
+  --brand-cream: #f3e6d0;
+  --brand-amber: #d98e3a;
+  --brand-ink: #1c1917;
+  --brand-steel: #8d929d;
+
+  /* Símbolo e logotipo: corpo (anel, letras) e linha (braço). */
+  --brand-body: var(--brand-ink);
+  --brand-line: var(--brand-amber);
+  --brand-ghost: #dcdfe5;
+
+  /* Ícones: contorno na cor do texto, no máximo um detalhe em âmbar; inativo, o detalhe fica cinza. */
+  --icon-accent: var(--brand-amber);
+  --icon-accent-idle: #9a9fa9;
+
+}
+
+.dark {
+  --brand-body: var(--brand-cream);
+  --brand-ghost: #2c2f36;
+  --icon-accent-idle: #6b6f78;
+}
+
+.kora-orbit {
+  transform-box: view-box;
+  transform-origin: 50px 60px;
+  animation: kora-orbit 1.6s linear infinite;
+}
+@keyframes kora-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kora-orbit {
+    animation: none;
+  }
+}
+
+/* Faixas que rolam na horizontal (abas): rolam pela roda do mouse, sem mostrar a barra. */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
