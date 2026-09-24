@@ -8,7 +8,7 @@ import { loadState, saveState } from './store'
 import { addProject, applyLayout, mergeTabs, removeProject, setTabAgent } from './projects'
 import { Terminals } from './terminals'
 import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from './files'
-import { AgentDetector } from './agent-detect'
+import { AgentDetector, UNREADABLE } from './agent-detect'
 import { createRolloutFinder, FolderWatch } from './agent-watch'
 import { listProjectSessions, sessionArtifacts } from './sessions'
 import { createEntry, openInDefaultBrowser, renameEntry } from './file-actions'
@@ -184,8 +184,11 @@ function detectAgents(): void {
   if (pids.size === 0) return
   try {
     const found = detector.detect(pids)
-    for (const [tabId, { agent }] of found) bindAgent(tabId, agent)
-    for (const tabId of pids.keys()) setActivity(tabId, found.get(tabId)?.activity ?? null)
+    for (const [tabId, detected] of found) if (detected !== UNREADABLE) bindAgent(tabId, detected.agent)
+    for (const tabId of pids.keys()) {
+      const detected = found.get(tabId)
+      if (detected !== UNREADABLE) setActivity(tabId, detected?.activity ?? null)
+    }
   } catch (err) {
     console.error('[kora] falha ao detectar sessões', err)
   }

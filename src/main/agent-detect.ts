@@ -27,21 +27,28 @@ interface CodexLock {
 
 // O Claude grava ~/.claude/sessions/<pid>.json enquanto o processo roda; o sessionId muda ali
 // quando o usuário troca de conversa com /resume dentro dele, e o status acompanha a tela.
-export function claudeStateForPid(dir: string, pid: number): Detected | null {
+// O Claude reescreve esse arquivo a cada mudança de status, e o watch dispara a detecção justamente nessa hora:
+// arquivo que existe mas vem pela metade é "sem leitura agora", não "sem Claude". Tratar como ausência fazia a
+// aba passar por "sem estado" entre trabalhando e esperando, e o aviso de sessão parada se perdia.
+export const UNREADABLE = 'sem-leitura'
+
+export function claudeStateForPid(dir: string, pid: number): Detected | typeof UNREADABLE | null {
+  let text: string
   try {
-    const data = JSON.parse(readFileSync(join(dir, `${pid}.json`), 'utf8')) as {
-      pid?: number
-      sessionId?: string
-      name?: string
-      status?: unknown
-    }
-    if (data.pid !== pid || !data.sessionId || !SESSION_ID.test(data.sessionId)) return null
-    return {
-      agent: { kind: 'claude', sessionId: data.sessionId, ...(data.name ? { name: data.name } : {}) },
-      activity: claudeActivity(data.status)
-    }
+    text = readFileSync(join(dir, `${pid}.json`), 'utf8')
   } catch {
     return null
+  }
+  let data: { pid?: number; sessionId?: string; name?: string; status?: unknown }
+  try {
+    data = JSON.parse(text) as typeof data
+  } catch {
+    return UNREADABLE
+  }
+  if (data.pid !== pid || !data.sessionId || !SESSION_ID.test(data.sessionId)) return null
+  return {
+    agent: { kind: 'claude', sessionId: data.sessionId, ...(data.name ? { name: data.name } : {}) },
+    activity: claudeActivity(data.status)
   }
 }
 
@@ -71,23 +78,27 @@ export class AgentDetector {
     return byPid
   }
 
-  detect(shellPids: Map<string, number>): Map<string, Detected> {
+  // UNREADABLE para a aba cujo agente não deu para ler nesta volta: quem chama mantém o que sabia dela.
+  detect(shellPids: Map<string, number>): Map<string, Detected | typeof UNREADABLE> {
     const all = this.sources.listProcesses()
     const codex = this.codexThreadsByPid()
-    const found = new Map<string, Detected>()
+    const found = new Map<string, Detected | typeof UNREADABLE>()
 
     for (const [tabId, shellPid] of shellPids) {
       let latest: { detected: Detected; createdMs: number } | null = null
+      let unreadable = false
       for (const proc of descendants(shellPid, all)) {
         const lock = codex.get(proc.pid)
-        const detected: Detected | null = lock
-          ? { agent: { kind: 'codex', sessionId: lock.threadId }, activity: this.codexActivityOf(lock.threadId) }
+        const detected = lock
+          ? { agent: { kind: 'codex' as const, sessionId: lock.threadId }, activity: this.codexActivityOf(lock.threadId) }
           : claudeStateForPid(this.sources.claudeSessionsDir, proc.pid)
-        if (!detected) continue
+        if (detected === UNREADABLE) unreadable = true
+        if (!detected || detected === UNREADABLE) continue
         const createdMs = this.sources.creationTime(proc) ?? 0
         if (!latest || createdMs >= latest.createdMs) latest = { detected, createdMs }
       }
       if (latest) found.set(tabId, latest.detected)
+      else if (unreadable) found.set(tabId, UNREADABLE)
     }
     return found
   }

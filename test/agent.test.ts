@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startupCommand } from '../src/shared/agent'
-import { AgentDetector, claudeStateForPid } from '../src/main/agent-detect'
+import { AgentDetector, claudeStateForPid, UNREADABLE } from '../src/main/agent-detect'
 import { fileHolders, listProcesses, withCreationTime } from '../src/main/processes'
 import { Terminals } from '../src/main/terminals'
 
@@ -45,7 +45,7 @@ describe('sessão do Claude pelo pid', () => {
     writeFileSync(join(dir, '3576.json'), claudePidFile(3576, sessionId), 'utf8')
     expect(claudeStateForPid(dir, 3576)).toEqual({ agent: { kind: 'claude', sessionId, name: 'exemplo-75' }, activity: 'waiting' })
     writeFileSync(join(dir, '3576.json'), claudePidFile(3576, sessionId, 'busy'), 'utf8')
-    expect(claudeStateForPid(dir, 3576)?.activity).toBe('working')
+    expect(claudeStateForPid(dir, 3576)).toMatchObject({ activity: 'working' })
   })
 
   it('ignora arquivo de outro pid ou sem sessão válida', () => {
@@ -55,6 +55,14 @@ describe('sessão do Claude pelo pid', () => {
     expect(claudeStateForPid(dir, 10)).toBeNull()
     expect(claudeStateForPid(dir, 12)).toBeNull()
     expect(claudeStateForPid(dir, 99)).toBeNull()
+  })
+
+  it('arquivo pego no meio da reescrita é "sem leitura agora", não "sem Claude"', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kora-claude-'))
+    writeFileSync(join(dir, '3576.json'), claudePidFile(3576, randomUUID()).slice(0, 40), 'utf8')
+    expect(claudeStateForPid(dir, 3576)).toBe(UNREADABLE)
+    writeFileSync(join(dir, '3576.json'), '', 'utf8')
+    expect(claudeStateForPid(dir, 3576)).toBe(UNREADABLE)
   })
 })
 
