@@ -327,6 +327,22 @@ const MUTANTS = [
     bug: 'arrasto da árvore sem o link file:// (navegador recusa)',
     find: "if (!entry.isDir) e.dataTransfer.setData('text/uri-list', windowsFileUrl(absolute(entry.path)))",
     replace: '{}'
+  },
+  {
+    id: 'M50g',
+    grep: 'R50 ',
+    file: 'src/renderer/src/components/Sidebar.tsx',
+    bug: 'botão de Configurações sem a engrenagem',
+    find: '<Icon name="engrenagem" className="size-3.5" />',
+    replace: '<Icon name="ajustes" className="size-3.5" />'
+  },
+  {
+    id: 'M50h',
+    grep: 'R50 ',
+    file: 'src/renderer/src/components/Sidebar.tsx',
+    bug: 'engrenagem depois do tema, no meio do rodapé',
+    find: '<div className="flex min-w-0 items-center gap-0.5">',
+    replace: '<div className="flex min-w-0 flex-row-reverse items-center gap-0.5">'
   }
 ]
 

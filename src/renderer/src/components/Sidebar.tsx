@@ -406,6 +406,14 @@ export function Sidebar(props: Props): React.JSX.Element {
         <div className="flex min-w-0 items-center gap-0.5">
           <button
             type="button"
+            title="Configurações"
+            onClick={props.onOpenSettings}
+            className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <Icon name="engrenagem" className="size-3.5" />
+          </button>
+          <button
+            type="button"
             title="Tema"
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect()
@@ -422,14 +430,6 @@ export function Sidebar(props: Props): React.JSX.Element {
                 </>
               )
             })()}
-          </button>
-          <button
-            type="button"
-            title="Configurações"
-            onClick={props.onOpenSettings}
-            className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
-          >
-            <Icon name="ajustes" className="size-3.5" />
           </button>
         </div>
         <SizeControl

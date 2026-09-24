@@ -336,7 +336,12 @@ test('R50 engrenagem abre Configurações com logo, versão e estado da atualiza
   await spyUpdateIpc(run)
   const version = await run.app.evaluate(({ app }) => app.getVersion())
 
-  await page.getByTitle('Configurações').click()
+  const gear = page.getByTitle('Configurações')
+  await expect(gear.locator('svg')).toHaveClass(/lucide-settings/)
+  const gearBox = (await gear.boundingBox())!
+  const themeBox = (await page.getByTitle('Tema').boundingBox())!
+  expect(gearBox.x + gearBox.width, 'engrenagem na ponta esquerda, antes do tema').toBeLessThanOrEqual(themeBox.x)
+  await gear.click()
   const dialog = page.getByRole('dialog', { name: 'Configurações' })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByLabel('kora')).toBeVisible()

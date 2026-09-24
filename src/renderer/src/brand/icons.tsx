@@ -20,6 +20,7 @@ import {
   Pencil,
   Pin,
   RefreshCw,
+  Settings,
   Sun,
   Trash2,
   TriangleAlert,
@@ -127,7 +128,8 @@ const PROVISIONAL = {
   cadeado: Lock,
   alerta: TriangleAlert,
   worktree: FolderGit2,
-  arrastar: GripVertical
+  arrastar: GripVertical,
+  engrenagem: Settings
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof BRAND | keyof typeof PROVISIONAL
