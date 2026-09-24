@@ -9,6 +9,7 @@ import { addProject, applyLayout, mergeTabs, removeProject, setTabAgent } from '
 import { Terminals } from './terminals'
 import { ConflictError, listDir, moveEntry, readText, resolveInside, writeText } from './files'
 import { AgentDetector } from './agent-detect'
+import { FolderWatch } from './agent-watch'
 import { listProjectSessions, sessionArtifacts } from './sessions'
 import { createEntry, openInDefaultBrowser, renameEntry } from './file-actions'
 import { ProjectIcons } from './project-icons'
@@ -40,7 +41,10 @@ import { z } from 'zod'
 import { AgentSessionSchema, type AgentSession, type Startup } from '../shared/agent'
 import type { CloseKind, CreateResult, Launch, SaveResult, TabRef } from '../shared/ipc'
 
-const DETECT_INTERVAL_MS = 2000
+// A detecção roda quando as pastas dos agentes mudam; a volta periódica só cobre o que não deixa rastro
+// em arquivo (ex.: o dono de um lock do Codex encerrar sem apagar o lock).
+const DETECT_FALLBACK_MS = 30_000
+const DETECT_MIN_GAP_MS = 400
 // O token OAuth do Claude é lido aqui dentro e nunca vai para o renderer; só os percentuais saem.
 const usageCacheFile = (): string => join(app.getPath('userData'), 'usage-cache.json')
 const usage = createUsageReader({
@@ -95,6 +99,13 @@ const detector = new AgentDetector({
   creationTime: (p) => withCreationTime(p).createdMs,
   lockHolders: fileHolders
 })
+const agentFolders = new FolderWatch(
+  [
+    { dir: join(homedir(), '.claude', 'sessions'), recursive: false },
+    { dir: join(homedir(), '.codex', 'thread-writer-locks'), recursive: false }
+  ],
+  () => scheduleDetect()
+)
 
 function commit(next: KoraState): KoraState {
   saveState(stateFile, next)
@@ -160,6 +171,22 @@ function detectAgents(): void {
   } catch (err) {
     console.error('[kora] falha ao detectar sessões', err)
   }
+}
+
+// Rajada de eventos (vários arquivos mudando juntos): no máximo uma detecção a cada DETECT_MIN_GAP_MS,
+// sempre com uma última depois da rajada para o estado final não se perder.
+let detectTimer: NodeJS.Timeout | undefined
+let lastDetect = 0
+function scheduleDetect(): void {
+  if (detectTimer) return
+  detectTimer = setTimeout(
+    () => {
+      detectTimer = undefined
+      lastDetect = Date.now()
+      detectAgents()
+    },
+    Math.max(0, lastDetect + DETECT_MIN_GAP_MS - Date.now())
+  )
 }
 
 // A barra nativa do Windows sai; ficam só os botões de janela sobre o canto direito, na altura das
@@ -578,7 +605,8 @@ void app.whenReady().then(() => {
   lag = createLagMonitor({ intervalMs: 100, thresholdMs: 300, write: lagLog })
   traceIpc()
   registerIpc()
-  setInterval(detectAgents, DETECT_INTERVAL_MS)
+  setInterval(detectAgents, DETECT_FALLBACK_MS)
+  agentFolders.start()
   createWindow()
   createTray()
   // KORA_UPDATE_FEED aponta para um servidor local nos testes de atualização; o normal são as Releases do GitHub.

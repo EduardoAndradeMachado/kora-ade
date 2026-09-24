@@ -278,6 +278,14 @@ const MUTANTS = [
     bug: 'erro da atualização sem o vermelho',
     find: "  error: 'text-destructive',",
     replace: "  error: 'text-muted-foreground',"
+  },
+  {
+    id: 'M52',
+    grep: 'R52 ',
+    file: 'src/main/index.ts',
+    bug: 'sem o watch das pastas dos agentes (só a volta de 30 s)',
+    find: '  agentFolders.start()\n',
+    replace: ''
   }
 ]
 

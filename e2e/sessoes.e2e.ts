@@ -307,3 +307,13 @@ test('R37 abrir um Claude num projeto e logo fechar uma aba Continuar de outro n
   expect(freezes).toEqual([])
 })
 
+
+test('R52 claude digitado à mão numa aba Terminal é vinculado em até 5 s (watch das pastas, não a volta periódica)', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  await newTab(run.page, 'Terminal')
+  await waitFor(() => readState(env).tabs.length === 1, 'aba terminal no estado')
+  await typeLine(run.page, 'claude')
+  const start = await waitFor(() => starts(env, 'claude')[0], 'claude falso iniciado pelo usuário')
+  await waitFor(() => readState(env).tabs.find((t) => t.agent?.sessionId === start.sessionId), 'sessão vinculada pelo watch', 5000)
+})
