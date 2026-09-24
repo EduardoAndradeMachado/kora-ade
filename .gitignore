@@ -1,0 +1,9 @@
+node_modules/
+out/
+dist/
+*.log
+.playwright-mcp
+out.txt
+# Identidade visual e backlog ficam só na máquina, fora do repositório público
+docs/
+dist-update/
