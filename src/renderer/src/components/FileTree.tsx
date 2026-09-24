@@ -7,6 +7,7 @@ import { useConfirm } from '@/components/ConfirmDialog'
 import { ipcErrorMessage, isNotFound } from '@/lib/ipc-error'
 import { cn } from '@/lib/utils'
 import { FILE_MIME } from '@/lib/drag'
+import { windowsFileUrl } from '@shared/file-url'
 
 interface Props {
   projectId: string
@@ -347,6 +348,8 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
               onDragStart={(e) => {
                 e.dataTransfer.setData(FILE_MIME, entry.path)
                 e.dataTransfer.setData('text/plain', absolute(entry.path))
+                // Link file:// é o que o navegador aceita soltar: HTML, PDF e JSON abrem direto numa aba dele.
+                if (!entry.isDir) e.dataTransfer.setData('text/uri-list', windowsFileUrl(absolute(entry.path)))
                 e.dataTransfer.effectAllowed = 'copyMove'
               }}
               onClick={() => {

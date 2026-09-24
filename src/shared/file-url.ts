@@ -29,3 +29,12 @@ export function parseKoraFileUrl(url: string): KoraFileRef {
   if (!projectId || segments.length === 0) throw new Error(`URL sem projeto ou arquivo: ${url}`)
   return { projectId, rel: segments.join('/') }
 }
+
+// Caminho do Windows como URL file:// que um navegador abre (espaço, #, % e acentos escapados por trecho).
+// Caminho de rede (\\servidor\pasta) vira file://servidor/pasta.
+export function windowsFileUrl(path: string): string {
+  const unc = path.startsWith('\\\\')
+  const parts = (unc ? path.slice(2) : path).split(/[\\/]/)
+  const encoded = parts.map((part, i) => (i === 0 && (unc || /^[A-Za-z]:$/.test(part)) ? part : encodeURIComponent(part)))
+  return unc ? `file://${encoded.join('/')}` : `file:///${encoded.join('/')}`
+}

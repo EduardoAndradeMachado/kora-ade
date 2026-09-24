@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { test, expect } from './harness'
 import {
   git,
@@ -536,4 +537,21 @@ test('R47 arquivos soltos do Explorer do Windows no terminal viram caminhos cola
   await page.keyboard.press('Enter')
   const line = await waitFor(() => readLog(env).find((e) => e.event === 'input'), 'claude falso recebeu a linha')
   expect(line.line?.trim()).toBe(`"${image}" ${doc}`)
+})
+
+test('R54 arrastar arquivo da árvore leva o link file:// que o navegador abre; pasta não leva link', async ({ kora }) => {
+  const env = kora.env()
+  mkdirSync(join(env.project, 'relatórios'))
+  writeFileSync(join(env.project, 'relatórios', 'mês #1.html'), '<h1>oi</h1>')
+  const run = await kora.launch(env)
+  await row(run, 'relatórios').click()
+  const dragged = (rel: string) =>
+    row(run, rel).evaluate((el) => {
+      const data = new DataTransfer()
+      el.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: data }))
+      return { uri: data.getData('text/uri-list'), text: data.getData('text/plain') }
+    })
+  const file = join(env.project, 'relatórios', 'mês #1.html')
+  expect(await dragged('relatórios\\mês #1.html')).toEqual({ uri: pathToFileURL(file).href, text: file })
+  expect((await dragged('relatórios')).uri).toBe('')
 })

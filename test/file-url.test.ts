@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { koraFileUrl, parseKoraFileUrl } from '../src/shared/file-url'
+import { pathToFileURL } from 'node:url'
+import { koraFileUrl, parseKoraFileUrl, windowsFileUrl } from '../src/shared/file-url'
 import { KoraFileError, resolveKoraFileRequest } from '../src/main/file-request'
 
 // O Chromium canonicaliza a URL de um scheme "standard" como faria com https (host em minúsculas,
@@ -104,5 +105,18 @@ describe('handler kora-file recusa sair do projeto', () => {
     'kora-file://project/Proj-1/%E0%A4%A.png'
   ])('URL malformada responde 400: %s', (url) => {
     expectStatus(() => resolveKoraFileRequest(url, getRoot), 400)
+  })
+})
+
+describe('caminho do Windows como link file:// para o navegador', () => {
+  it('bate com o pathToFileURL do Node em espaço, #, %, acento e pasta de rede', () => {
+    for (const path of [
+      'C:\\Users\\voce\\projeto\\index.html',
+      'C:\\Users\\voce\\meu projeto\\relatório #2 (100%).pdf',
+      'D:\\dados\\config.json',
+      '\\\\servidor\\compartilhado\\notas.md'
+    ]) {
+      expect(windowsFileUrl(path), path).toBe(pathToFileURL(path).href)
+    }
   })
 })

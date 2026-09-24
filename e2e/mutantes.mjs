@@ -319,6 +319,14 @@ const MUTANTS = [
     bug: 'pedido de renomear já atendido reabre a edição quando a aba volta a ser desenhada',
     find: '    if (editRequest === seenRequest.current) return\n',
     replace: ''
+  },
+  {
+    id: 'M54',
+    grep: 'R54 ',
+    file: 'src/renderer/src/components/FileTree.tsx',
+    bug: 'arrasto da árvore sem o link file:// (navegador recusa)',
+    find: "if (!entry.isDir) e.dataTransfer.setData('text/uri-list', windowsFileUrl(absolute(entry.path)))",
+    replace: '{}'
   }
 ]
 
