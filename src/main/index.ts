@@ -7,7 +7,7 @@ import { is } from '@electron-toolkit/utils'
 import { loadState, saveState } from './store'
 import { addProject, applyLayout, mergeTabs, removeProject, setTabAgent } from './projects'
 import { Terminals } from './terminals'
-import { ConflictError, listDir, moveEntry, readText, resolveInside, writeText } from './files'
+import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from './files'
 import { AgentDetector } from './agent-detect'
 import { createRolloutFinder, FolderWatch } from './agent-watch'
 import { listProjectSessions, sessionArtifacts } from './sessions'
@@ -419,6 +419,9 @@ function registerIpc(): void {
   ipcMain.on('diag:long-task', (_e, ms: number) => lagLog(`${new Date().toISOString()} interface travada ${Math.round(Number(ms))} ms`))
   ipcMain.handle('fs:move', (_e, id: string, fromRel: string, toDirRel: string) =>
     moveEntry(projectRoot(id), String(fromRel), String(toDirRel))
+  )
+  ipcMain.handle('fs:import', (_e, id: string, sources: unknown, toDirRel: string) =>
+    importEntries(projectRoot(id), z.array(z.string().min(1)).parse(sources), String(toDirRel))
   )
   ipcMain.handle('fs:rename', (_e, id: string, rel: string, name: string) =>
     renameEntry(projectRoot(id), String(rel), String(name))

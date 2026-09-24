@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { ConflictError, MoveConflictError, listDir, moveEntry, readText, writeText } from '../src/main/files'
+import { ConflictError, MoveConflictError, importEntries, listDir, moveEntry, readText, writeText } from '../src/main/files'
 
 let parent: string
 let root: string
@@ -199,5 +199,60 @@ describe('mover arquivos e pastas', () => {
   it.runIf(process.platform === 'win32')('.git escrito com outra caixa também é recusado', () => {
     expect(() => moveEntry(root, '.GIT', 'src')).toThrow(/\.git/)
     expect(existsSync(join(root, '.git'))).toBe(true)
+  })
+})
+
+describe('copiar para o projeto o que veio do Explorer do Windows', () => {
+  let fora: string
+  beforeEach(() => {
+    fora = join(parent, 'fora')
+    mkdirSync(join(fora, 'fotos', 'viagem'), { recursive: true })
+    writeFileSync(join(fora, 'relatório.pdf'), 'pdf', 'utf8')
+    writeFileSync(join(fora, 'fotos', 'a.png'), 'a', 'utf8')
+    writeFileSync(join(fora, 'fotos', 'viagem', 'b.png'), 'b', 'utf8')
+  })
+
+  it('copia arquivo para a pasta e mantém o original onde estava', () => {
+    expect(importEntries(root, [join(fora, 'relatório.pdf')], 'src')).toEqual([join('src', 'relatório.pdf')])
+    expect(readFileSync(join(root, 'src', 'relatório.pdf'), 'utf8')).toBe('pdf')
+    expect(existsSync(join(fora, 'relatório.pdf'))).toBe(true)
+  })
+
+  it('copia pasta inteira, com subpastas, para a raiz do projeto', () => {
+    expect(importEntries(root, [join(fora, 'fotos')], '')).toEqual(['fotos'])
+    expect(readFileSync(join(root, 'fotos', 'viagem', 'b.png'), 'utf8')).toBe('b')
+    expect(existsSync(join(fora, 'fotos', 'viagem', 'b.png'))).toBe(true)
+  })
+
+  it('nome que já existe ganha (2), (3)... e nada é sobrescrito', () => {
+    writeFileSync(join(fora, 'b.txt'), 'de fora', 'utf8')
+    expect(importEntries(root, [join(fora, 'b.txt')], '')).toEqual(['b (2).txt'])
+    expect(importEntries(root, [join(fora, 'b.txt')], '')).toEqual(['b (3).txt'])
+    expect(readFileSync(join(root, 'b.txt'), 'utf8')).toBe('b')
+    mkdirSync(join(root, 'fotos'))
+    expect(importEntries(root, [join(fora, 'fotos')], '')).toEqual(['fotos (2)'])
+  })
+
+  it('vários itens de uma vez', () => {
+    expect(importEntries(root, [join(fora, 'relatório.pdf'), join(fora, 'fotos')], 'src')).toEqual([
+      join('src', 'relatório.pdf'),
+      join('src', 'fotos')
+    ])
+  })
+
+  it('item que já está na pasta de destino não é duplicado', () => {
+    expect(importEntries(root, [join(root, 'src', 'index.ts')], 'src')).toEqual([])
+    expect(readdirSync(join(root, 'src'))).toEqual(['index.ts'])
+  })
+
+  it('recusa destino dentro do .git, fora do projeto ou pasta copiada para dentro dela mesma', () => {
+    expect(() => importEntries(root, [join(fora, 'relatório.pdf')], '.git')).toThrow(/\.git/)
+    expect(() => importEntries(root, [join(fora, 'relatório.pdf')], '..')).toThrow(/fora do projeto/)
+    expect(() => importEntries(root, [root], 'src')).toThrow(/dentro dela mesma/)
+    expect(existsSync(join(root, '.git', 'relatório.pdf'))).toBe(false)
+  })
+
+  it('item arrastado que sumiu antes de soltar vira erro legível', () => {
+    expect(() => importEntries(root, [join(fora, 'nao-existe.txt')], '')).toThrow(/não existe/)
   })
 })

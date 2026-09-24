@@ -343,6 +343,22 @@ const MUTANTS = [
     bug: 'engrenagem depois do tema, no meio do rodapé',
     find: '<div className="flex min-w-0 items-center gap-0.5">',
     replace: '<div className="flex min-w-0 flex-row-reverse items-center gap-0.5">'
+  },
+  {
+    id: 'M55',
+    grep: 'R55 ',
+    file: 'src/renderer/src/components/FileTree.tsx',
+    bug: 'pasta da árvore só aceita arrasto vindo da própria árvore',
+    find: "if (!internal && !e.dataTransfer.types.includes('Files')) return",
+    replace: 'if (!internal) return'
+  },
+  {
+    id: 'M55b',
+    grep: 'R55 ',
+    file: 'src/renderer/src/components/FileTree.tsx',
+    bug: 'soltar arquivo do sistema na pasta não copia nada',
+    find: 'else void importFrom(e.dataTransfer.files, dir)',
+    replace: 'else {}'
   }
 ]
 

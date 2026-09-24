@@ -555,3 +555,51 @@ test('R54 arrastar arquivo da árvore leva o link file:// que o navegador abre; 
   expect(await dragged('relatórios\\mês #1.html')).toEqual({ uri: pathToFileURL(file).href, text: file })
   expect((await dragged('relatórios')).uri).toBe('')
 })
+
+test('R55 arquivos soltos do Explorer do Windows numa pasta da árvore (ou na área vazia) são copiados para ela', async ({ kora }) => {
+  const env = kora.env()
+  mkdirSync(join(env.project, 'docs'))
+  writeFileSync(join(env.project, 'docs', 'nota.txt'), 'já estava\n')
+  const outside = join(env.root, 'Downloads')
+  mkdirSync(outside)
+  writeFileSync(join(outside, 'nota.txt'), 'de fora\n')
+  writeFileSync(join(outside, 'print.png'), pngBytes())
+  const run = await kora.launch(env)
+  const page = run.page
+  await expect(row(run, 'docs')).toBeVisible()
+
+  // Arrasto do sistema não é simulável pelo Playwright; um <input type=file> entrega File com caminho real no disco,
+  // o mesmo tipo de objeto que o Explorer do Windows entrega no drop.
+  const dropFiles = async (target: import('@playwright/test').Locator, paths: string[]): Promise<boolean> => {
+    await page.evaluate(() => {
+      document.getElementById('arquivos-do-sistema')?.remove()
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.multiple = true
+      input.id = 'arquivos-do-sistema'
+      input.style.display = 'none'
+      document.body.append(input)
+    })
+    await page.locator('#arquivos-do-sistema').setInputFiles(paths)
+    return target.evaluate((el) => {
+      const input = document.getElementById('arquivos-do-sistema') as HTMLInputElement
+      const data = new DataTransfer()
+      for (const file of input.files!) data.items.add(file)
+      const over = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: data })
+      el.dispatchEvent(over)
+      el.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data }))
+      return over.defaultPrevented
+    })
+  }
+
+  expect(await dropFiles(row(run, 'docs'), [join(outside, 'nota.txt'), join(outside, 'print.png')]), 'a pasta aceita o arrasto').toBe(true)
+  await expect(row(run, 'docs\\nota (2).txt')).toBeVisible()
+  await expect(row(run, 'docs\\print.png')).toBeVisible()
+  expect(readFileSync(join(env.project, 'docs', 'nota (2).txt'), 'utf8')).toBe('de fora\n')
+  expect(readFileSync(join(env.project, 'docs', 'nota.txt'), 'utf8'), 'o que já estava não é sobrescrito').toBe('já estava\n')
+  expect(existsSync(join(outside, 'print.png')), 'o original fica onde estava').toBe(true)
+
+  await dropFiles(panelOf(run).locator('div.min-h-8.flex-1'), [join(outside, 'print.png')])
+  await expect(row(run, 'print.png')).toBeVisible()
+  expect(existsSync(join(env.project, 'print.png')), 'solto na área vazia vai para a raiz').toBe(true)
+})

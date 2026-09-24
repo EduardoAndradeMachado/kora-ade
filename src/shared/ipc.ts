@@ -76,6 +76,8 @@ export interface KoraApi {
   // Os dois devolvem o caminho relativo novo; nenhum sobrescreve item existente.
   moveEntry(projectId: string, fromRel: string, toDirRel: string): Promise<string>
   renameEntry(projectId: string, rel: string, name: string): Promise<string>
+  // Copia para a pasta (relativa ao projeto) o que veio de fora do app; devolve os caminhos relativos novos.
+  importEntries(projectId: string, sources: string[], toDirRel: string): Promise<string[]>
   // Caminho impresso no terminal que é um arquivo do projeto; null para qualquer outra coisa.
   resolveTerminalLink(projectId: string, text: string): Promise<{ rel: string; line: number | null } | null>
   // Caminho no disco de um arquivo solto de fora do app (Explorer do Windows); '' se ele não vier do disco.

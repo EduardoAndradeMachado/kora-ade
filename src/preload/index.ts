@@ -39,6 +39,7 @@ const api: KoraApi = {
   appVersion: () => ipcRenderer.invoke('app:version'),
   setWindowDark: (dark) => ipcRenderer.send('window:dark', dark),
   renameEntry: (projectId, rel, name) => ipcRenderer.invoke('fs:rename', projectId, rel, name),
+  importEntries: (projectId, sources, toDirRel) => ipcRenderer.invoke('fs:import', projectId, sources, toDirRel),
   openInBrowser: (projectId, rel) => ipcRenderer.invoke('fs:open-browser', projectId, rel),
 
   listSessions: (projectId) => ipcRenderer.invoke('sessions:list', projectId),

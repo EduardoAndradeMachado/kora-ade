@@ -247,12 +247,28 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
     }
   }
 
+  // Arquivos e pastas do Explorer do Windows entram como cópia; os da própria árvore são movidos.
+  const importFrom = async (files: FileList, toDir: string): Promise<void> => {
+    const sources = [...files].map((file) => window.kora.pathForFile(file)).filter(Boolean)
+    if (sources.length === 0) return
+    try {
+      const copied = await window.kora.importEntries(projectId, sources, toDir)
+      setError(null)
+      if (copied[0]) setSelected(copied[0])
+      if (toDir && !expanded.has(toDir)) setExpandedDirs(new Set(expanded).add(toDir))
+      await load(toDir)
+    } catch (err) {
+      setError(ipcErrorMessage(err))
+    }
+  }
+
   const dropProps = (dir: string): React.HTMLAttributes<HTMLDivElement> => ({
     onDragOver: (e) => {
-      if (!e.dataTransfer.types.includes(FILE_MIME)) return
+      const internal = e.dataTransfer.types.includes(FILE_MIME)
+      if (!internal && !e.dataTransfer.types.includes('Files')) return
       e.preventDefault()
       e.stopPropagation()
-      e.dataTransfer.dropEffect = 'move'
+      e.dataTransfer.dropEffect = internal ? 'move' : 'copy'
       if (dropDir !== dir) setDropDir(dir)
     },
     onDragLeave: (e) => {
@@ -260,11 +276,12 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
     },
     onDrop: (e) => {
       const from = e.dataTransfer.getData(FILE_MIME)
-      if (!from) return
+      if (!from && e.dataTransfer.files.length === 0) return
       e.preventDefault()
       e.stopPropagation()
       setDropDir(null)
-      void move(from, dir)
+      if (from) void move(from, dir)
+      else void importFrom(e.dataTransfer.files, dir)
     }
   })
 

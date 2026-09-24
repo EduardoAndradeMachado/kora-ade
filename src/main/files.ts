@@ -1,4 +1,4 @@
-import { openSync, readdirSync, readFileSync, readSync, closeSync, lstatSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, openSync, readdirSync, readFileSync, readSync, closeSync, lstatSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import type { Stats } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { FileEntry, TextFile } from '../shared/ipc'
@@ -120,4 +120,42 @@ export function moveEntry(root: string, fromRel: string, toDirRel: string): stri
   }
   renameSync(from, target)
   return relative(projectRoot, target)
+}
+
+// "nome.ext" livre na pasta, ou "nome (2).ext", "nome (3).ext"... como o Windows faz ao colar em cima de um igual.
+function freeName(dir: string, name: string, isDir: boolean): string {
+  if (!lstatOrNull(join(dir, name))) return name
+  const dot = isDir ? -1 : name.lastIndexOf('.')
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ''
+  for (let n = 2; ; n++) {
+    const candidate = `${stem} (${n})${ext}`
+    if (!lstatOrNull(join(dir, candidate))) return candidate
+  }
+}
+
+// Arquivos e pastas soltos de fora do app (Explorer do Windows) entram no projeto como cópia: o original fica
+// onde estava, como no VS Code. Nada é sobrescrito; item que já está nessa mesma pasta é ignorado.
+export function importEntries(root: string, sources: string[], toDirRel: string): string[] {
+  const projectRoot = resolve(root)
+  const toDir = resolveInside(root, toDirRel)
+  if (touchesGit(projectRoot, toDir)) throw new Error('Não é possível copiar para dentro do .git.')
+  const destination = lstatOrNull(toDir)
+  if (!destination) throw missing(`a pasta de destino não existe mais: ${toDirRel || '(raiz do projeto)'}`)
+  if (!destination.isDirectory()) throw new Error(`O destino não é uma pasta: ${toDirRel}`)
+
+  const copied: string[] = []
+  for (const raw of sources) {
+    const source = resolve(raw)
+    const stats = lstatOrNull(source)
+    if (!stats) throw missing(`o item arrastado não existe: ${raw}`)
+    if (relative(dirname(source), toDir) === '') continue
+    if (stats.isDirectory() && isSameOrInside(source, toDir)) {
+      throw new Error(`Não é possível copiar a pasta "${basename(source)}" para dentro dela mesma.`)
+    }
+    const target = join(toDir, freeName(toDir, basename(source), stats.isDirectory()))
+    cpSync(source, target, { recursive: true, errorOnExist: true, force: false })
+    copied.push(relative(projectRoot, target))
+  }
+  return copied
 }
