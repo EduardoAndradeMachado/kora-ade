@@ -180,7 +180,7 @@ describe('Codex: subagentes e títulos de reserva', () => {
 
 describe('leitura não trava o processo principal', () => {
   it('com centenas de conversas, timers continuam rodando durante a listagem', async () => {
-    for (let i = 0; i < 300; i++) writeCodex(randomUUID(), i % 2 ? project : 'C:\outro', undefined, 20_000)
+    for (let i = 0; i < 300; i++) writeCodex(randomUUID(), i % 2 ? project : 'C:\\outro', undefined, 20_000)
 
     let ticks = 0
     const timer = setInterval(() => ticks++, 1)

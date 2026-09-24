@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, normalize } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -71,7 +71,8 @@ const byPath = (a: GitFile, b: GitFile): number =>
   a.path.localeCompare(b.path) || Number(b.staged) - Number(a.staged)
 
 beforeEach(() => {
-  parent = mkdtempSync(join(tmpdir(), 'kora-git-'))
+  // .native devolve o caminho longo (sem RUNNER~1), o mesmo formato que o git imprime.
+  parent = realpathSync.native(mkdtempSync(join(tmpdir(), 'kora-git-')))
   tempDirs.push(parent)
   repo = join(parent, 'repo')
   initRepo(repo)

@@ -91,7 +91,13 @@ async function startOwner(mode: 'job' | 'nojob'): Promise<{ owner: Identity; tar
 afterEach(() => {
   for (const job of jobs.splice(0)) job.close()
   for (const id of spawned.splice(0)) {
-    if (isAlive(id)) process.kill(id.pid)
+    if (!isAlive(id)) continue
+    try {
+      process.kill(id.pid)
+    } catch (err) {
+      // Pode morrer entre a checagem e o kill (o job fechando leva a árvore junto): já é o que se queria.
+      if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err
+    }
   }
 })
 

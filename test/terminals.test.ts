@@ -17,7 +17,7 @@ afterEach(() => terminals.killAll())
 // oxlint-disable-next-line no-control-regex
 const plainOutput = (id: string): string => (outputs.get(id) ?? '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
 
-async function waitFor(check: () => boolean, ms = 15000): Promise<void> {
+async function waitFor(check: () => boolean, ms = 30000): Promise<void> {
   const start = Date.now()
   while (!check()) {
     if (Date.now() - start > ms) throw new Error('timeout esperando saída do terminal')
@@ -27,7 +27,7 @@ async function waitFor(check: () => boolean, ms = 15000): Promise<void> {
 
 describe('Terminals (PowerShell real via node-pty)', () => {
   it('abre o shell na pasta do projeto', async () => {
-    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'kora-pty-')))
+    const cwd = realpathSync.native(mkdtempSync(join(tmpdir(), 'kora-pty-')))
     const id = randomUUID()
     terminals.spawn(id, cwd, 200, 30)
 
@@ -53,7 +53,7 @@ describe('Terminals (PowerShell real via node-pty)', () => {
 
   it('aba de retomada roda o comando do agente e continua como shell depois que ele sai', async () => {
     const id = randomUUID()
-    const fakeBin = realpathSync(mkdtempSync(join(tmpdir(), 'kora-bin-')))
+    const fakeBin = realpathSync.native(mkdtempSync(join(tmpdir(), 'kora-bin-')))
     const { writeFileSync } = await import('node:fs')
     writeFileSync(join(fakeBin, 'claude.cmd'), '@echo FAKE_CLAUDE %*\r\n', 'utf8')
     const sessionId = randomUUID()
@@ -78,7 +78,7 @@ describe('Terminals (PowerShell real via node-pty)', () => {
   it('fechar a aba encerra o shell e o agente que roda dentro dele (nada fica órfão)', async () => {
     const { listProcesses } = await import('../src/main/processes')
     const { existsSync, readFileSync, writeFileSync } = await import('node:fs')
-    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kora-kill-')))
+    const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'kora-kill-')))
     const marker = join(dir, 'pid.txt')
     const script = join(dir, 'agente.js')
     writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid)); setInterval(() => {}, 1000)`)

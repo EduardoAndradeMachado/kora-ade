@@ -90,7 +90,7 @@ describe('persistência de projetos', () => {
   })
 
   it('aba salva antes de existir renomeação abre como não travada', () => {
-    const saved = { version: 2, projects: [{ id: 'p1', name: 'a', path: 'C:\a' }], tabs: [{ id: 't1', projectId: 'p1', title: 'x', agent: null }] }
+    const saved = { version: 2, projects: [{ id: 'p1', name: 'a', path: 'C:\\a' }], tabs: [{ id: 't1', projectId: 'p1', title: 'x', agent: null }] }
     writeFileSync(file, JSON.stringify(saved), 'utf8')
     expect(loadState(file).tabs[0]?.titleLocked).toBe(false)
     expect(readdirSync(dir).some((f) => f.includes('.corrupt-'))).toBe(false)
