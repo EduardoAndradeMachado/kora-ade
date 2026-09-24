@@ -400,6 +400,8 @@ test('R56 sessão que para sem você olhar: símbolo e sino na aba, som da corda
 
   await openClaude(run, env)
   await newTab(page, 'Terminal')
+  // O app mede o trabalho a partir de quando detecta o "ocupado"; com a máquina carregada isso atrasa mais de 1 s.
+  // 7 s de trabalho ficam bem acima do mínimo de 3 s mesmo assim.
   const workThenLeave = async (seconds: number): Promise<void> => {
     await ui.sideTab(page, /Claude/).click()
     await typeLine(page, `trabalhe ${seconds}`)
@@ -407,8 +409,8 @@ test('R56 sessão que para sem você olhar: símbolo e sino na aba, som da corda
     await ui.sideTab(page, 'Terminal').click()
   }
 
-  await workThenLeave(4)
-  await expect(claudeAlert).toHaveCount(1, { timeout: 10_000 })
+  await workThenLeave(7)
+  await expect(claudeAlert).toHaveCount(1, { timeout: 15_000 })
   await expect(claudeBell).toHaveCount(1)
   await expect(ui.sideTab(page, /Claude/).locator('[data-alert]')).toHaveCount(1)
   expect(await spy()).toEqual({ chimes: 1, notifications: [] })
@@ -417,9 +419,9 @@ test('R56 sessão que para sem você olhar: símbolo e sino na aba, som da corda
   await expect(claudeAlert, 'abrir a aba conta como vista').toHaveCount(0)
   await expect(claudeBell).toHaveCount(0)
 
-  await workThenLeave(4)
+  await workThenLeave(7)
   await setFocused(false)
-  await expect(claudeAlert).toHaveCount(1, { timeout: 10_000 })
+  await expect(claudeAlert).toHaveCount(1, { timeout: 15_000 })
   const { chimes, notifications } = await spy()
   expect(chimes).toBe(2)
   expect(notifications).toEqual([{ title: 'Claude está esperando você', body: expect.stringContaining('proj-teste') }])
@@ -429,9 +431,9 @@ test('R56 sessão que para sem você olhar: símbolo e sino na aba, som da corda
   await setFocused(true)
   await expect(claudeAlert).toHaveCount(0)
 
-  await typeLine(page, 'trabalhe 4')
+  await typeLine(page, 'trabalhe 7')
   await expect(ui.barTab(page, /Claude/).locator('[data-activity]')).toHaveAttribute('data-activity', 'working', { timeout: 5000 })
-  await expect(ui.barTab(page, /Claude/).locator('[data-activity]')).toHaveAttribute('data-activity', 'waiting', { timeout: 10_000 })
+  await expect(ui.barTab(page, /Claude/).locator('[data-activity]')).toHaveAttribute('data-activity', 'waiting', { timeout: 15_000 })
   await page.waitForTimeout(500)
   await expect(claudeAlert, 'a aba que você está olhando não avisa').toHaveCount(0)
   expect((await spy()).chimes).toBe(2)
@@ -444,8 +446,8 @@ test('R56 sessão que para sem você olhar: símbolo e sino na aba, som da corda
   await waitFor(() => readState(env).settings?.alerts?.sound === false, 'som desligado salvo')
   await page.keyboard.press('Escape')
 
-  await workThenLeave(4)
-  await expect(claudeAlert).toHaveCount(1, { timeout: 10_000 })
+  await workThenLeave(7)
+  await expect(claudeAlert).toHaveCount(1, { timeout: 15_000 })
   expect((await spy()).chimes, 'som desligado não toca, o aviso visual continua').toBe(2)
 })
 
@@ -460,11 +462,11 @@ test('R57 aviso de sessão parada também no Codex: símbolo e sino na aba e som
   await waitFor(() => starts(env, 'codex')[0], 'codex falso subiu')
   await newTab(page, 'Terminal')
   await ui.sideTab(page, /Codex/).click()
-  await typeLine(page, 'trabalhe 4')
+  await typeLine(page, 'trabalhe 7')
   await expect(ui.barTab(page, /Codex/).locator('[data-activity]')).toHaveAttribute('data-activity', 'working', { timeout: 5000 })
   await ui.sideTab(page, 'Terminal').click()
 
-  await expect(codexAlert).toHaveCount(1, { timeout: 10_000 })
+  await expect(codexAlert).toHaveCount(1, { timeout: 15_000 })
   await expect(ui.barTab(page, /Codex/).locator('svg.lucide-bell')).toHaveCount(1)
   await expect(ui.sideTab(page, /Codex/).locator('[data-alert]')).toHaveCount(1)
   expect(await spy()).toEqual({ chimes: 1, notifications: [] })
