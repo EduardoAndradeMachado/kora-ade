@@ -1,0 +1,32 @@
+appId: com.eduardoandrademachado.kora-ade
+productName: Kora ADE
+copyright: Copyright © 2026 Eduardo Andrade Machado
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - out/**
+  - resources/**
+  - package.json
+# node-pty abre o conpty.dll e o OpenConsole.exe pelo caminho do disco, e o koffi carrega o .node dele: fora do asar.
+asarUnpack:
+  - node_modules/node-pty/**
+  - node_modules/koffi/**
+# node-pty 1.1 e koffi usam N-API (binário serve para Node e Electron); recompilar só atrasaria e poderia quebrar.
+npmRebuild: false
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.ico
+# Instalação por usuário, sem pedir administrador: a atualização troca os arquivos em silêncio, sem UAC.
+nsis:
+  oneClick: true
+  perMachine: false
+  deleteAppDataOnUninstall: false
+  artifactName: Kora-ADE-Setup-${version}.${ext}
+  shortcutName: Kora ADE
+publish:
+  provider: github
+  owner: EduardoAndradeMachado
+  repo: kora-ade
