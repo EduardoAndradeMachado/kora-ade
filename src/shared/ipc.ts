@@ -48,6 +48,9 @@ export interface TabRef {
   titleLocked?: boolean
 }
 
+// Por que o app pediu para a interface resolver os arquivos não salvos: o X esconde na bandeja, o resto encerra.
+export type CloseKind = 'hide' | 'quit'
+
 export interface KoraApi {
   windowsBuild: number
 
@@ -113,6 +116,13 @@ export interface KoraApi {
   saveTabs(tabs: TabRef[]): Promise<void>
   // Síncrono: usado ao descarregar a janela, quando uma chamada assíncrona não chegaria a completar.
   saveTabsNow(tabs: TabRef[]): void
+  // O main só segura o fechamento para perguntar quando há arquivo com alteração não salva.
+  setUnsaved(unsaved: boolean): void
+  onCloseRequested(listener: (kind: CloseKind) => void): () => void
+  // A janela foi para a bandeja: as abas de arquivo fecham junto, como fechar o programa.
+  onHidden(listener: () => void): () => void
+  // Resposta ao pedido: 'proceed' segue com o fechamento (arquivos já salvos ou descartados), 'cancel' mantém aberto.
+  answerClose(kind: CloseKind, answer: 'proceed' | 'cancel'): void
   setTabAgent(tab: TabRef, agent: AgentSession | null): Promise<void>
   onTabAgent(listener: (tabId: string, agent: AgentSession | null) => void): () => void
 

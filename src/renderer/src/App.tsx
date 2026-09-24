@@ -4,7 +4,7 @@ import type { AgentSession } from '@shared/agent'
 import { viewerFor } from '@shared/file-kind'
 import { arrangeProjects, reorder, sortBySection, type Place, type ProjectDrop } from '@shared/arrange'
 import { moveAmongSiblings, nestGroup, placeGroup, removeGroup, setGroupHidden } from '@shared/groups'
-import type { Launch, SessionSummary, TabRef } from '@shared/ipc'
+import type { CloseKind, Launch, SessionSummary, TabRef } from '@shared/ipc'
 import { Sidebar, type GroupAction } from '@/components/Sidebar'
 import { TabBar, type Tab } from '@/components/TabBar'
 import { TerminalView } from '@/components/TerminalView'
@@ -201,6 +201,76 @@ export function App(): React.JSX.Element {
     window.addEventListener('beforeunload', flush)
     return () => window.removeEventListener('beforeunload', flush)
   }, [])
+
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
+  const unsavedFiles = Object.values(tabs).some((list) => list.some((t) => t.kind === 'file' && t.dirty))
+  useEffect(() => window.kora.setUnsaved(unsavedFiles), [unsavedFiles])
+
+  // Arquivo aberto não volta ao reabrir o app: fechar o programa (X para a bandeja) fecha as abas de arquivo.
+  const closeFileTabs = useCallback((): void => {
+    setTabs((prev) => Object.fromEntries(Object.entries(prev).map(([pid, list]) => [pid, list.filter((t) => t.kind !== 'file')])))
+    setActiveTab((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([pid, active]) => {
+          const list = tabsRef.current[pid] ?? []
+          if (list.find((t) => t.id === active)?.kind !== 'file') return [pid, active]
+          return [pid, list.filter((t) => t.kind !== 'file').at(-1)?.id]
+        })
+      )
+    )
+  }, [])
+
+  // Salvar tudo, descartar tudo ou desistir de fechar. Salvamento que falha (conflito com o disco) mantém o app
+  // aberto na aba do arquivo, com o aviso do editor.
+  const resolveUnsaved = useCallback(
+    async (kind: CloseKind): Promise<boolean> => {
+      const dirty = Object.entries(tabsRef.current).flatMap(([pid, list]) =>
+        list.flatMap((t) => (t.kind === 'file' && t.dirty ? [{ projectId: pid, tab: t }] : []))
+      )
+      if (dirty.length === 0) return true
+      const names = dirty.map((d) => d.tab.title)
+      const choice = await choose({
+        title: dirty.length === 1 ? `Salvar "${names[0]}" antes de fechar?` : `Salvar ${dirty.length} arquivos antes de fechar?`,
+        message: (
+          <>
+            {dirty.length > 1 && <p className="mb-2 text-foreground">{names.join(', ')}</p>}
+            <p>Sem salvar, as alterações feitas desde o último Ctrl+S são perdidas.</p>
+          </>
+        ),
+        confirmLabel: kind === 'hide' ? 'Salvar e fechar' : 'Salvar e sair',
+        alternativeLabel: 'Descartar alterações'
+      })
+      if (choice === 'cancel') return false
+      if (choice === 'confirm') {
+        for (const { projectId, tab } of dirty) {
+          if (await fileSavers.current.get(tab.id)?.()) continue
+          setSelectedId(projectId)
+          setActiveTab((prev) => ({ ...prev, [projectId]: tab.id }))
+          return false
+        }
+      }
+      return true
+    },
+    [choose]
+  )
+
+  useEffect(() => {
+    const offRequest = window.kora.onCloseRequested((kind) => {
+      void resolveUnsaved(kind).then((proceed) => {
+        if (!proceed) return window.kora.answerClose(kind, 'cancel')
+        // Descartado ou salvo: o main não pode voltar a segurar o fechamento por arquivos que já não contam.
+        window.kora.setUnsaved(false)
+        if (kind === 'hide') closeFileTabs()
+        window.kora.answerClose(kind, 'proceed')
+      })
+    })
+    const offHidden = window.kora.onHidden(closeFileTabs)
+    return () => {
+      offRequest()
+      offHidden()
+    }
+  }, [resolveUnsaved, closeFileTabs])
 
   const toggleRightPanel = (): void => {
     setRightPanelOpen((open) => {

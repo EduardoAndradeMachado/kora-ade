@@ -179,6 +179,48 @@ const MUTANTS = [
     bug: 'caminho com espaço colado sem aspas',
     find: 'paths.filter(Boolean).map((path) => (path.includes(\' \') ? `"${path}"` : path))',
     replace: 'paths.filter(Boolean)'
+  },
+  {
+    id: 'M48',
+    grep: 'R48 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'abas de arquivo continuam abertas depois do X',
+    find: 'const offHidden = window.kora.onHidden(closeFileTabs)',
+    replace: 'const offHidden = window.kora.onHidden(() => {})'
+  },
+  {
+    id: 'M48b',
+    grep: 'R48 ',
+    file: 'src/main/index.ts',
+    bug: 'X esconde na bandeja sem perguntar pelos arquivos não salvos',
+    find: "    if (unsaved) askRenderer('hide')\n    else hideToTray()",
+    replace: '    hideToTray()'
+  },
+  {
+    id: 'M48c',
+    grep: 'R4[89] ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'interface não avisa o main que há arquivo não salvo',
+    find: 'useEffect(() => window.kora.setUnsaved(unsavedFiles), [unsavedFiles])',
+    replace: 'useEffect(() => {}, [unsavedFiles])',
+    expect: { 'R48 ': 'failed', 'R49 ': 'failed' }
+  },
+  {
+    id: 'M49',
+    grep: 'R49 ',
+    file: 'src/main/index.ts',
+    bug: 'Sair encerra sem perguntar pelos arquivos não salvos',
+    find: 'if (unsaved && !quitConfirmed && mainWindow) {',
+    replace: 'if (false) {'
+  },
+  {
+    id: 'M49b',
+    grep: 'R4[89] ',
+    file: 'src/main/index.ts',
+    bug: 'main não reconhece que a interface recebeu o pedido e fecha no tempo de segurança',
+    find: "ipcMain.on('app:close-ack', () => clearTimeout(closeAckTimer))",
+    replace: "ipcMain.on('app:close-ack', () => {})",
+    expect: { 'R48 ': 'failed', 'R49 ': 'failed' }
   }
 ]
 

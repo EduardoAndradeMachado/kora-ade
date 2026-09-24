@@ -1,4 +1,4 @@
-import { existsSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect } from './harness'
 import {
@@ -253,4 +253,72 @@ test('Órfãos: depois de matar o app à força não sobram PowerShell nem agent
   console.log(JSON.stringify(summary, null, 2))
   await testInfo.attach('orfaos.json', { body: JSON.stringify(summary, null, 2), contentType: 'application/json' })
   expect(alive.map((k) => k.name), 'processos órfãos 10 s depois do kill do main').toEqual([])
+})
+
+const fileRow = (run: KoraRun, rel: string) => run.page.locator('aside').last().locator(`div[title="${rel}"]`)
+const windowVisible = (run: KoraRun) => run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())
+const closeX = (run: KoraRun) => run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
+
+async function editOpenFile(run: KoraRun, text: string): Promise<void> {
+  const editor = run.page.locator('.monaco-editor').filter({ visible: true })
+  await expect(editor.locator('.view-lines')).toBeVisible()
+  await editor.locator('.view-lines').click()
+  await run.page.keyboard.press('Control+End')
+  await run.page.keyboard.type(text)
+  await expect(run.page.getByText('Não salvo').filter({ visible: true })).toBeVisible()
+}
+
+test('R48 X para a bandeja fecha as abas de arquivo; com alteração não salva pergunta antes e Cancelar mantém tudo', async ({ kora }) => {
+  const env = kora.env()
+  writeFileSync(join(env.project, 'notas.txt'), 'antes\n')
+  writeFileSync(join(env.project, 'outro.txt'), 'outro\n')
+  const run = await kora.launch(env)
+  const page = run.page
+  await newTab(page, 'Terminal')
+  await waitFor(() => readState(env).tabs.length === 1, 'aba terminal salva')
+
+  await fileRow(run, 'outro.txt').click()
+  await expect(ui.barTab(page, 'outro.txt')).toBeVisible()
+  await closeX(run)
+  await expect.poll(() => windowVisible(run)).toBe(false)
+  await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.show())
+  await expect(ui.barTab(page, 'outro.txt')).toHaveCount(0)
+  await expect(ui.barTab(page, 'Terminal')).toBeVisible()
+
+  await fileRow(run, 'notas.txt').click()
+  await editOpenFile(run, 'depois')
+  await closeX(run)
+  const dialog = page.locator('[role=dialog]')
+  await expect(dialog).toContainText('Salvar "notas.txt" antes de fechar?')
+  expect(await windowVisible(run), 'a janela espera a resposta').toBe(true)
+  await dialog.getByRole('button', { name: 'Cancelar' }).click()
+  await page.waitForTimeout(3500)
+  expect(await windowVisible(run), 'Cancelar mantém a janela, mesmo depois do tempo de segurança do main').toBe(true)
+  await expect(ui.barTab(page, 'notas.txt')).toBeVisible()
+  expect(readFileSync(join(env.project, 'notas.txt'), 'utf8')).toBe('antes\n')
+
+  await closeX(run)
+  await dialog.getByRole('button', { name: 'Salvar e fechar' }).click()
+  await expect.poll(() => windowVisible(run)).toBe(false)
+  expect(readFileSync(join(env.project, 'notas.txt'), 'utf8')).toBe('antes\ndepois')
+  await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.show())
+  await expect(ui.barTab(page, 'notas.txt')).toHaveCount(0)
+})
+
+test('R49 Sair com arquivo não salvo pergunta antes de encerrar: Descartar encerra sem gravar', async ({ kora }) => {
+  const env = kora.env()
+  writeFileSync(join(env.project, 'notas.txt'), 'antes\n')
+  const run = await kora.launch(env)
+  const page = run.page
+  await fileRow(run, 'notas.txt').click()
+  await editOpenFile(run, 'depois')
+
+  await run.app.evaluate(({ app }) => app.quit())
+  const dialog = page.locator('[role=dialog]')
+  await expect(dialog).toContainText('Salvar "notas.txt" antes de fechar?')
+  await page.waitForTimeout(3500)
+  expect(isAlive(run.pid), 'o app espera a resposta, mesmo depois do tempo de segurança do main').toBe(true)
+  await dialog.getByRole('button', { name: 'Descartar alterações' }).click()
+  await expect.poll(() => isAlive(run.pid), { timeout: 15_000 }).toBe(false)
+  expect(readFileSync(join(env.project, 'notas.txt'), 'utf8')).toBe('antes\n')
 })

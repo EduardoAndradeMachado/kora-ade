@@ -37,7 +37,7 @@ import { fileHolders, listProcesses, withCreationTime } from './processes'
 import { FILE_FONT, ProjectGroupSchema, TERMINAL_FONT, ThemePreferenceSchema, ZOOM, type KoraState } from '../shared/state'
 import { z } from 'zod'
 import { AgentSessionSchema, type AgentSession, type Startup } from '../shared/agent'
-import type { CreateResult, Launch, SaveResult, TabRef } from '../shared/ipc'
+import type { CloseKind, CreateResult, Launch, SaveResult, TabRef } from '../shared/ipc'
 
 const DETECT_INTERVAL_MS = 2000
 // O token OAuth do Claude é lido aqui dentro e nunca vai para o renderer; só os percentuais saem.
@@ -201,13 +201,20 @@ function createWindow(): void {
   // O zoom do Chromium é por origem e se perde no reload; reaplica o salvo a cada carregamento.
   mainWindow.webContents.on('did-finish-load', () => mainWindow?.webContents.setZoomFactor(state.settings.zoom))
   // X da janela vai para a bandeja: os processos das abas são encerrados (libera a memória, como "Suspender")
-  // e as abas ficam com "Continuar chat". Sair de verdade só pelo menu da bandeja.
+  // e as abas ficam com "Continuar chat". Sair de verdade só pelo menu da bandeja. Sem bandeja o X encerra,
+  // e aí quem pergunta pelos arquivos não salvos é este handler (o before-quit só vem depois da janela fechar).
   mainWindow.on('close', (event) => {
     detectAgents()
-    if (quitting || !tray) return
+    if (quitting) return
+    if (!tray) {
+      if (!unsaved || quitConfirmed) return
+      event.preventDefault()
+      askRenderer('quit')
+      return
+    }
     event.preventDefault()
-    terminals.killAll()
-    mainWindow?.hide()
+    if (unsaved) askRenderer('hide')
+    else hideToTray()
   })
   mainWindow.on('closed', () => {
     terminals.killAll()
@@ -226,6 +233,35 @@ function createWindow(): void {
   } else {
     void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+}
+
+function hideToTray(): void {
+  terminals.killAll()
+  mainWindow?.hide()
+  mainWindow?.webContents.send('app:hidden')
+}
+
+// Arquivo com alteração não salva: o fechamento espera a interface perguntar (salvar, descartar ou cancelar).
+// Interface travada não responde nem o recebimento; aí o fechamento segue, para o app nunca ficar sem saída.
+const CLOSE_ACK_MS = 3000
+let unsaved = false
+let quitConfirmed = false
+let closeAckTimer: NodeJS.Timeout | undefined
+
+function proceedClose(kind: CloseKind): void {
+  if (kind === 'hide') {
+    hideToTray()
+    return
+  }
+  quitConfirmed = true
+  app.quit()
+}
+
+function askRenderer(kind: CloseKind): void {
+  showWindow()
+  clearTimeout(closeAckTimer)
+  closeAckTimer = setTimeout(() => proceedClose(kind), CLOSE_ACK_MS)
+  mainWindow?.webContents.send('app:close-requested', kind)
 }
 
 function projectRoot(id: string): string {
@@ -416,6 +452,14 @@ function registerIpc(): void {
     for (const file of files) await shell.trashItem(file)
   })
 
+  ipcMain.on('app:unsaved', (_e, value: unknown) => {
+    unsaved = value === true
+  })
+  ipcMain.on('app:close-ack', () => clearTimeout(closeAckTimer))
+  ipcMain.on('app:close-answer', (_e, kind: unknown, answer: unknown) => {
+    if ((kind === 'hide' || kind === 'quit') && answer === 'proceed') proceedClose(kind)
+  })
+
   ipcMain.on('tabs:save-sync', (event, tabs: TabRef[]) => {
     commit(mergeTabs(state, tabs))
     event.returnValue = true
@@ -478,7 +522,12 @@ if (!app.requestSingleInstanceLock()) app.quit()
 
 let quitting = false
 let tray: Tray | null = null
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (unsaved && !quitConfirmed && mainWindow) {
+    event.preventDefault()
+    askRenderer('quit')
+    return
+  }
   quitting = true
 })
 
