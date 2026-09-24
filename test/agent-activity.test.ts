@@ -17,11 +17,12 @@ const quoted =
 const lines = (...l: string[]): string => l.join('\n') + '\n'
 
 describe('estado do Claude pelo arquivo do pid', () => {
-  it('busy é trabalhando; waiting e idle são esperando você; o resto fica sem indicador', () => {
+  it('busy e shell (comando rodando) são trabalhando; waiting e idle são esperando você; o resto fica sem indicador', () => {
     expect(claudeActivity('busy')).toBe('working')
+    expect(claudeActivity('shell')).toBe('working')
     expect(claudeActivity('waiting')).toBe('waiting')
     expect(claudeActivity('idle')).toBe('waiting')
-    expect(claudeActivity('shell')).toBeNull()
+    expect(claudeActivity('outro')).toBeNull()
     expect(claudeActivity(undefined)).toBeNull()
   })
 })

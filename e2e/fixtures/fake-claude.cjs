@@ -54,11 +54,22 @@ onLines(
     }
     if (line.trim() === 'trabalhe') writeStatus('busy')
     if (line.trim() === 'pare') writeStatus('idle')
-    // "trabalhe 5": fica ocupado 5 s e para sozinho, como um turno que termina enquanto você está em outra aba.
+    // "trabalhe 5": turno de 5 s que termina sozinho, como um turno que acaba enquanto você está em outra aba.
+    // Como o Claude real usando ferramentas, alterna entre "busy" (respondendo) e "shell" (rodando comando).
     const timed = /^trabalhe (\d+)$/.exec(line.trim())
     if (timed) {
+      const until = Date.now() + Number(timed[1]) * 1000
+      let shell = false
       writeStatus('busy')
-      setTimeout(() => writeStatus('idle'), Number(timed[1]) * 1000)
+      const flip = setInterval(() => {
+        if (Date.now() >= until) {
+          clearInterval(flip)
+          writeStatus('idle')
+          return
+        }
+        shell = !shell
+        writeStatus(shell ? 'shell' : 'busy')
+      }, 700)
     }
     turns++
     setTitle(`FakeClaude ${short} turno ${turns}`)

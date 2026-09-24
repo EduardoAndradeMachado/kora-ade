@@ -417,6 +417,14 @@ const MUTANTS = [
     bug: 'classe do balanço aplicada, mas sem animação no CSS (o símbolo não se mexe)',
     find: 'animation: kora-balanca 1.4s ease-in-out 1;',
     replace: 'animation: none;'
+  },
+  {
+    id: 'M59',
+    grep: 'R56 ',
+    file: 'src/main/agent-activity.ts',
+    bug: 'status "shell" do Claude (comando rodando) sem estado: o turno não termina como "trabalhando → esperando" e o sino não toca',
+    find: "if (status === 'busy' || status === 'shell') return 'working'",
+    replace: "if (status === 'busy') return 'working'"
   }
 ]
 
