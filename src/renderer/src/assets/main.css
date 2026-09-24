@@ -140,16 +140,16 @@
 }
 
 .markdown {
-  @apply text-[13px] leading-relaxed text-foreground select-text break-words;
+  @apply leading-relaxed text-foreground select-text break-words;
 }
 .markdown h1 {
-  @apply mt-2 mb-3 text-lg font-semibold;
+  @apply mt-2 mb-3 text-[1.385em] font-semibold;
 }
 .markdown h2 {
-  @apply mt-5 mb-2 border-b pb-1 text-[15px] font-semibold;
+  @apply mt-5 mb-2 border-b pb-1 text-[1.154em] font-semibold;
 }
 .markdown h3 {
-  @apply mt-4 mb-1.5 text-sm font-semibold;
+  @apply mt-4 mb-1.5 text-[1.077em] font-semibold;
 }
 .markdown p {
   @apply my-2;
@@ -171,7 +171,7 @@
   @apply text-sky-400 underline-offset-2 hover:underline;
 }
 .markdown code {
-  @apply rounded bg-secondary px-1 py-0.5 font-mono text-[12px] break-all;
+  @apply rounded bg-secondary px-1 py-0.5 font-mono text-[0.923em] break-all;
 }
 .markdown pre {
   @apply my-3 overflow-x-auto rounded-md bg-card p-3;
@@ -183,7 +183,7 @@
   @apply my-2 border-l-2 pl-3 text-muted-foreground;
 }
 .markdown table {
-  @apply my-3 w-full border-collapse text-xs;
+  @apply my-3 w-full border-collapse text-[0.923em];
 }
 .markdown th,
 .markdown td {

@@ -12,9 +12,13 @@ const KEY_DIRECTION: Record<string, Direction> = {
 }
 
 // Ctrl ± / 0 → interface inteira; com Shift → só o texto do terminal. Ctrl + roda: sobre o terminal
-// muda o texto dele, no resto do app o zoom. Escuta na captura da janela para o xterm e o Monaco
-// não engolirem as teclas antes.
-export function useZoomShortcuts(onZoom: (d: Direction) => void, onTerminalFont: (d: Direction) => void): void {
+// muda o texto dele, sobre um arquivo aberto o texto dos arquivos, no resto do app o zoom. Escuta na
+// captura da janela para o xterm e o Monaco não engolirem as teclas antes.
+export function useZoomShortcuts(
+  onZoom: (d: Direction) => void,
+  onTerminalFont: (d: Direction) => void,
+  onFileFont: (d: Direction) => void
+): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (!e.ctrlKey || e.altKey || e.metaKey) return
@@ -29,8 +33,9 @@ export function useZoomShortcuts(onZoom: (d: Direction) => void, onTerminalFont:
       if (!e.ctrlKey || e.deltaY === 0) return
       e.preventDefault()
       const direction: Direction = e.deltaY < 0 ? 1 : -1
-      const overTerminal = e.target instanceof Element && e.target.closest('.xterm') !== null
-      if (overTerminal) onTerminalFont(direction)
+      const target = e.target instanceof Element ? e.target : null
+      if (target?.closest('.xterm')) onTerminalFont(direction)
+      else if (target?.closest('[data-file-text]')) onFileFont(direction)
       else onZoom(direction)
     }
     window.addEventListener('keydown', onKey, true)
@@ -39,5 +44,5 @@ export function useZoomShortcuts(onZoom: (d: Direction) => void, onTerminalFont:
       window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('wheel', onWheel, true)
     }
-  }, [onZoom, onTerminalFont])
+  }, [onZoom, onTerminalFont, onFileFont])
 }

@@ -47,8 +47,10 @@ interface Props {
   onSetTheme(theme: ThemePreference): void
   zoom: number
   terminalFontSize: number
+  fileFontSize: number
   onZoom(step: 1 | -1 | 0): void
   onTerminalFont(step: 1 | -1 | 0): void
+  onFileFont(step: 1 | -1 | 0): void
 }
 
 const THEMES: { theme: ThemePreference; label: string; icon: IconName }[] = [
@@ -419,8 +421,10 @@ export function Sidebar(props: Props): React.JSX.Element {
         <SizeControl
           zoom={props.zoom}
           terminalFontSize={props.terminalFontSize}
+          fileFontSize={props.fileFontSize}
           onZoom={props.onZoom}
           onTerminalFont={props.onTerminalFont}
+          onFileFont={props.onFileFont}
         />
       </div>
       {themeMenu && (

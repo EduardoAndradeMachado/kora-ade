@@ -214,7 +214,7 @@ test('R34 controle visível de tamanho: interface e texto do terminal mudam sepa
   await expect.poll(cellHeight).toBeGreaterThan(0)
   const initialCell = await cellHeight()
 
-  const open = page.getByTitle('Tamanho da interface e do texto do terminal')
+  const open = page.getByTitle('Tamanho da interface, do terminal e dos arquivos')
   await expect(open).toContainText('100% · 14 px')
   await open.click()
   const panel = page.getByRole('dialog', { name: 'Tamanhos' })

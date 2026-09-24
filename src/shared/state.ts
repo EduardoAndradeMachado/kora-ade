@@ -37,6 +37,7 @@ export type ThemePreference = z.infer<typeof ThemePreferenceSchema>
 
 export const ZOOM = { min: 0.7, max: 1.6, step: 0.1, default: 1 }
 export const TERMINAL_FONT = { min: 10, max: 28, step: 1, default: 14 }
+export const FILE_FONT = { min: 10, max: 28, step: 1, default: 13 }
 
 // toFixed: somar 0.1 várias vezes em ponto flutuante dá 1.2000000000000002.
 export function stepValue(current: number, direction: 1 | -1 | 0, range: typeof ZOOM): number {
@@ -54,10 +55,16 @@ const SettingsSchema = z.object({
     .min(TERMINAL_FONT.min)
     .max(TERMINAL_FONT.max)
     .catch(TERMINAL_FONT.default)
-    .default(TERMINAL_FONT.default)
+    .default(TERMINAL_FONT.default),
+  fileFontSize: z.number().int().min(FILE_FONT.min).max(FILE_FONT.max).catch(FILE_FONT.default).default(FILE_FONT.default)
 })
 export type Settings = z.infer<typeof SettingsSchema>
-const defaultSettings = (): Settings => ({ theme: 'system', zoom: ZOOM.default, terminalFontSize: TERMINAL_FONT.default })
+const defaultSettings = (): Settings => ({
+  theme: 'system',
+  zoom: ZOOM.default,
+  terminalFontSize: TERMINAL_FONT.default,
+  fileFontSize: FILE_FONT.default
+})
 
 const StateV1Schema = z.object({
   version: z.literal(1),

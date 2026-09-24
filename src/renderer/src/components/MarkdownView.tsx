@@ -9,10 +9,11 @@ interface Props {
   projectId: string
   path: string
   visible: boolean
+  fontSize: number
   onEdit(): void
 }
 
-export function MarkdownView({ projectId, path, visible, onEdit }: Props): React.JSX.Element {
+export function MarkdownView({ projectId, path, visible, fontSize, onEdit }: Props): React.JSX.Element {
   const [source, setSource] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -45,6 +46,8 @@ export function MarkdownView({ projectId, path, visible, onEdit }: Props): React
           <p className="p-4 text-xs text-muted-foreground">Carregando…</p>
         ) : (
           <article
+            data-file-text
+            style={{ fontSize }}
             className="markdown mx-auto max-w-3xl px-6 py-5"
             onClick={(e) => {
               const link = (e.target as HTMLElement).closest('a')

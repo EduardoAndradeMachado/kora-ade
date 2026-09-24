@@ -434,3 +434,42 @@ test('R42 editor: botão Salvar no topo grava o arquivo; sem alteração fica de
   await expect(page.getByText('Não salvo').filter({ visible: true })).toHaveCount(0)
   await expect(saveButton).toBeDisabled()
 })
+
+test('R43 texto dos arquivos: tamanho próprio no painel Aa e no Ctrl + roda sobre o arquivo, sem mexer no terminal nem na interface', async ({ kora }) => {
+  const env = kora.env()
+  seedRepo(env)
+  writeFileSync(join(env.project, 'dados.json'), '{ "b": 2 }\n')
+  const run = await kora.launch(env)
+  const page = run.page
+  const zoomFactor = () => run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.getZoomFactor())
+  const editorFont = () =>
+    page.evaluate(() => {
+      const lines = [...document.querySelectorAll<HTMLElement>('.monaco-editor .view-lines')].find((e) => e.offsetParent !== null)
+      return lines ? getComputedStyle(lines).fontSize : ''
+    })
+  const markdownFont = () => page.locator('article.markdown').filter({ visible: true }).evaluate((e) => getComputedStyle(e).fontSize)
+
+  await row(run, 'dados.json').click()
+  await expect.poll(editorFont).toBe('13px')
+
+  await page.getByTitle('Tamanho da interface, do terminal e dos arquivos').click()
+  const panel = page.getByRole('dialog', { name: 'Tamanhos' })
+  await panel.getByTitle('Aumentar texto dos arquivos').click()
+  await panel.getByTitle('Aumentar texto dos arquivos').click()
+  await expect.poll(editorFont).toBe('15px')
+  await page.keyboard.press('Escape')
+  expect(await zoomFactor()).toBeCloseTo(1)
+  await waitFor(() => readState(env).settings?.fileFontSize === 15 && readState(env).settings?.terminalFontSize === 14, 'tamanho dos arquivos salvo')
+
+  await row(run, 'README.md').click()
+  await expect.poll(markdownFont).toBe('15px')
+  const article = page.locator('article.markdown').filter({ visible: true })
+  const box = (await article.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + 10)
+  await page.keyboard.down('Control')
+  await page.mouse.wheel(0, -100)
+  await page.keyboard.up('Control')
+  await expect.poll(markdownFont).toBe('16px')
+  expect(await zoomFactor()).toBeCloseTo(1)
+  await waitFor(() => readState(env).settings?.fileFontSize === 16, 'Ctrl + roda sobre o arquivo salvo')
+})

@@ -34,7 +34,7 @@ import {
 } from './git'
 import { KORA_FILE_PRIVILEGED_SCHEMES, registerKoraFileProtocol } from './file-protocol'
 import { fileHolders, listProcesses, withCreationTime } from './processes'
-import { ProjectGroupSchema, TERMINAL_FONT, ThemePreferenceSchema, ZOOM, type KoraState } from '../shared/state'
+import { FILE_FONT, ProjectGroupSchema, TERMINAL_FONT, ThemePreferenceSchema, ZOOM, type KoraState } from '../shared/state'
 import { z } from 'zod'
 import { AgentSessionSchema, type AgentSession, type Startup } from '../shared/agent'
 import type { CreateResult, Launch, SaveResult, TabRef } from '../shared/ipc'
@@ -242,7 +242,8 @@ function registerIpc(): void {
   // O renderer segue o prefers-color-scheme, que o Chromium deriva do nativeTheme.themeSource.
   const SizesSchema = z.object({
     zoom: z.number().min(ZOOM.min).max(ZOOM.max).optional(),
-    terminalFontSize: z.number().int().min(TERMINAL_FONT.min).max(TERMINAL_FONT.max).optional()
+    terminalFontSize: z.number().int().min(TERMINAL_FONT.min).max(TERMINAL_FONT.max).optional(),
+    fileFontSize: z.number().int().min(FILE_FONT.min).max(FILE_FONT.max).optional()
   })
   const LayoutSchema = z.object({
     groups: z.array(ProjectGroupSchema),

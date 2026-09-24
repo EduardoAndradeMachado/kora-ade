@@ -10,6 +10,7 @@ interface Props {
   projectId: string
   path: string
   visible: boolean
+  fontSize: number
   onDirtyChange(dirty: boolean): void
   headerExtra?: React.ReactNode
   // Deixa quem fecha a aba salvar antes; o salvamento pode não acontecer (conflito, erro) e aí devolve false.
@@ -33,7 +34,7 @@ const contentOf = (model: monaco.editor.ITextModel): string =>
 
 const bannerButton = 'rounded-md border border-current/30 px-2 py-0.5 hover:bg-white/10 disabled:opacity-50'
 
-export function CodeView({ projectId, path, visible, onDirtyChange, headerExtra, onSaveHandle, jump }: Props): React.JSX.Element {
+export function CodeView({ projectId, path, visible, fontSize, onDirtyChange, headerExtra, onSaveHandle, jump }: Props): React.JSX.Element {
   const confirm = useConfirm()
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -43,6 +44,7 @@ export function CodeView({ projectId, path, visible, onDirtyChange, headerExtra,
   const busyRef = useRef(false)
   const onDirtyRef = useRef(onDirtyChange)
   const saveRef = useRef<() => Promise<void>>(async () => {})
+  const fontSizeRef = useRef(fontSize)
 
   const [load, setLoad] = useState<Load>({ status: 'loading' })
   const [reloadKey, setReloadKey] = useState(0)
@@ -92,7 +94,12 @@ export function CodeView({ projectId, path, visible, onDirtyChange, headerExtra,
       (file) => {
         if (cancelled || !hostRef.current) return
         model = monaco.editor.createModel(file.content, undefined, modelUri(projectId, path))
-        editor = monaco.editor.create(hostRef.current, { ...EDITOR_OPTIONS, theme: themeForDocument(), model })
+        editor = monaco.editor.create(hostRef.current, {
+          ...EDITOR_OPTIONS,
+          fontSize: fontSizeRef.current,
+          theme: themeForDocument(),
+          model
+        })
         editorRef.current = editor
         const loaded = model
         markSaved(loaded, file.mtimeMs, loaded.getAlternativeVersionId())
@@ -120,6 +127,11 @@ export function CodeView({ projectId, path, visible, onDirtyChange, headerExtra,
       publishDirty(false)
     }
   }, [projectId, path, reloadKey])
+
+  useEffect(() => {
+    fontSizeRef.current = fontSize
+    editorRef.current?.updateOptions({ fontSize })
+  }, [fontSize])
 
   useEffect(() => {
     if (visible && load.status === 'ready') editorRef.current?.focus()
@@ -262,7 +274,7 @@ export function CodeView({ projectId, path, visible, onDirtyChange, headerExtra,
       )}
 
       <div className="relative min-h-0 flex-1">
-        <div ref={hostRef} className={cn('absolute inset-0', load.status !== 'ready' && 'invisible')} />
+        <div ref={hostRef} data-file-text className={cn('absolute inset-0', load.status !== 'ready' && 'invisible')} />
         {load.status === 'loading' && <p className="absolute p-4 text-xs text-muted-foreground">Carregando…</p>}
         {load.status === 'error' && (
           <div className="absolute inset-0 flex flex-col items-start gap-3 p-4">

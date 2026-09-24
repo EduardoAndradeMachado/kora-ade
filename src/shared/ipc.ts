@@ -43,7 +43,7 @@ export interface KoraApi {
 
   getState(): Promise<KoraState>
   setTheme(theme: ThemePreference): Promise<KoraState>
-  setSizes(sizes: { zoom?: number; terminalFontSize?: number }): Promise<KoraState>
+  setSizes(sizes: { zoom?: number; terminalFontSize?: number; fileFontSize?: number }): Promise<KoraState>
   addProject(): Promise<KoraState>
   addProjectPath(path: string): Promise<KoraState>
   removeProject(id: string): Promise<KoraState>

@@ -109,6 +109,22 @@ const MUTANTS = [
     replace: 'loaded.onDidChangeContent(() => (refreshDirty(loaded), void saveRef.current()))'
   },
   {
+    id: 'M43',
+    grep: 'R43 ',
+    file: 'src/renderer/src/components/CodeView.tsx',
+    bug: 'editor aberto não acompanha a mudança do texto dos arquivos',
+    find: '    editorRef.current?.updateOptions({ fontSize })\n',
+    replace: ''
+  },
+  {
+    id: 'M43b',
+    grep: 'R43 ',
+    file: 'src/renderer/src/lib/use-zoom-shortcuts.ts',
+    bug: 'Ctrl + roda sobre o arquivo muda o zoom da interface',
+    find: "else if (target?.closest('[data-file-text]')) onFileFont(direction)",
+    replace: 'else if (false) onFileFont(direction)'
+  },
+  {
     id: 'M44',
     grep: 'R44 ',
     file: 'src/renderer/src/components/Sidebar.tsx',

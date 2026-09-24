@@ -1,5 +1,5 @@
 ﻿import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { GROUP_NAME_MAX, stepValue, TERMINAL_FONT, ZOOM, type KoraState, type Project, type ProjectGroup } from '@shared/state'
+import { FILE_FONT, GROUP_NAME_MAX, stepValue, TERMINAL_FONT, ZOOM, type KoraState, type Project, type ProjectGroup } from '@shared/state'
 import type { AgentSession } from '@shared/agent'
 import { viewerFor } from '@shared/file-kind'
 import { arrangeProjects, reorder, sortBySection, type Place, type ProjectDrop } from '@shared/arrange'
@@ -34,6 +34,11 @@ import type { NewTabChoice } from '@/components/NewTabMenu'
 import { terminalBus } from '@/lib/terminal-bus'
 
 type TabsByProject = Record<string, Tab[]>
+
+type Sizes = { zoom: number; terminalFontSize: number; fileFontSize: number }
+const SIZE_RANGES: Record<keyof Sizes, typeof ZOOM> = { zoom: ZOOM, terminalFontSize: TERMINAL_FONT, fileFontSize: FILE_FONT }
+const DEFAULT_SIZES: Sizes = { zoom: ZOOM.default, terminalFontSize: TERMINAL_FONT.default, fileFontSize: FILE_FONT.default }
+const SIZE_LABELS: Record<Exclude<keyof Sizes, 'zoom'>, string> = { terminalFontSize: 'Terminal', fileFontSize: 'Arquivos' }
 
 const RIGHT_PANEL_KEY = 'kora.rightPanelOpen'
 const DEFAULT_TITLE: Record<NewTabChoice, string> = {
@@ -100,8 +105,11 @@ export function App(): React.JSX.Element {
   }, [])
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // Atualizado na hora de cada atalho: apertos seguidos não podem esperar a resposta do main para somar.
-  const sizesRef = useRef<{ zoom: number; terminalFontSize: number } | null>(null)
-  if (state && !sizesRef.current) sizesRef.current = { zoom: state.settings.zoom, terminalFontSize: state.settings.terminalFontSize }
+  const sizesRef = useRef<Sizes | null>(null)
+  if (state && !sizesRef.current) {
+    const { zoom, terminalFontSize, fileFontSize } = state.settings
+    sizesRef.current = { zoom, terminalFontSize, fileFontSize }
+  }
 
   const flash = useCallback((text: string) => {
     setToast(text)
@@ -109,29 +117,21 @@ export function App(): React.JSX.Element {
     toastTimer.current = setTimeout(() => setToast(null), 1200)
   }, [])
 
-  const onZoom = useCallback(
-    (direction: 1 | -1 | 0) => {
-      const current = sizesRef.current?.zoom ?? ZOOM.default
-      const zoom = stepValue(current, direction, ZOOM)
-      sizesRef.current = { terminalFontSize: sizesRef.current?.terminalFontSize ?? TERMINAL_FONT.default, zoom }
-      flash(`Interface ${Math.round(zoom * 100)}%`)
-      void window.kora.setSizes({ zoom }).then(setState)
+  const stepSize = useCallback(
+    (key: keyof Sizes, direction: 1 | -1 | 0) => {
+      const sizes = sizesRef.current ?? DEFAULT_SIZES
+      const value = stepValue(sizes[key], direction, SIZE_RANGES[key])
+      sizesRef.current = { ...sizes, [key]: value }
+      flash(key === 'zoom' ? `Interface ${Math.round(value * 100)}%` : `${SIZE_LABELS[key]} ${value} px`)
+      void window.kora.setSizes({ [key]: value }).then(setState)
     },
     [flash]
   )
+  const onZoom = useCallback((direction: 1 | -1 | 0) => stepSize('zoom', direction), [stepSize])
+  const onTerminalFont = useCallback((direction: 1 | -1 | 0) => stepSize('terminalFontSize', direction), [stepSize])
+  const onFileFont = useCallback((direction: 1 | -1 | 0) => stepSize('fileFontSize', direction), [stepSize])
 
-  const onTerminalFont = useCallback(
-    (direction: 1 | -1 | 0) => {
-      const current = sizesRef.current?.terminalFontSize ?? TERMINAL_FONT.default
-      const terminalFontSize = stepValue(current, direction, TERMINAL_FONT)
-      sizesRef.current = { zoom: sizesRef.current?.zoom ?? ZOOM.default, terminalFontSize }
-      flash(`Terminal ${terminalFontSize} px`)
-      void window.kora.setSizes({ terminalFontSize }).then(setState)
-    },
-    [flash]
-  )
-
-  useZoomShortcuts(onZoom, onTerminalFont)
+  useZoomShortcuts(onZoom, onTerminalFont, onFileFont)
 
   useEffect(() => {
     const timer = setTimeout(() => requestIdleCallback(() => void loadCodeView()), MONACO_PRELOAD_DELAY_MS)
@@ -599,8 +599,10 @@ export function App(): React.JSX.Element {
         onArrangeProject={arrangeProject}
         zoom={state.settings.zoom}
         terminalFontSize={state.settings.terminalFontSize}
+        fileFontSize={state.settings.fileFontSize}
         onZoom={onZoom}
         onTerminalFont={onTerminalFont}
+        onFileFont={onFileFont}
         onReorderTab={reorderTab}
         theme={state.settings.theme}
         onSetTheme={(theme) => void window.kora.setTheme(theme).then(setState)}
@@ -642,6 +644,7 @@ export function App(): React.JSX.Element {
                       projectId={projectId}
                       path={tab.path}
                       visible={visible}
+                      fontSize={state.settings.fileFontSize}
                       onEdit={() => patchFile(tab.id, { editing: true })}
                     />
                   )
@@ -652,6 +655,7 @@ export function App(): React.JSX.Element {
                       projectId={projectId}
                       path={tab.path}
                       visible={visible}
+                      fontSize={state.settings.fileFontSize}
                       onDirtyChange={(dirty) => patchFile(tab.id, { dirty })}
                       onSaveHandle={(save) => (save ? fileSavers.current.set(tab.id, save) : fileSavers.current.delete(tab.id))}
                       jump={tab.jump}

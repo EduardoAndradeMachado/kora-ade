@@ -7,8 +7,10 @@ type Step = 1 | -1 | 0
 interface Props {
   zoom: number
   terminalFontSize: number
+  fileFontSize: number
   onZoom(step: Step): void
   onTerminalFont(step: Step): void
+  onFileFont(step: Step): void
 }
 
 const stepButton =
@@ -39,7 +41,7 @@ function Row(props: { label: string; value: string; shortcut: string; onStep(ste
   )
 }
 
-// Os dois tamanhos são independentes; o painel mostra os atalhos para quem quiser parar de abrir o painel.
+// Os três tamanhos são independentes; o painel mostra os atalhos para quem quiser parar de abrir o painel.
 export function SizeControl(props: Props): React.JSX.Element {
   const [anchor, setAnchor] = useState<DOMRect | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -64,7 +66,7 @@ export function SizeControl(props: Props): React.JSX.Element {
     <>
       <button
         type="button"
-        title="Tamanho da interface e do texto do terminal"
+        title="Tamanho da interface, do terminal e dos arquivos"
         onClick={(e) => setAnchor(anchor ? null : e.currentTarget.getBoundingClientRect())}
         className={cn(
           'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs tabular-nums text-muted-foreground hover:bg-secondary hover:text-foreground',
@@ -72,7 +74,7 @@ export function SizeControl(props: Props): React.JSX.Element {
         )}
       >
         <span className="text-[13px] leading-none">Aa</span>
-        {Math.round(props.zoom * 100)}% · {props.terminalFontSize} px
+        {Math.round(props.zoom * 100)}% · {props.terminalFontSize} px · {props.fileFontSize} px
       </button>
       {anchor &&
         createPortal(
@@ -94,6 +96,12 @@ export function SizeControl(props: Props): React.JSX.Element {
               value={`${props.terminalFontSize} px`}
               shortcut="Ctrl Shift + / − / 0 ou Ctrl + roda"
               onStep={props.onTerminalFont}
+            />
+            <Row
+              label="Texto dos arquivos"
+              value={`${props.fileFontSize} px`}
+              shortcut="Ctrl + roda sobre o arquivo"
+              onStep={props.onFileFont}
             />
           </div>,
           document.body
