@@ -501,14 +501,15 @@ test('R58 easter egg: sino tocando em outra sessão faz o símbolo da tela vazia
   await expect(emptySymbol).not.toHaveClass(/kora-balanca/)
 
   await expect(emptySymbol).toHaveClass(/kora-balanca/, { timeout: 15_000 })
-  // A classe sozinha passaria com o CSS da animação quebrado: o símbolo tem que estar de fato girando.
-  const motion = () =>
-    emptySymbol.evaluate((el) => ({
-      running: el.getAnimations().some((a) => (a as CSSAnimation).animationName === 'kora-balanca' && a.playState === 'running'),
-      transform: getComputedStyle(el).transform
-    }))
-  const first = await motion()
-  expect(first.running, 'animação kora-balanca rodando no símbolo').toBe(true)
-  await page.waitForTimeout(150)
-  expect((await motion()).transform, 'o ângulo muda durante o balanço').not.toBe(first.transform)
+  // A classe sozinha passaria com o CSS da animação quebrado: a animação tem que estar rodando no símbolo e as etapas
+  // dela têm que girar de verdade. Não mede o ângulo ao longo do tempo: com a janela de teste escondida atrás de
+  // outras, o Electron congela as animações e o ângulo não anda, sem nada estar quebrado.
+  const swing = await emptySymbol.evaluate((el) => {
+    const animation = el.getAnimations().find((a) => (a as CSSAnimation).animationName === 'kora-balanca')
+    if (!animation) return null
+    const turns = (animation.effect as KeyframeEffect).getKeyframes().map((k) => String(k['transform'] ?? ''))
+    return { state: animation.playState, turns }
+  })
+  expect(swing?.state, 'animação kora-balanca rodando no símbolo').toBe('running')
+  expect(swing!.turns.filter((t) => /rotate\(-?[1-9]/.test(t)).length, 'etapas com rotação').toBeGreaterThan(2)
 })
