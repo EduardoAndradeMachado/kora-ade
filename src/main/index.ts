@@ -230,7 +230,8 @@ function createWindow(): void {
   mainWindow.webContents.on('did-start-loading', () => terminals.killAll())
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    const vitrine = process.env['KORA_VITRINE'] === '1' ? '#vitrine' : ''
+    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + vitrine)
   } else {
     void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
