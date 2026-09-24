@@ -91,6 +91,14 @@ const MUTANTS = [
     bug: 'kill() só esquece o pty sem encerrar o processo',
     find: '    this.sessions.get(id)?.kill()\n',
     replace: ''
+  },
+  {
+    id: 'M45',
+    grep: 'R45 ',
+    file: 'src/renderer/src/components/Sidebar.tsx',
+    bug: 'tema segue com o nome antigo',
+    find: "label: 'Sistema'",
+    replace: "label: 'Seguir o Windows'"
   }
 ]
 

@@ -641,3 +641,11 @@ test('R24 sem barra de rolagem nativa e sem diálogos nativos nos fluxos de conf
   const native = await run.nativeDialogs()
   expect(native, 'nenhum diálogo nativo (window.confirm/alert ou dialog do Electron) deve aparecer').toEqual([])
 })
+
+test('R45 tema: o seletor chama o modo que segue o sistema de "Sistema"', async ({ kora }) => {
+  const run = await kora.launch(kora.env())
+  const page = run.page
+  await page.getByTitle('Tema').click()
+  await expect(ui.menuItem(page, '● Sistema')).toBeVisible()
+  await expect(page.getByText('Seguir o Windows')).toHaveCount(0)
+})

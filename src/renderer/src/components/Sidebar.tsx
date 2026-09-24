@@ -52,7 +52,7 @@ interface Props {
 }
 
 const THEMES: { theme: ThemePreference; label: string; icon: IconName }[] = [
-  { theme: 'system', label: 'Seguir o Windows', icon: 'temaSistema' },
+  { theme: 'system', label: 'Sistema', icon: 'temaSistema' },
   { theme: 'light', label: 'Claro', icon: 'temaClaro' },
   { theme: 'dark', label: 'Escuro', icon: 'temaEscuro' }
 ]
