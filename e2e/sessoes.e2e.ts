@@ -256,7 +256,7 @@ test('R14 Suspender sessão encerra o processo do agente e Continuar retoma a me
   expect(isAlive(start.pid)).toBe(true)
 
   await ui.barTab(run.page, /FakeClaude|Claude/).click({ button: 'right' })
-  await ui.menuItem(run.page, 'Suspender sessão (libera memória)').click()
+  await ui.menuItem(run.page, 'Suspender sessão').click()
   await waitFor(() => !isAlive(start.pid), 'processo do claude falso morreu')
   if (shell) await waitFor(() => !isAlive(shell.pid), 'PowerShell da aba morreu')
   await expect(ui.visibleButton(run.page, 'Continuar chat')).toBeVisible()
@@ -338,7 +338,7 @@ test('R51 estado do agente na aba (barra e lateral): esperando você e trabalhan
   await expect(codex.bar).toHaveAttribute('data-activity', 'waiting', { timeout: 5000 })
 
   await ui.barTab(page, /Claude/).click({ button: 'right' })
-  await ui.menuItem(page, 'Suspender sessão (libera memória)').click()
+  await ui.menuItem(page, 'Suspender sessão').click()
   await expect(claude.bar).toHaveCount(0)
   await expect(claude.side).toHaveCount(0)
   await expect(codex.bar).toHaveAttribute('data-activity', 'waiting')

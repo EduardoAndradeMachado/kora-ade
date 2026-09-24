@@ -712,7 +712,7 @@ export function App(): React.JSX.Element {
     ]
     if (tab.live) {
       items.push({
-        label: tab.agent ? 'Suspender sessão (libera memória)' : 'Encerrar terminal',
+        label: tab.agent ? 'Suspender sessão' : 'Encerrar terminal',
         onSelect: () => suspendTab(tab.id)
       })
     } else if (tab.agent) {
