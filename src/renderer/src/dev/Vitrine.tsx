@@ -1,75 +1,37 @@
-import { useState } from 'react'
-import type { UpdateStatus } from '@shared/update'
-import { SettingsPanel } from '@/components/SettingsDialog'
 import { cn } from '@/lib/utils'
 
-// Só no `pnpm dev` (KORA_VITRINE=1): componentes reais em estados simulados, para escolher antes de aplicar no app.
-const LAYOUTS = [{ label: 'C — só o logotipo, versão em etiqueta (escolhida)' }]
+// Vitrine de amostras, só no `pnpm dev` com KORA_VITRINE=1 (import.meta.env.DEV a tira do build de produção).
+// Para testar uma parte da interface antes de aplicar no app: desenhe os componentes reais em estados simulados
+// dentro de <Amostra>, uma por variante, e escolha olhando claro e escuro lado a lado. Decidido, a variante vai
+// para o componente de verdade e a vitrine volta a ficar vazia.
 
-const STATES: { label: string; update: UpdateStatus }[] = [
-  { label: 'Pronta', update: { state: 'ready', version: '0.2.0' } },
-  { label: 'Baixando', update: { state: 'downloading', version: '0.2.0', percent: 63 } },
-  { label: 'Em dia', update: { state: 'current', checkedAt: Date.now() } },
-  { label: 'Erro', update: { state: 'error', message: 'sem conexão com o GitHub' } },
-  { label: 'Fora do app instalado', update: { state: 'disabled' } }
-]
+export function Amostra({ titulo, detalhe, children }: { titulo: string; detalhe?: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <section className="flex flex-col gap-2">
+      <div className="flex flex-col">
+        <h2 className="text-xs font-semibold">{titulo}</h2>
+        {detalhe && <p className="text-[11px] text-muted-foreground">{detalhe}</p>}
+      </div>
+      <div className="flex flex-wrap gap-4">
+        {(['light', 'dark'] as const).map((theme) => (
+          <div key={theme} className={cn('rounded-xl bg-background p-4 text-foreground ring-1 ring-border', theme === 'dark' && 'dark')}>
+            {children}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
 
 export function Vitrine(): React.JSX.Element {
-  const [stateIndex, setStateIndex] = useState(0)
-  const [width, setWidth] = useState(448)
-  const update = STATES[stateIndex]!.update
-
   return (
     <div className="h-full overflow-auto bg-background p-6 text-foreground">
-      <div className="mb-5 flex flex-wrap items-center gap-2 text-xs">
-        <span className="mr-2 text-sm font-semibold">Vitrine · Configurações</span>
-        {STATES.map((s, i) => (
-          <button
-            key={s.label}
-            type="button"
-            onClick={() => setStateIndex(i)}
-            className={cn('rounded-md border px-2 py-1', i === stateIndex ? 'bg-secondary font-medium' : 'text-muted-foreground hover:bg-secondary')}
-          >
-            {s.label}
-          </button>
-        ))}
-        <span className="ml-4 text-muted-foreground">Largura</span>
-        {[340, 448].map((w) => (
-          <button
-            key={w}
-            type="button"
-            onClick={() => setWidth(w)}
-            className={cn('rounded-md border px-2 py-1', w === width ? 'bg-secondary font-medium' : 'text-muted-foreground hover:bg-secondary')}
-          >
-            {w} px
-          </button>
-        ))}
-      </div>
-      <div className="flex flex-col gap-8">
-        {LAYOUTS.map(({ label }) => (
-          <section key={label} className="flex flex-col gap-2">
-            <h2 className="text-xs font-semibold">{label}</h2>
-            <div className="flex flex-wrap gap-6">
-              {(['light', 'dark'] as const).map((theme) => (
-                <div
-                  key={theme}
-                  className={cn('rounded-xl bg-black/40 p-6', theme === 'dark' && 'dark')}
-                  style={{ width: width + 48 }}
-                >
-                  <SettingsPanel
-                    version="0.1.1"
-                    update={update}
-                    installing={false}
-                    onCheck={() => {}}
-                    onInstall={() => {}}
-                    onClose={() => {}}
-                  />
-                </div>
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
+      <h1 className="mb-1 text-sm font-semibold">Vitrine</h1>
+      <p className="mb-6 text-xs text-muted-foreground">
+        Sem amostras no momento. Para testar uma parte da interface, coloque cada variante num {'<Amostra>'} em
+        src/renderer/src/dev/Vitrine.tsx.
+      </p>
+      <div className="flex flex-col gap-8" />
     </div>
   )
 }
