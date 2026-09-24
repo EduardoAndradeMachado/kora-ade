@@ -467,6 +467,7 @@ function SideTabs(props: SideTabsProps): React.JSX.Element {
             key={tab.id}
             {...drag.itemProps(tab.id)}
             onClick={() => props.onSelect(tab.id)}
+            onAuxClick={(e) => e.button === 1 && props.onClose(tab.id)}
             onContextMenu={(e) => {
               e.preventDefault()
               e.stopPropagation()

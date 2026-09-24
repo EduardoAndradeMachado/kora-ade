@@ -93,6 +93,14 @@ const MUTANTS = [
     replace: ''
   },
   {
+    id: 'M44',
+    grep: 'R44 ',
+    file: 'src/renderer/src/components/Sidebar.tsx',
+    bug: 'clique do meio não fecha a aba na lateral',
+    find: 'onAuxClick={(e) => e.button === 1 && props.onClose(tab.id)}',
+    replace: 'onAuxClick={() => {}}'
+  },
+  {
     id: 'M45',
     grep: 'R45 ',
     file: 'src/renderer/src/components/Sidebar.tsx',

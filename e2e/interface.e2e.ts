@@ -642,6 +642,29 @@ test('R24 sem barra de rolagem nativa e sem diálogos nativos nos fluxos de conf
   expect(native, 'nenhum diálogo nativo (window.confirm/alert ou dialog do Electron) deve aparecer').toEqual([])
 })
 
+test('R44 clique com o botão do meio fecha a aba, na barra de cima e na lateral', async ({ kora }) => {
+  const env = kora.env()
+  writeState(env, {
+    version: 2,
+    projects: [{ id: 'p1', name: 'proj-teste', path: env.project }],
+    tabs: [
+      { id: 't1', projectId: 'p1', title: 'Um', titleLocked: true, agent: null },
+      { id: 't2', projectId: 'p1', title: 'Dois', titleLocked: true, agent: null }
+    ]
+  })
+  const run = await kora.launch(env)
+  const page = run.page
+  await expect(ui.sideTab(page, 'Um')).toBeVisible()
+
+  await ui.sideTab(page, 'Um').click({ button: 'middle' })
+  await waitFor(() => readState(env).tabs.map((t) => t.id).join() === 't2', 'aba da lateral fechada')
+  await expect(ui.barTab(page, 'Um')).toHaveCount(0)
+
+  await ui.barTab(page, 'Dois').click({ button: 'middle' })
+  await waitFor(() => readState(env).tabs.length === 0, 'aba da barra fechada')
+  await expect(ui.sideTab(page, 'Dois')).toHaveCount(0)
+})
+
 test('R45 tema: o seletor chama o modo que segue o sistema de "Sistema"', async ({ kora }) => {
   const run = await kora.launch(kora.env())
   const page = run.page
