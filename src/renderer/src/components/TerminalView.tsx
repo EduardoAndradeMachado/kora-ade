@@ -245,12 +245,16 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
     return () => cancelAnimationFrame(frame)
   }, [visible])
 
-  // Arquivo solto vindo do explorador vira o caminho colado, como o Explorer do Windows faz com o Windows Terminal.
+  // Arquivo solto (do explorador do Kora ou do Explorer do Windows) vira o caminho colado, como o Windows
+  // Terminal faz; vários viram caminhos separados por espaço. Claude/Codex anexam imagem a partir do caminho.
   const onDrop = (event: React.DragEvent): void => {
-    const path = event.dataTransfer.getData('text/plain')
-    if (!event.dataTransfer.types.includes(FILE_MIME) || !path) return
+    const paths = event.dataTransfer.types.includes(FILE_MIME)
+      ? [event.dataTransfer.getData('text/plain')]
+      : [...event.dataTransfer.files].map((file) => window.kora.pathForFile(file))
+    const pasted = paths.filter(Boolean).map((path) => (path.includes(' ') ? `"${path}"` : path))
+    if (pasted.length === 0) return
     event.preventDefault()
-    termRef.current?.paste(path.includes(' ') ? `"${path}" ` : `${path} `)
+    termRef.current?.paste(`${pasted.join(' ')} `)
     termRef.current?.focus()
   }
 
@@ -258,7 +262,7 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
     <div
       className={cn('absolute inset-0 bg-terminal pl-3 pt-2', !visible && 'invisible')}
       onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes(FILE_MIME)) return
+        if (!e.dataTransfer.types.includes(FILE_MIME) && !e.dataTransfer.types.includes('Files')) return
         e.preventDefault()
         e.dataTransfer.dropEffect = 'copy'
       }}

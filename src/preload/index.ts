@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type { FilesChange, KoraApi } from '../shared/ipc'
 import type { AgentSession } from '../shared/agent'
 
@@ -29,6 +29,7 @@ const api: KoraApi = {
   trashEntry: (projectId, rel) => ipcRenderer.invoke('fs:trash', projectId, rel),
   moveEntry: (projectId, fromRel, toDirRel) => ipcRenderer.invoke('fs:move', projectId, fromRel, toDirRel),
   resolveTerminalLink: (projectId, text) => ipcRenderer.invoke('terminal:resolve-link', projectId, text),
+  pathForFile: (file) => webUtils.getPathForFile(file),
   reportLongTask: (ms) => ipcRenderer.send('diag:long-task', ms),
   pendingUpdate: () => ipcRenderer.invoke('update:pending'),
   installUpdate: () => ipcRenderer.invoke('update:install'),

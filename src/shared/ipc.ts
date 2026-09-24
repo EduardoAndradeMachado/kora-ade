@@ -74,6 +74,8 @@ export interface KoraApi {
   renameEntry(projectId: string, rel: string, name: string): Promise<string>
   // Caminho impresso no terminal que é um arquivo do projeto; null para qualquer outra coisa.
   resolveTerminalLink(projectId: string, text: string): Promise<{ rel: string; line: number | null } | null>
+  // Caminho no disco de um arquivo solto de fora do app (Explorer do Windows); '' se ele não vier do disco.
+  pathForFile(file: File): string
   reportLongTask(ms: number): void
   // Versão nova já baixada (null se não há); instalar fecha o app como no "Sair" e reabre atualizado.
   pendingUpdate(): Promise<string | null>

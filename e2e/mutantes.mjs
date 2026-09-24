@@ -155,6 +155,30 @@ const MUTANTS = [
     bug: 'status do git ignora o aviso do watcher e só atualiza no polling',
     find: "if (changedProject !== projectId || !change.git) return",
     replace: 'return'
+  },
+  {
+    id: 'M47',
+    grep: 'R47 ',
+    file: 'src/renderer/src/components/TerminalView.tsx',
+    bug: 'terminal só aceita arrasto vindo do explorador do Kora',
+    find: "if (!e.dataTransfer.types.includes(FILE_MIME) && !e.dataTransfer.types.includes('Files')) return",
+    replace: 'if (!e.dataTransfer.types.includes(FILE_MIME)) return'
+  },
+  {
+    id: 'M47b',
+    grep: 'R47 ',
+    file: 'src/preload/index.ts',
+    bug: 'arquivo do sistema chega sem caminho (File.path não existe mais no Electron)',
+    find: 'pathForFile: (file) => webUtils.getPathForFile(file),',
+    replace: "pathForFile: (file) => (file as unknown as { path?: string }).path ?? '',"
+  },
+  {
+    id: 'M47c',
+    grep: 'R47 ',
+    file: 'src/renderer/src/components/TerminalView.tsx',
+    bug: 'caminho com espaço colado sem aspas',
+    find: 'paths.filter(Boolean).map((path) => (path.includes(\' \') ? `"${path}"` : path))',
+    replace: 'paths.filter(Boolean)'
   }
 ]
 

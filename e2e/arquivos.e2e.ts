@@ -496,3 +496,44 @@ test('R46 explorador sem trocar de aba: .gitignore editado por fora deixa o item
     await expect(tracked).toHaveCount(letter, { timeout: 1500 })
   }
 })
+
+test('R47 arquivos soltos do Explorer do Windows no terminal viram caminhos colados (imagem e qualquer outro, com aspas se tiver espaço)', async ({ kora }) => {
+  const env = kora.env()
+  const outside = join(env.root, 'fora do projeto')
+  mkdirSync(outside)
+  const image = join(outside, 'print da tela.png')
+  const doc = join(env.root, 'contrato.pdf')
+  writeFileSync(image, pngBytes())
+  writeFileSync(doc, pdfBytes())
+  const run = await kora.launch(env)
+  const page = run.page
+
+  await newTab(page, 'Claude')
+  await waitFor(() => starts(env, 'claude')[0], 'claude falso subiu')
+  // Arrasto do sistema não é simulável pelo Playwright; um <input type=file> entrega File com caminho real no disco,
+  // o mesmo tipo de objeto que o Explorer do Windows entrega no drop.
+  await page.evaluate(() => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.multiple = true
+    input.id = 'arquivos-do-sistema'
+    input.style.display = 'none'
+    document.body.append(input)
+  })
+  await page.locator('#arquivos-do-sistema').setInputFiles([image, doc])
+  const dropTarget = ui.terminal(page)
+  const accepted = await dropTarget.evaluate((el) => {
+    const input = document.getElementById('arquivos-do-sistema') as HTMLInputElement
+    const data = new DataTransfer()
+    for (const file of input.files!) data.items.add(file)
+    const over = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: data })
+    el.dispatchEvent(over)
+    el.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data }))
+    return over.defaultPrevented
+  })
+  expect(accepted, 'o terminal aceita o arrasto de arquivos do sistema').toBe(true)
+  await ui.terminal(page).click()
+  await page.keyboard.press('Enter')
+  const line = await waitFor(() => readLog(env).find((e) => e.event === 'input'), 'claude falso recebeu a linha')
+  expect(line.line?.trim()).toBe(`"${image}" ${doc}`)
+})
