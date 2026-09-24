@@ -1,5 +1,6 @@
 import {
   ArrowDown,
+  Bell,
   ArrowUp,
   Check,
   ListPlus,
@@ -129,7 +130,8 @@ const PROVISIONAL = {
   alerta: TriangleAlert,
   worktree: FolderGit2,
   arrastar: GripVertical,
-  engrenagem: Settings
+  engrenagem: Settings,
+  sino: Bell
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof BRAND | keyof typeof PROVISIONAL

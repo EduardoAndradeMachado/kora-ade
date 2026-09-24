@@ -54,6 +54,12 @@ onLines(
     }
     if (line.trim() === 'trabalhe') writeStatus('busy')
     if (line.trim() === 'pare') writeStatus('idle')
+    // "trabalhe 5": fica ocupado 5 s e para sozinho, como um turno que termina enquanto você está em outra aba.
+    const timed = /^trabalhe (\d+)$/.exec(line.trim())
+    if (timed) {
+      writeStatus('busy')
+      setTimeout(() => writeStatus('idle'), Number(timed[1]) * 1000)
+    }
     turns++
     setTitle(`FakeClaude ${short} turno ${turns}`)
     process.stdout.write(`eco: ${line}\r\n> `)

@@ -21,6 +21,9 @@ import { Button } from '@/brand/Button'
 import { SymbolMark } from '@/brand/Logo'
 import { OrphanDialog, type OrphanSurvivor } from '@/components/OrphanDialog'
 import { SettingsDialog } from '@/components/SettingsDialog'
+import { playChime } from '@/lib/chime'
+import { finishedUnseen } from '@/lib/alerts'
+import { agentLabel } from '@/components/AgentIcon'
 import type { UpdateStatus } from '@shared/update'
 
 // O Monaco pesa vários MB e a primeira abertura levava ~1,6 s; fora do caminho do boot, mas pré-carregado
@@ -174,14 +177,12 @@ export function App(): React.JSX.Element {
     })
     const offExit = window.kora.onTerminalExit((id) => {
       terminalBus.forget(id)
-      patchTerminal(id, { live: false, activity: null })
+      patchTerminal(id, { live: false, activity: null, alert: false })
     })
     const offAgent = window.kora.onTabAgent((id, agent) => patchTerminal(id, { agent }))
-    const offActivity = window.kora.onTabActivity((id, activity) => patchTerminal(id, { activity }))
     return () => {
       offExit()
       offAgent()
-      offActivity()
     }
   }, [patchTerminal])
 
@@ -296,6 +297,65 @@ export function App(): React.JSX.Element {
     if (!installed) setInstalling(false)
     return installed
   }
+
+  // Aviso de sessão parada: guarda quando cada aba começou a trabalhar e, quando ela para sem você estar olhando,
+  // marca a aba como não vista, toca a corda e (com a janela sem foco) manda a notificação do Windows.
+  const workingSince = useRef(new Map<string, number>())
+  const viewRef = useRef({ selectedId, activeTab })
+  viewRef.current = { selectedId, activeTab }
+  const stateRef = useRef(state)
+  stateRef.current = state
+
+  const notifyFinished = useCallback((projectId: string, tab: Extract<Tab, { kind: 'terminal' }>) => {
+    const alerts = stateRef.current?.settings.alerts
+    if (alerts?.sound) playChime()
+    if (!alerts?.windowsNotification || document.hasFocus() || !tab.agent) return
+    const project = stateRef.current?.projects.find((p) => p.id === projectId)
+    const notification = new Notification(`${agentLabel(tab.agent.kind)} está esperando você`, {
+      body: project ? `${project.name} · ${tab.title}` : tab.title,
+      silent: true
+    })
+    notification.onclick = () => {
+      window.kora.focusWindow()
+      setSelectedId(projectId)
+      setActiveTab((prev) => ({ ...prev, [projectId]: tab.id }))
+    }
+  }, [])
+
+  useEffect(
+    () =>
+      window.kora.onTabActivity((id, activity) => {
+        const found = Object.entries(tabsRef.current)
+          .flatMap(([projectId, list]) => list.map((tab) => ({ projectId, tab })))
+          .find((f) => f.tab.id === id)
+        const now = Date.now()
+        const since = workingSince.current.get(id) ?? null
+        if (activity === 'working') {
+          if (since === null) workingSince.current.set(id, now)
+        } else {
+          workingSince.current.delete(id)
+        }
+        if (!found || found.tab.kind !== 'terminal') return patchTerminal(id, { activity })
+        const { selectedId: shownProject, activeTab: shownTabs } = viewRef.current
+        const watching = document.hasFocus() && shownProject === found.projectId && shownTabs[found.projectId] === id
+        const alert = finishedUnseen({ previous: found.tab.activity, next: activity, workingSince: since, now, watching })
+        patchTerminal(id, alert ? { activity, alert: true } : activity === 'working' ? { activity, alert: false } : { activity })
+        if (alert) notifyFinished(found.projectId, found.tab)
+      }),
+    [patchTerminal, notifyFinished]
+  )
+
+  // A aba com aviso que aparece na tela, com a janela em foco, conta como vista.
+  useEffect(() => {
+    const clearShown = (): void => {
+      if (!document.hasFocus() || !selectedId) return
+      const shown = (tabsRef.current[selectedId] ?? []).find((t) => t.id === activeTab[selectedId])
+      if (shown?.kind === 'terminal' && shown.alert) patchTerminal(shown.id, { alert: false })
+    }
+    clearShown()
+    window.addEventListener('focus', clearShown)
+    return () => window.removeEventListener('focus', clearShown)
+  }, [selectedId, activeTab, patchTerminal])
 
   const toggleRightPanel = (): void => {
     setRightPanelOpen((open) => {
@@ -863,6 +923,9 @@ export function App(): React.JSX.Element {
           onCheck={() => void window.kora.checkUpdate()}
           onInstall={() => void installUpdate()}
           onClose={closeSettings}
+          alerts={state.settings.alerts}
+          onAlertsChange={(alerts) => void window.kora.setAlerts(alerts).then(setState)}
+          onPreviewSound={playChime}
         />
       )}
 

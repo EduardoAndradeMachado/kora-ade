@@ -33,12 +33,40 @@
     transform: rotate(360deg);
   }
 }
+/* Aviso de sessão parada: o símbolo balança uma vez, pendurado pelo topo do braço, como corda tocada. */
+@keyframes kora-balanca {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  10% {
+    transform: rotate(16deg);
+  }
+  25% {
+    transform: rotate(-12deg);
+  }
+  40% {
+    transform: rotate(8deg);
+  }
+  55% {
+    transform: rotate(-4deg);
+  }
+  70% {
+    transform: rotate(2deg);
+  }
+}
+.kora-balanca {
+  transform-origin: 50% 8%;
+  animation: kora-balanca 1.4s ease-in-out 1;
+}
+
 .kora-spin {
   animation: kora-orbit 1.2s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .kora-orbit,
-  .kora-spin {
+  .kora-spin,
+  .kora-balanca {
     animation: none;
   }
 }

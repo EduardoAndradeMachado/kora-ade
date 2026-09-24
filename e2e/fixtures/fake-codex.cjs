@@ -62,6 +62,12 @@ onLines(
     }
     if (line.trim() === 'trabalhe') turnEvent('task_started')
     if (line.trim() === 'pare') turnEvent('task_complete')
+    // "trabalhe 5": turno de 5 s que termina sozinho, como um turno que acaba enquanto você está em outra aba.
+    const timed = /^trabalhe (\d+)$/.exec(line.trim())
+    if (timed) {
+      turnEvent('task_started')
+      setTimeout(() => turnEvent('task_complete'), Number(timed[1]) * 1000)
+    }
     process.stdout.write(`eco: ${line}\r\n> `)
   },
   () => log('codex', 'stdin-end', { threadId })

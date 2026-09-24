@@ -34,12 +34,32 @@ describe('zoom da interface, texto do terminal e texto dos arquivos', () => {
       file,
       JSON.stringify({ version: 2, projects: [], tabs: [], settings: { theme: 'dark', zoom: 9, terminalFontSize: 3, fileFontSize: 99 } })
     )
-    expect(loadState(file).settings).toEqual({ theme: 'dark', zoom: 1, terminalFontSize: 14, fileFontSize: 13 })
+    expect(loadState(file).settings).toEqual({
+      theme: 'dark',
+      zoom: 1,
+      terminalFontSize: 14,
+      fileFontSize: 13,
+      alerts: { sound: true, windowsNotification: true }
+    })
   })
 
   it('estado salvo antes do texto dos arquivos existir abre com o padrão dele, sem perder os outros tamanhos', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'kora-settings-')), 'kora-state.json')
     writeFileSync(file, JSON.stringify({ version: 2, projects: [], tabs: [], settings: { theme: 'light', zoom: 1.2, terminalFontSize: 16 } }))
-    expect(loadState(file).settings).toEqual({ theme: 'light', zoom: 1.2, terminalFontSize: 16, fileFontSize: 13 })
+    expect(loadState(file).settings).toEqual({
+      theme: 'light',
+      zoom: 1.2,
+      terminalFontSize: 16,
+      fileFontSize: 13,
+      alerts: { sound: true, windowsNotification: true }
+    })
+  })
+
+  it('chaves dos avisos ficam salvas; valor estragado no arquivo volta a ligado', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'kora-settings-')), 'kora-state.json')
+    saveState(file, { ...emptyState(), settings: { ...emptyState().settings, alerts: { sound: false, windowsNotification: true } } })
+    expect(loadState(file).settings.alerts).toEqual({ sound: false, windowsNotification: true })
+    writeFileSync(file, JSON.stringify({ version: 2, projects: [], tabs: [], settings: { alerts: { sound: 'sim' } } }))
+    expect(loadState(file).settings.alerts).toEqual({ sound: true, windowsNotification: true })
   })
 })

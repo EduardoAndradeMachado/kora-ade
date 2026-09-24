@@ -353,3 +353,122 @@ test('R52 claude digitado à mão numa aba Terminal é vinculado em até 5 s (wa
   const start = await waitFor(() => starts(env, 'claude')[0], 'claude falso iniciado pelo usuário')
   await waitFor(() => readState(env).tabs.find((t) => t.agent?.sessionId === start.sessionId), 'sessão vinculada pelo watch', 5000)
 })
+
+// Espiões no lugar do alto-falante e da notificação do Windows; o foco da janela fica sob controle do teste.
+async function installAlertSpies(page: import('@playwright/test').Page) {
+  await page.evaluate(() => {
+    const g = window as unknown as { __chimes: number; __notifications: { title: string; body?: string }[]; __last?: { onclick: (() => void) | null }; __focused: boolean }
+    g.__chimes = 0
+    g.__notifications = []
+    g.__focused = true
+    const Audio = window.AudioContext
+    window.AudioContext = class extends Audio {
+      override createBufferSource(): AudioBufferSourceNode {
+        g.__chimes++
+        return super.createBufferSource()
+      }
+    }
+    window.Notification = class {
+      onclick: (() => void) | null = null
+      constructor(title: string, options?: NotificationOptions) {
+        g.__notifications.push({ title, body: options?.body })
+        g.__last = this
+      }
+    } as unknown as typeof Notification
+    document.hasFocus = () => g.__focused
+  })
+  const spy = () =>
+    page.evaluate(() => {
+      const g = window as unknown as { __chimes: number; __notifications: { title: string; body?: string }[] }
+      return { chimes: g.__chimes, notifications: g.__notifications }
+    })
+  const setFocused = (focused: boolean) =>
+    page.evaluate((f) => {
+      ;(window as unknown as { __focused: boolean }).__focused = f
+      if (f) window.dispatchEvent(new Event('focus'))
+    }, focused)
+  return { spy, setFocused }
+}
+
+test('R56 sessão que para sem você olhar: símbolo e sino na aba, som da corda e notificação do Windows; nada para a aba vista; som desliga nas Configurações', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  const { spy, setFocused } = await installAlertSpies(page)
+  const claudeAlert = ui.barTab(page, /Claude/).locator('[data-alert]')
+  const claudeBell = ui.barTab(page, /Claude/).locator('svg.lucide-bell')
+
+  await openClaude(run, env)
+  await newTab(page, 'Terminal')
+  const workThenLeave = async (seconds: number): Promise<void> => {
+    await ui.sideTab(page, /Claude/).click()
+    await typeLine(page, `trabalhe ${seconds}`)
+    await expect(ui.barTab(page, /Claude/).locator('[data-activity]')).toHaveAttribute('data-activity', 'working', { timeout: 5000 })
+    await ui.sideTab(page, 'Terminal').click()
+  }
+
+  await workThenLeave(4)
+  await expect(claudeAlert).toHaveCount(1, { timeout: 10_000 })
+  await expect(claudeBell).toHaveCount(1)
+  await expect(ui.sideTab(page, /Claude/).locator('[data-alert]')).toHaveCount(1)
+  expect(await spy()).toEqual({ chimes: 1, notifications: [] })
+
+  await ui.sideTab(page, /Claude/).click()
+  await expect(claudeAlert, 'abrir a aba conta como vista').toHaveCount(0)
+  await expect(claudeBell).toHaveCount(0)
+
+  await workThenLeave(4)
+  await setFocused(false)
+  await expect(claudeAlert).toHaveCount(1, { timeout: 10_000 })
+  const { chimes, notifications } = await spy()
+  expect(chimes).toBe(2)
+  expect(notifications).toEqual([{ title: 'Claude está esperando você', body: expect.stringContaining('proj-teste') }])
+  await page.evaluate(() => (window as unknown as { __last: { onclick: () => void } }).__last.onclick())
+  await expect(ui.barTab(page, /Claude/)).toHaveClass(/bg-secondary(?!\/)/)
+  await expect(claudeAlert, 'sem foco, a aba na tela ainda não foi vista').toHaveCount(1)
+  await setFocused(true)
+  await expect(claudeAlert).toHaveCount(0)
+
+  await typeLine(page, 'trabalhe 4')
+  await expect(ui.barTab(page, /Claude/).locator('[data-activity]')).toHaveAttribute('data-activity', 'working', { timeout: 5000 })
+  await expect(ui.barTab(page, /Claude/).locator('[data-activity]')).toHaveAttribute('data-activity', 'waiting', { timeout: 10_000 })
+  await page.waitForTimeout(500)
+  await expect(claudeAlert, 'a aba que você está olhando não avisa').toHaveCount(0)
+  expect((await spy()).chimes).toBe(2)
+
+  await page.getByTitle('Configurações').click()
+  const sound = page.getByRole('switch', { name: 'Som quando uma sessão para' })
+  await expect(sound).toHaveAttribute('aria-checked', 'true')
+  await sound.click()
+  await expect(sound).toHaveAttribute('aria-checked', 'false')
+  await waitFor(() => readState(env).settings?.alerts?.sound === false, 'som desligado salvo')
+  await page.keyboard.press('Escape')
+
+  await workThenLeave(4)
+  await expect(claudeAlert).toHaveCount(1, { timeout: 10_000 })
+  expect((await spy()).chimes, 'som desligado não toca, o aviso visual continua').toBe(2)
+})
+
+test('R57 aviso de sessão parada também no Codex: símbolo e sino na aba e som da corda; abrir a aba limpa', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  const { spy } = await installAlertSpies(page)
+  const codexAlert = ui.barTab(page, /Codex/).locator('[data-alert]')
+
+  await newTab(page, 'Codex')
+  await waitFor(() => starts(env, 'codex')[0], 'codex falso subiu')
+  await newTab(page, 'Terminal')
+  await ui.sideTab(page, /Codex/).click()
+  await typeLine(page, 'trabalhe 4')
+  await expect(ui.barTab(page, /Codex/).locator('[data-activity]')).toHaveAttribute('data-activity', 'working', { timeout: 5000 })
+  await ui.sideTab(page, 'Terminal').click()
+
+  await expect(codexAlert).toHaveCount(1, { timeout: 10_000 })
+  await expect(ui.barTab(page, /Codex/).locator('svg.lucide-bell')).toHaveCount(1)
+  await expect(ui.sideTab(page, /Codex/).locator('[data-alert]')).toHaveCount(1)
+  expect(await spy()).toEqual({ chimes: 1, notifications: [] })
+
+  await ui.sideTab(page, /Codex/).click()
+  await expect(codexAlert).toHaveCount(0)
+})

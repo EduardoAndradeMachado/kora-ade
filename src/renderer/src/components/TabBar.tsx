@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { hintClass, useReorderDrag } from '@/lib/drag'
 import type { Place } from '@shared/arrange'
 import { Icon, type IconName } from '@/brand/icons'
+import { SymbolCropped } from '@/brand/Logo'
 
 export type Tab =
   | {
@@ -17,6 +18,8 @@ export type Tab =
       live: boolean
       agent: AgentSession | null
       activity?: AgentActivity | null
+      // Parou de trabalhar e você ainda não abriu a aba: símbolo do Kora no lugar do ícone e sininho no título.
+      alert?: boolean
     }
   | {
       kind: 'file'
@@ -48,6 +51,18 @@ export function TabIcon({ tab, className }: { tab: Tab; className?: string }): R
   if (tab.agent) {
     const icon = <AgentIcon kind={tab.agent.kind} className={cn('size-3.5', dim, className)} />
     const activity = tab.live ? tab.activity : null
+    if (tab.live && tab.alert) {
+      return (
+        <span
+          data-activity="waiting"
+          data-alert
+          title={`${agentLabel(tab.agent.kind)} parou e está esperando você`}
+          className="relative inline-flex size-3.5 shrink-0 items-center justify-center overflow-visible"
+        >
+          <SymbolCropped height={18} className="kora-balanca" />
+        </span>
+      )
+    }
     if (!activity) return icon
     return (
       <span
@@ -77,6 +92,11 @@ function WaitingDot(): React.JSX.Element {
   return (
     <span className="pointer-events-none absolute -right-[3px] -top-[3px] size-[7px] rounded-full bg-[var(--brand-amber)] ring-[1.5px] ring-background" />
   )
+}
+
+export function AlertBell({ tab }: { tab: Tab }): React.JSX.Element | null {
+  if (tab.kind !== 'terminal' || !tab.live || !tab.alert) return null
+  return <Icon name="sino" className="size-3.5 shrink-0 text-[var(--brand-amber)]" />
 }
 
 interface Props {
@@ -139,6 +159,7 @@ export function TabBar(props: Props): React.JSX.Element {
               onCommit={(title) => props.onRename(tab.id, title)}
               editRequest={props.renameRequest?.tabId === tab.id ? props.renameRequest.n : undefined}
             />
+            <AlertBell tab={tab} />
             <button
               type="button"
               title="Fechar aba"

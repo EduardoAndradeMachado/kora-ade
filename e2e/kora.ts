@@ -51,7 +51,7 @@ export interface SavedState {
     titleLocked: boolean
     agent: { kind: 'claude' | 'codex'; sessionId: string; name?: string } | null
   }[]
-  settings?: { theme?: string; zoom?: number; terminalFontSize?: number; fileFontSize?: number }
+  settings?: { theme?: string; zoom?: number; terminalFontSize?: number; fileFontSize?: number; alerts?: { sound: boolean; windowsNotification: boolean } }
 }
 
 const cmdShim = (script: string): string => `@echo off\r\n"${process.execPath}" "${join(FIXTURES, script)}" %*\r\n`

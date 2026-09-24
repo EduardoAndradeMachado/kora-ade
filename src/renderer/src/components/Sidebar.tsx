@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { GROUP_NAME_MAX, type Project, type ProjectGroup, type ThemePreference } from '@shared/state'
 import { childrenOf, depthOf, descendantIds, drawOrder } from '@shared/groups'
-import { isDormant, TabIcon, type RenameRequest, type Tab } from '@/components/TabBar'
+import { AlertBell, isDormant, TabIcon, type RenameRequest, type Tab } from '@/components/TabBar'
 import { NewTabMenu, type NewTabChoice } from '@/components/NewTabMenu'
 import { EditableTitle } from '@/components/EditableTitle'
 import { ContextMenu, type MenuItem } from '@/components/ContextMenu'
@@ -505,6 +505,7 @@ function SideTabs(props: SideTabsProps): React.JSX.Element {
               onCommit={(title) => props.onRename(tab.id, title)}
               editRequest={props.renameRequest?.tabId === tab.id ? props.renameRequest.n : undefined}
             />
+            <AlertBell tab={tab} />
             <button
               type="button"
               title="Fechar aba"

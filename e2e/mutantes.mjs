@@ -359,6 +359,48 @@ const MUTANTS = [
     bug: 'soltar arquivo do sistema na pasta não copia nada',
     find: 'else void importFrom(e.dataTransfer.files, dir)',
     replace: 'else {}'
+  },
+  {
+    id: 'M56',
+    grep: 'R56 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'avisa até a aba que você está olhando',
+    find: 'const watching = document.hasFocus() && shownProject === found.projectId && shownTabs[found.projectId] === id',
+    replace: 'const watching = false'
+  },
+  {
+    id: 'M56b',
+    grep: 'R56 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'chave do som nas Configurações não desliga o som',
+    find: 'if (alerts?.sound) playChime()',
+    replace: 'playChime()'
+  },
+  {
+    id: 'M56c',
+    grep: 'R5[67] ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'abrir a aba não limpa o aviso',
+    find: "if (shown?.kind === 'terminal' && shown.alert) patchTerminal(shown.id, { alert: false })",
+    replace: 'void shown',
+    expect: { 'R56 ': 'failed', 'R57 ': 'failed' }
+  },
+  {
+    id: 'M56d',
+    grep: 'R56 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'notificação do Windows sai mesmo com a janela em foco',
+    find: 'if (!alerts?.windowsNotification || document.hasFocus() || !tab.agent) return',
+    replace: 'if (!alerts?.windowsNotification || !tab.agent) return'
+  },
+  {
+    id: 'M57',
+    grep: 'R5[67] ',
+    file: 'src/renderer/src/components/TabBar.tsx',
+    bug: 'aba com aviso não mostra o símbolo do Kora',
+    find: 'if (tab.live && tab.alert) {',
+    replace: 'if (false) {',
+    expect: { 'R56 ': 'failed', 'R57 ': 'failed' }
   }
 ]
 

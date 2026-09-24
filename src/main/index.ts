@@ -36,7 +36,7 @@ import {
 } from './git'
 import { KORA_FILE_PRIVILEGED_SCHEMES, registerKoraFileProtocol } from './file-protocol'
 import { fileHolders, listProcesses, withCreationTime } from './processes'
-import { FILE_FONT, ProjectGroupSchema, TERMINAL_FONT, ThemePreferenceSchema, ZOOM, type KoraState } from '../shared/state'
+import { AlertsSchema, FILE_FONT, ProjectGroupSchema, TERMINAL_FONT, ThemePreferenceSchema, ZOOM, type KoraState } from '../shared/state'
 import { z } from 'zod'
 import { AgentSessionSchema, type AgentActivity, type AgentSession, type Startup } from '../shared/agent'
 import type { CloseKind, CreateResult, Launch, SaveResult, TabRef } from '../shared/ipc'
@@ -410,6 +410,10 @@ function registerIpc(): void {
       }
     }
   )
+  ipcMain.handle('settings:alerts', (_e, alerts: unknown) =>
+    commit({ ...state, settings: { ...state.settings, alerts: AlertsSchema.parse(alerts) } })
+  )
+  ipcMain.on('window:focus', () => showWindow())
   ipcMain.on('window:dark', (_e, dark: unknown) => {
     rendererDark = dark === true
     mainWindow?.setTitleBarOverlay(titleBarOverlay())

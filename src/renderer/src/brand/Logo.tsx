@@ -55,6 +55,17 @@ export function SymbolMark({
   )
 }
 
+// Símbolo mínimo recortado como o SVG oficial (docs/identidade-visual/svg/simbolo/simbolo-minimo-*): sem a
+// margem do quadro 100x100, ocupa a altura inteira. Usado pequeno, no lugar de um ícone (ex.: aviso na aba).
+export function SymbolCropped({ height, className }: { height: number; className?: string }): React.JSX.Element {
+  return (
+    <svg viewBox="14.5 -3.5 71 97" height={height} width={(height * 71) / 97} aria-hidden="true" className={cn('shrink-0', className)}>
+      <circle cx="50" cy="58" r="27" fill="none" stroke="var(--brand-body)" strokeWidth="15" />
+      <line x1="50" y1="5" x2="50" y2="61.25" stroke="var(--brand-line)" strokeWidth="13" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 // Logotipo desenhado (sem fonte): o "o" é o anel atravessado pelo braço.
 export function Wordmark({ height, plainO = false }: { height: number; plainO?: boolean }): React.JSX.Element {
   return (

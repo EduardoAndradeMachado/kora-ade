@@ -1,4 +1,4 @@
-import type { KoraState, ProjectGroup, ThemePreference } from './state'
+import type { Alerts, KoraState, ProjectGroup, ThemePreference } from './state'
 import type { AgentActivity, AgentSession } from './agent'
 import type { GitBranch, GitStatus, GitWorktree } from './git-types'
 import type { AgentUsage } from './usage-types'
@@ -58,6 +58,9 @@ export interface KoraApi {
   getState(): Promise<KoraState>
   setTheme(theme: ThemePreference): Promise<KoraState>
   setSizes(sizes: { zoom?: number; terminalFontSize?: number; fileFontSize?: number }): Promise<KoraState>
+  setAlerts(alerts: Alerts): Promise<KoraState>
+  // Traz a janela para a frente (clique na notificação do Windows).
+  focusWindow(): void
   addProject(): Promise<KoraState>
   addProjectPath(path: string): Promise<KoraState>
   removeProject(id: string): Promise<KoraState>

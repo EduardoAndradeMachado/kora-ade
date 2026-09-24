@@ -46,6 +46,15 @@ export function stepValue(current: number, direction: 1 | -1 | 0, range: typeof 
   return Math.min(range.max, Math.max(range.min, next))
 }
 
+// Aviso quando uma sessão para e fica esperando você: som e notificação do Windows, cada um com a sua chave.
+const AlertsSchema = z.object({
+  sound: z.boolean().catch(true).default(true),
+  windowsNotification: z.boolean().catch(true).default(true)
+})
+export type Alerts = z.infer<typeof AlertsSchema>
+export { AlertsSchema }
+const defaultAlerts = (): Alerts => ({ sound: true, windowsNotification: true })
+
 const SettingsSchema = z.object({
   theme: ThemePreferenceSchema.default('system'),
   zoom: z.number().min(ZOOM.min).max(ZOOM.max).catch(ZOOM.default).default(ZOOM.default),
@@ -56,14 +65,16 @@ const SettingsSchema = z.object({
     .max(TERMINAL_FONT.max)
     .catch(TERMINAL_FONT.default)
     .default(TERMINAL_FONT.default),
-  fileFontSize: z.number().int().min(FILE_FONT.min).max(FILE_FONT.max).catch(FILE_FONT.default).default(FILE_FONT.default)
+  fileFontSize: z.number().int().min(FILE_FONT.min).max(FILE_FONT.max).catch(FILE_FONT.default).default(FILE_FONT.default),
+  alerts: AlertsSchema.catch(defaultAlerts).default(defaultAlerts)
 })
 export type Settings = z.infer<typeof SettingsSchema>
 const defaultSettings = (): Settings => ({
   theme: 'system',
   zoom: ZOOM.default,
   terminalFontSize: TERMINAL_FONT.default,
-  fileFontSize: FILE_FONT.default
+  fileFontSize: FILE_FONT.default,
+  alerts: defaultAlerts()
 })
 
 const StateV1Schema = z.object({
