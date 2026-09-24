@@ -409,6 +409,14 @@ const MUTANTS = [
     bug: 'sino não mexe o símbolo da tela vazia',
     find: '    setRings((n) => n + 1)\n',
     replace: ''
+  },
+  {
+    id: 'M58b',
+    grep: 'R58 ',
+    file: 'src/renderer/src/brand/tokens.css',
+    bug: 'classe do balanço aplicada, mas sem animação no CSS (o símbolo não se mexe)',
+    find: 'animation: kora-balanca 1.4s ease-in-out 1;',
+    replace: 'animation: none;'
   }
 ]
 

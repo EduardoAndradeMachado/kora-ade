@@ -501,4 +501,14 @@ test('R58 easter egg: sino tocando em outra sessão faz o símbolo da tela vazia
   await expect(emptySymbol).not.toHaveClass(/kora-balanca/)
 
   await expect(emptySymbol).toHaveClass(/kora-balanca/, { timeout: 15_000 })
+  // A classe sozinha passaria com o CSS da animação quebrado: o símbolo tem que estar de fato girando.
+  const motion = () =>
+    emptySymbol.evaluate((el) => ({
+      running: el.getAnimations().some((a) => (a as CSSAnimation).animationName === 'kora-balanca' && a.playState === 'running'),
+      transform: getComputedStyle(el).transform
+    }))
+  const first = await motion()
+  expect(first.running, 'animação kora-balanca rodando no símbolo').toBe(true)
+  await page.waitForTimeout(150)
+  expect((await motion()).transform, 'o ângulo muda durante o balanço').not.toBe(first.transform)
 })
