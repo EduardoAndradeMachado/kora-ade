@@ -30,6 +30,27 @@ jobs:
           [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME, package.json $version"; exit 1; }
       - run: pnpm check
       - run: pnpm exec electron-vite build
+      # O electron-builder cria a Release em paralelo para cada arquivo e às vezes cria duas com a mesma tag
+      # (aconteceu na 0.1.1 e na 0.1.2): a "última" podia ficar só com o .blockmap e o atualizador recebia 404
+      # no latest.yml. Com um rascunho já criado, ele só envia os arquivos para ele.
+      - name: Cria a Release como rascunho
+        shell: bash
+        run: gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "${GITHUB_REF_NAME#v}" --notes ""
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: pnpm exec electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Confere uma Release só, com instalador, blockmap e latest.yml, e publica
+        shell: bash
+        run: |
+          count=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[] | select(.tag_name == \"$GITHUB_REF_NAME\")] | length")
+          [ "$count" = 1 ] || { echo "esperava 1 Release para $GITHUB_REF_NAME, achei $count"; exit 1; }
+          version="${GITHUB_REF_NAME#v}"
+          assets=" $(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | tr '\n' ' ')"
+          for file in "Kora-ADE-Setup-$version.exe" "Kora-ADE-Setup-$version.exe.blockmap" latest.yml; do
+            case "$assets" in *" $file "*) ;; *) echo "falta $file na Release (tem:$assets)"; exit 1 ;; esac
+          done
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
