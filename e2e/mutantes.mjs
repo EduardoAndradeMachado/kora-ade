@@ -466,7 +466,8 @@ const summary = []
 for (const m of MUTANTS.filter((x) => wanted.length === 0 || wanted.includes(x.id))) {
   const real = join(ROOT, m.file)
   const before = sha(real)
-  const source = readFileSync(real, 'utf8')
+  // Com core.autocrlf o arquivo pode estar com CRLF na pasta; os trechos dos mutantes são escritos com \n.
+  const source = readFileSync(real, 'utf8').replace(/\r\n/g, '\n')
   const hits = source.split(m.find).length - 1
   if (hits !== 1) {
     summary.push({ id: m.id, bug: m.bug, resultado: `NÃO APLICADO: trecho aparece ${hits}x em ${m.file}` })
