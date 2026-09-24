@@ -138,19 +138,6 @@ test('R27 link OSC 8 no terminal (o que o Claude imprime) abre no navegador sem 
   expect(await run.nativeDialogs()).toEqual([])
 })
 
-test('R36 versão nova baixada aparece na lateral com Atualizar agora; sem versão pronta, o clique não fecha o app', async ({ kora }) => {
-  const run = await kora.launch(kora.env())
-  const page = run.page
-  await expect(page.getByRole('status').filter({ hasText: 'pronta' })).toHaveCount(0)
-  await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.send('update:ready', '9.9.9'))
-  const banner = page.getByRole('status').filter({ hasText: 'Versão 9.9.9 pronta' })
-  await expect(banner).toBeVisible()
-  // Fora do app instalado não há atualizador: o main responde que não instalou e o botão volta.
-  await banner.getByRole('button', { name: 'Atualizar agora' }).click()
-  await expect(banner.getByRole('button', { name: 'Atualizar agora' })).toBeEnabled()
-  expect(isAlive(run.pid)).toBe(true)
-})
-
 // Longo de propósito (KORA_E2E_SOAK_MIN=10, por exemplo): fica fora da suíte normal.
 const SOAK_MIN = Number(process.env['KORA_E2E_SOAK_MIN'] ?? 0)
 test('Memória em uso contínuo: terminais com saída sem parar, troca de abas, editor e painéis', async ({ kora }, testInfo) => {
@@ -321,4 +308,91 @@ test('R49 Sair com arquivo não salvo pergunta antes de encerrar: Descartar ence
   await dialog.getByRole('button', { name: 'Descartar alterações' }).click()
   await expect.poll(() => isAlive(run.pid), { timeout: 15_000 }).toBe(false)
   expect(readFileSync(join(env.project, 'notas.txt'), 'utf8')).toBe('antes\n')
+})
+
+const sendUpdateStatus = (run: KoraRun, status: Record<string, unknown>) =>
+  run.app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0]!.webContents.send('update:status', s), status)
+
+// Fora do app instalado não há atualizador; o espião conta os pedidos de instalar e buscar que chegam ao main.
+const spyUpdateIpc = (run: KoraRun) =>
+  run.app.evaluate(({ ipcMain }) => {
+    const g = globalThis as unknown as { __updateCalls: string[] }
+    g.__updateCalls = []
+    ipcMain.removeHandler('update:install')
+    ipcMain.handle('update:install', () => {
+      g.__updateCalls.push('install')
+      return false
+    })
+    ipcMain.removeHandler('update:check')
+    ipcMain.handle('update:check', () => {
+      g.__updateCalls.push('check')
+    })
+  })
+const updateCalls = (run: KoraRun) => run.app.evaluate(() => (globalThis as unknown as { __updateCalls: string[] }).__updateCalls)
+
+test('R50 engrenagem abre Configurações com logo, versão e estado da atualização; buscar e atualizar chegam ao main', async ({ kora }) => {
+  const run = await kora.launch(kora.env())
+  const page = run.page
+  await spyUpdateIpc(run)
+  const version = await run.app.evaluate(({ app }) => app.getVersion())
+
+  await page.getByTitle('Configurações').click()
+  const dialog = page.getByRole('dialog', { name: 'Configurações' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByLabel('kora')).toBeVisible()
+  await expect(dialog).toContainText(`Versão ${version}`)
+  await expect(dialog).toContainText('só funciona no app instalado')
+  await expect(dialog.getByRole('button', { name: 'Buscar atualização' })).toBeDisabled()
+
+  await sendUpdateStatus(run, { state: 'current', checkedAt: Date.now() })
+  await expect(dialog).toContainText('versão mais recente')
+  await dialog.getByRole('button', { name: 'Buscar atualização' }).click()
+  await expect.poll(() => updateCalls(run)).toEqual(['check'])
+
+  await sendUpdateStatus(run, { state: 'downloading', version: '9.9.9', percent: 42 })
+  await expect(dialog).toContainText('Baixando a versão 9.9.9… 42%')
+  await expect(dialog.getByRole('button', { name: 'Buscar atualização' })).toBeDisabled()
+
+  await sendUpdateStatus(run, { state: 'error', message: 'sem internet' })
+  await expect(dialog).toContainText('Não foi possível consultar: sem internet')
+  await dialog.getByRole('button', { name: 'Tentar de novo' }).click()
+  await expect.poll(() => updateCalls(run)).toEqual(['check', 'check'])
+
+  await sendUpdateStatus(run, { state: 'ready', version: '9.9.9' })
+  await dialog.getByRole('button', { name: 'Atualizar agora' }).click()
+  await expect.poll(() => updateCalls(run)).toEqual(['check', 'check', 'install'])
+  // O main respondeu que não instalou: o botão volta e o app segue aberto.
+  await expect(dialog.getByRole('button', { name: 'Atualizar agora' })).toBeEnabled()
+  expect(isAlive(run.pid)).toBe(true)
+
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+})
+
+test('R36 versão pronta aparece na lateral; com arquivo não salvo, Atualizar agora pergunta antes e Cancelar não instala', async ({ kora }) => {
+  const env = kora.env()
+  writeFileSync(join(env.project, 'notas.txt'), 'antes\n')
+  const run = await kora.launch(env)
+  const page = run.page
+  await spyUpdateIpc(run)
+  await expect(page.getByRole('status').filter({ hasText: 'pronta' })).toHaveCount(0)
+  await sendUpdateStatus(run, { state: 'ready', version: '9.9.9' })
+  const banner = page.getByRole('status').filter({ hasText: 'Versão 9.9.9 pronta' })
+  await expect(banner).toBeVisible()
+
+  await fileRow(run, 'notas.txt').click()
+  await editOpenFile(run, 'depois')
+  await banner.getByRole('button', { name: 'Atualizar agora' }).click()
+  const confirm = page.locator('[role=dialog]').filter({ hasText: 'antes de fechar?' })
+  await expect(confirm).toBeVisible()
+  await confirm.getByRole('button', { name: 'Cancelar' }).click()
+  await page.waitForTimeout(500)
+  expect(await updateCalls(run)).toEqual([])
+
+  await banner.getByRole('button', { name: 'Atualizar agora' }).click()
+  await confirm.getByRole('button', { name: 'Salvar e sair' }).click()
+  await expect.poll(() => updateCalls(run)).toEqual(['install'])
+  expect(readFileSync(join(env.project, 'notas.txt'), 'utf8')).toBe('antes\ndepois')
+  await expect(banner.getByRole('button', { name: 'Atualizar agora' })).toBeEnabled()
+  expect(isAlive(run.pid)).toBe(true)
 })

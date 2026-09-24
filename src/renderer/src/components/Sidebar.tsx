@@ -14,6 +14,7 @@ import { Icon, type IconName } from '@/brand/icons'
 import { Wordmark } from '@/brand/Logo'
 import { hintClass, mergeDragHandlers, mimeFor, useReorderDrag } from '@/lib/drag'
 import type { Place, ProjectDrop } from '@shared/arrange'
+import type { UpdateStatus } from '@shared/update'
 
 export type GroupAction =
   | { kind: 'create'; name: string; parentId: string | null }
@@ -51,6 +52,9 @@ interface Props {
   onZoom(step: 1 | -1 | 0): void
   onTerminalFont(step: 1 | -1 | 0): void
   onFileFont(step: 1 | -1 | 0): void
+  update: UpdateStatus
+  onInstallUpdate(): Promise<boolean>
+  onOpenSettings(): void
 }
 
 const THEMES: { theme: ThemePreference; label: string; icon: IconName }[] = [
@@ -394,30 +398,40 @@ export function Sidebar(props: Props): React.JSX.Element {
             <p className="px-2 py-1 text-[11px] text-muted-foreground">Arraste um projeto ou uma categoria para cá para tirá-los da lista principal.</p>
           ))}
       </nav>
-      <UpdateBanner />
+      <UpdateBanner update={props.update} onInstall={props.onInstallUpdate} />
       <div className="shrink-0 border-t px-2 pt-1.5">
         <UsageFooter />
       </div>
-      <div className="flex h-9 shrink-0 items-center justify-between px-2">
-        <button
-          type="button"
-          title="Tema"
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect()
-            setThemeMenu({ x: r.left, y: r.top - 8 - THEMES.length * 28 })
-          }}
-          className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
-        >
-          {(() => {
-            const current = THEMES.find((t) => t.theme === props.theme) ?? THEMES[0]!
-            return (
-              <>
-                <Icon name={current.icon} className="size-3.5" />
-                {current.label}
-              </>
-            )
-          })()}
-        </button>
+      <div className="flex h-9 shrink-0 items-center justify-between gap-1 px-2">
+        <div className="flex min-w-0 items-center gap-0.5">
+          <button
+            type="button"
+            title="Tema"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setThemeMenu({ x: r.left, y: r.top - 8 - THEMES.length * 28 })
+            }}
+            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            {(() => {
+              const current = THEMES.find((t) => t.theme === props.theme) ?? THEMES[0]!
+              return (
+                <>
+                  <Icon name={current.icon} className="size-3.5" />
+                  {current.label}
+                </>
+              )
+            })()}
+          </button>
+          <button
+            type="button"
+            title="Configurações"
+            onClick={props.onOpenSettings}
+            className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <Icon name="ajustes" className="size-3.5" />
+          </button>
+        </div>
         <SizeControl
           zoom={props.zoom}
           terminalFontSize={props.terminalFontSize}

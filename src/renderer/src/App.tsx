@@ -20,6 +20,8 @@ import { useRenameTabShortcut } from '@/lib/use-rename-tab-shortcut'
 import { Button } from '@/brand/Button'
 import { SymbolMark } from '@/brand/Logo'
 import { OrphanDialog, type OrphanSurvivor } from '@/components/OrphanDialog'
+import { SettingsDialog } from '@/components/SettingsDialog'
+import type { UpdateStatus } from '@shared/update'
 
 // O Monaco pesa vários MB e a primeira abertura levava ~1,6 s; fora do caminho do boot, mas pré-carregado
 // quando o app fica ocioso, para o primeiro clique num arquivo já encontrar o editor pronto.
@@ -99,6 +101,17 @@ export function App(): React.JSX.Element {
   const fileSavers = useRef(new Map<string, () => Promise<boolean>>())
   const [toast, setToast] = useState<string | null>(null)
   const [orphans, setOrphans] = useState<OrphanSurvivor[]>([])
+  const [update, setUpdate] = useState<UpdateStatus>({ state: 'idle' })
+  const [appVersion, setAppVersion] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [installing, setInstalling] = useState(false)
+  const closeSettings = useCallback(() => setSettingsOpen(false), [])
+
+  useEffect(() => {
+    window.kora.updateStatus().then(setUpdate, () => {})
+    window.kora.appVersion().then(setAppVersion, () => {})
+    return window.kora.onUpdateStatus(setUpdate)
+  }, [])
 
   useEffect(() => {
     window.kora.listOrphans().then(setOrphans, () => {})
@@ -271,6 +284,16 @@ export function App(): React.JSX.Element {
       offHidden()
     }
   }, [resolveUnsaved, closeFileTabs])
+
+  // Instalar fecha o app: arquivo não salvo passa pela mesma pergunta do Sair antes de o main assumir.
+  const installUpdate = async (): Promise<boolean> => {
+    if (!(await resolveUnsaved('quit'))) return false
+    window.kora.setUnsaved(false)
+    setInstalling(true)
+    const installed = await window.kora.installUpdate().catch(() => false)
+    if (!installed) setInstalling(false)
+    return installed
+  }
 
   const toggleRightPanel = (): void => {
     setRightPanelOpen((open) => {
@@ -676,6 +699,9 @@ export function App(): React.JSX.Element {
         onReorderTab={reorderTab}
         theme={state.settings.theme}
         onSetTheme={(theme) => void window.kora.setTheme(theme).then(setState)}
+        update={update}
+        onInstallUpdate={installUpdate}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
@@ -826,6 +852,17 @@ export function App(): React.JSX.Element {
           void window.kora.keepOrphans()
         }}
       />
+
+      {settingsOpen && (
+        <SettingsDialog
+          version={appVersion}
+          update={update}
+          installing={installing}
+          onCheck={() => void window.kora.checkUpdate()}
+          onInstall={() => void installUpdate()}
+          onClose={closeSettings}
+        />
+      )}
 
       {toast && (
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-md border bg-card px-3 py-1.5 text-xs font-medium shadow-lg">

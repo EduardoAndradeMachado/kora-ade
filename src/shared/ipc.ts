@@ -2,6 +2,7 @@ import type { KoraState, ProjectGroup, ThemePreference } from './state'
 import type { AgentSession } from './agent'
 import type { GitBranch, GitStatus, GitWorktree } from './git-types'
 import type { AgentUsage } from './usage-types'
+import type { UpdateStatus } from './update'
 
 export interface FileEntry {
   name: string
@@ -80,13 +81,14 @@ export interface KoraApi {
   // Caminho no disco de um arquivo solto de fora do app (Explorer do Windows); '' se ele não vier do disco.
   pathForFile(file: File): string
   reportLongTask(ms: number): void
-  // Versão nova já baixada (null se não há); instalar fecha o app como no "Sair" e reabre atualizado.
-  pendingUpdate(): Promise<string | null>
+  updateStatus(): Promise<UpdateStatus>
+  onUpdateStatus(listener: (status: UpdateStatus) => void): () => void
+  checkUpdate(): Promise<void>
+  // Só instala versão já baixada; fecha o app como no "Sair" e reabre atualizado. false se não instalou.
   installUpdate(): Promise<boolean>
   appVersion(): Promise<string>
   // Tema que a interface aplicou: os botões de janela (desenhados pelo Windows) pegam as mesmas cores.
   setWindowDark(dark: boolean): void
-  onUpdateReady(listener: (version: string) => void): () => void
   revealInExplorer(projectId: string, rel: string): Promise<void>
   trashEntry(projectId: string, rel: string): Promise<void>
   openInBrowser(projectId: string, rel: string): Promise<void>

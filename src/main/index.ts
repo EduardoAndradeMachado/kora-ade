@@ -20,6 +20,7 @@ import { ProjectWatchers } from './project-watcher'
 import { createLagMonitor } from './lag-monitor'
 import { autoUpdater } from 'electron-updater'
 import { startUpdates, type Updates } from './updater'
+import type { UpdateStatus } from '../shared/update'
 import { resolveTerminalLink } from './terminal-links'
 import {
   gitBranches,
@@ -361,7 +362,8 @@ function registerIpc(): void {
     rendererDark = dark === true
     mainWindow?.setTitleBarOverlay(titleBarOverlay())
   })
-  ipcMain.handle('update:pending', () => updates?.pending() ?? null)
+  ipcMain.handle('update:status', (): UpdateStatus => updates?.status() ?? { state: 'disabled' })
+  ipcMain.handle('update:check', () => updates?.check())
   ipcMain.handle('update:install', () => updates?.install() ?? false)
   ipcMain.handle('app:version', () => app.getVersion())
   ipcMain.handle('terminal:resolve-link', (_e, id: string, text: string) => resolveTerminalLink(projectRoot(id), String(text)))
@@ -584,7 +586,7 @@ void app.whenReady().then(() => {
     if (feed) autoUpdater.setFeedURL({ provider: 'generic', url: feed })
     updates = startUpdates({
       source: autoUpdater,
-      onReady: (version) => mainWindow?.webContents.send('update:ready', version),
+      onStatus: (status) => mainWindow?.webContents.send('update:status', status),
       beforeInstall: () => {
         quitting = true
         detectAgents()

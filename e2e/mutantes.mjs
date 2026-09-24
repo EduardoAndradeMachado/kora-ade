@@ -221,6 +221,47 @@ const MUTANTS = [
     find: "ipcMain.on('app:close-ack', () => clearTimeout(closeAckTimer))",
     replace: "ipcMain.on('app:close-ack', () => {})",
     expect: { 'R48 ': 'failed', 'R49 ': 'failed' }
+  },
+  {
+    id: 'M50',
+    grep: 'R50 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'engrenagem não abre as Configurações',
+    find: 'onOpenSettings={() => setSettingsOpen(true)}',
+    replace: 'onOpenSettings={() => {}}'
+  },
+  {
+    id: 'M50b',
+    grep: 'R50 ',
+    file: 'src/renderer/src/components/SettingsDialog.tsx',
+    bug: 'Buscar atualização não chega ao main',
+    find: 'onClick={props.onCheck}',
+    replace: 'onClick={() => {}}'
+  },
+  {
+    id: 'M50c',
+    grep: 'R(50|36) ',
+    file: 'src/preload/index.ts',
+    bug: 'interface não recebe as mudanças de estado da atualização',
+    find: "onUpdateStatus: (listener) => subscribe<[UpdateStatus]>('update:status', listener),",
+    replace: 'onUpdateStatus: () => () => {},',
+    expect: { 'R50 ': 'failed', 'R36 ': 'failed' }
+  },
+  {
+    id: 'M50d',
+    grep: 'R50 ',
+    file: 'src/main/index.ts',
+    bug: 'fora do app instalado a tela finge que pode buscar atualização',
+    find: "updates?.status() ?? { state: 'disabled' }",
+    replace: "updates?.status() ?? { state: 'idle' }"
+  },
+  {
+    id: 'M36',
+    grep: 'R36 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'Atualizar agora instala sem perguntar pelos arquivos não salvos',
+    find: "    if (!(await resolveUnsaved('quit'))) return false\n",
+    replace: ''
   }
 ]
 

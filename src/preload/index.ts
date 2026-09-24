@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type { CloseKind, FilesChange, KoraApi } from '../shared/ipc'
 import type { AgentSession } from '../shared/agent'
+import type { UpdateStatus } from '../shared/update'
 
 function subscribe<A extends unknown[]>(channel: string, listener: (...args: A) => void): () => void {
   const handler = (_e: IpcRendererEvent, ...args: unknown[]): void => listener(...(args as A))
@@ -31,11 +32,12 @@ const api: KoraApi = {
   resolveTerminalLink: (projectId, text) => ipcRenderer.invoke('terminal:resolve-link', projectId, text),
   pathForFile: (file) => webUtils.getPathForFile(file),
   reportLongTask: (ms) => ipcRenderer.send('diag:long-task', ms),
-  pendingUpdate: () => ipcRenderer.invoke('update:pending'),
+  updateStatus: () => ipcRenderer.invoke('update:status'),
+  onUpdateStatus: (listener) => subscribe<[UpdateStatus]>('update:status', listener),
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
   installUpdate: () => ipcRenderer.invoke('update:install'),
   appVersion: () => ipcRenderer.invoke('app:version'),
   setWindowDark: (dark) => ipcRenderer.send('window:dark', dark),
-  onUpdateReady: (listener) => subscribe<[string]>('update:ready', listener),
   renameEntry: (projectId, rel, name) => ipcRenderer.invoke('fs:rename', projectId, rel, name),
   openInBrowser: (projectId, rel) => ipcRenderer.invoke('fs:open-browser', projectId, rel),
 
