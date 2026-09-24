@@ -1,0 +1,35 @@
+name: Release
+
+# Uma tag v* (ex.: v0.1.2) gera o instalador a partir do código dessa tag e publica a Release com o latest.yml,
+# que é o arquivo que o atualizador do app consulta. A versão da tag precisa ser a mesma do package.json.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Tag e package.json com a mesma versão
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME, package.json $version"; exit 1; }
+      - run: pnpm check
+      - run: pnpm exec electron-vite build
+      - run: pnpm exec electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

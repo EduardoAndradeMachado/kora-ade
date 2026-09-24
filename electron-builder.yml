@@ -26,7 +26,9 @@ nsis:
   deleteAppDataOnUninstall: false
   artifactName: Kora-ADE-Setup-${version}.${ext}
   shortcutName: Kora ADE
+# releaseType release: sem isso sai como rascunho, e rascunho o atualizador não enxerga.
 publish:
   provider: github
   owner: EduardoAndradeMachado
   repo: kora-ade
+  releaseType: release
