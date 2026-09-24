@@ -19,11 +19,10 @@ const short = sessionId.slice(0, 8)
 const sessionsDir = join(home, '.claude', 'sessions')
 mkdirSync(sessionsDir, { recursive: true })
 const pidFile = join(sessionsDir, `${process.pid}.json`)
-writeFileSync(
-  pidFile,
-  JSON.stringify({ pid: process.pid, sessionId, cwd, name: `fake-${short}`, status: 'idle' }),
-  'utf8'
-)
+// O Claude real troca o status desse arquivo conforme a tela: busy respondendo, idle parado no prompt.
+const writeStatus = (status) =>
+  writeFileSync(pidFile, JSON.stringify({ pid: process.pid, sessionId, cwd, name: `fake-${short}`, status }), 'utf8')
+writeStatus('idle')
 
 const projectDir = join(home, '.claude', 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'))
 mkdirSync(projectDir, { recursive: true })
@@ -53,6 +52,8 @@ onLines(
       log('claude', 'exit', { sessionId })
       process.exit(0)
     }
+    if (line.trim() === 'trabalhe') writeStatus('busy')
+    if (line.trim() === 'pare') writeStatus('idle')
     turns++
     setTitle(`FakeClaude ${short} turno ${turns}`)
     process.stdout.write(`eco: ${line}\r\n> `)

@@ -1,5 +1,5 @@
 import type { KoraState, ProjectGroup, ThemePreference } from './state'
-import type { AgentSession } from './agent'
+import type { AgentActivity, AgentSession } from './agent'
 import type { GitBranch, GitStatus, GitWorktree } from './git-types'
 import type { AgentUsage } from './usage-types'
 import type { UpdateStatus } from './update'
@@ -127,6 +127,7 @@ export interface KoraApi {
   answerClose(kind: CloseKind, answer: 'proceed' | 'cancel'): void
   setTabAgent(tab: TabRef, agent: AgentSession | null): Promise<void>
   onTabAgent(listener: (tabId: string, agent: AgentSession | null) => void): () => void
+  onTabActivity(listener: (tabId: string, activity: AgentActivity | null) => void): () => void
 
   spawnTerminal(tab: TabRef, cols: number, rows: number, launch: Launch): Promise<void>
   savePastedImage(bytes: Uint8Array, mime: string): Promise<string>

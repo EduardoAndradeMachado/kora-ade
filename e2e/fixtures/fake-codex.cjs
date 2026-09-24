@@ -13,6 +13,10 @@ const home = process.env.USERPROFILE
 const cwd = process.cwd()
 let threadId = null
 let lockFd = null
+let rollout = null
+// No rollout real cada turno abre com task_started e fecha com task_complete.
+const turnEvent = (type) =>
+  appendFileSync(rollout, JSON.stringify({ type: 'event_msg', payload: { type, turn_id: 't' } }) + '\n', 'utf8')
 
 registerPid('codex')
 log('codex', 'start', { args, resumed })
@@ -26,7 +30,7 @@ function startThread() {
   lockFd = openSync(join(locks, `${threadId}.lock`), 'w')
   const day = join(home, '.codex', 'sessions', '2026', '09', '24')
   mkdirSync(day, { recursive: true })
-  const rollout = join(day, `rollout-2026-09-24T10-00-00-${threadId}.jsonl`)
+  rollout = join(day, `rollout-2026-09-24T10-00-00-${threadId}.jsonl`)
   writeFileSync(
     rollout,
     JSON.stringify({ type: 'session_meta', payload: { id: threadId, cwd, originator: 'codex-tui' } }) +
@@ -56,6 +60,8 @@ onLines(
       log('codex', 'exit', { threadId })
       process.exit(0)
     }
+    if (line.trim() === 'trabalhe') turnEvent('task_started')
+    if (line.trim() === 'pare') turnEvent('task_complete')
     process.stdout.write(`eco: ${line}\r\n> `)
   },
   () => log('codex', 'stdin-end', { threadId })

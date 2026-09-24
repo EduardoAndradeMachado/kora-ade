@@ -308,6 +308,42 @@ test('R37 abrir um Claude num projeto e logo fechar uma aba Continuar de outro n
 })
 
 
+test('R51 estado do agente na aba (barra e lateral): esperando você e trabalhando, para Claude e Codex; some ao suspender', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  // O título da aba é o que o agente publica ("FakeClaude …", "FakeCodex"); o nome do agente basta para achar a aba.
+  const activity = (title: RegExp) => ({
+    bar: ui.barTab(page, title).locator('[data-activity]'),
+    side: ui.sideTab(page, title).locator('[data-activity]')
+  })
+
+  await openClaude(run, env)
+  const claude = activity(/Claude/)
+  // Sem o watch das pastas, a detecção só rodaria na volta de 30 s: 5 s bastam só se o aviso vier do disco.
+  await expect(claude.bar).toHaveAttribute('data-activity', 'waiting', { timeout: 5000 })
+  await expect(claude.side).toHaveAttribute('data-activity', 'waiting')
+  await typeLine(page, 'trabalhe')
+  await expect(claude.bar).toHaveAttribute('data-activity', 'working', { timeout: 5000 })
+  await expect(claude.side).toHaveAttribute('data-activity', 'working')
+  await typeLine(page, 'pare')
+  await expect(claude.bar).toHaveAttribute('data-activity', 'waiting', { timeout: 5000 })
+
+  await newTab(page, 'Codex')
+  await waitFor(() => starts(env, 'codex')[0], 'codex falso subiu')
+  await typeLine(page, 'trabalhe')
+  const codex = activity(/Codex/)
+  await expect(codex.bar).toHaveAttribute('data-activity', 'working', { timeout: 5000 })
+  await typeLine(page, 'pare')
+  await expect(codex.bar).toHaveAttribute('data-activity', 'waiting', { timeout: 5000 })
+
+  await ui.barTab(page, /Claude/).click({ button: 'right' })
+  await ui.menuItem(page, 'Suspender sessão (libera memória)').click()
+  await expect(claude.bar).toHaveCount(0)
+  await expect(claude.side).toHaveCount(0)
+  await expect(codex.bar).toHaveAttribute('data-activity', 'waiting')
+})
+
 test('R52 claude digitado à mão numa aba Terminal é vinculado em até 5 s (watch das pastas, não a volta periódica)', async ({ kora }) => {
   const env = kora.env()
   const run = await kora.launch(env)

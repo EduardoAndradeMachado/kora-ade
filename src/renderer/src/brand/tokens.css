@@ -33,8 +33,12 @@
     transform: rotate(360deg);
   }
 }
+.kora-spin {
+  animation: kora-orbit 1.2s linear infinite;
+}
 @media (prefers-reduced-motion: reduce) {
-  .kora-orbit {
+  .kora-orbit,
+  .kora-spin {
     animation: none;
   }
 }

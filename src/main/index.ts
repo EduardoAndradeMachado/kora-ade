@@ -9,7 +9,7 @@ import { addProject, applyLayout, mergeTabs, removeProject, setTabAgent } from '
 import { Terminals } from './terminals'
 import { ConflictError, listDir, moveEntry, readText, resolveInside, writeText } from './files'
 import { AgentDetector } from './agent-detect'
-import { FolderWatch } from './agent-watch'
+import { createRolloutFinder, FolderWatch } from './agent-watch'
 import { listProjectSessions, sessionArtifacts } from './sessions'
 import { createEntry, openInDefaultBrowser, renameEntry } from './file-actions'
 import { ProjectIcons } from './project-icons'
@@ -38,7 +38,7 @@ import { KORA_FILE_PRIVILEGED_SCHEMES, registerKoraFileProtocol } from './file-p
 import { fileHolders, listProcesses, withCreationTime } from './processes'
 import { FILE_FONT, ProjectGroupSchema, TERMINAL_FONT, ThemePreferenceSchema, ZOOM, type KoraState } from '../shared/state'
 import { z } from 'zod'
-import { AgentSessionSchema, type AgentSession, type Startup } from '../shared/agent'
+import { AgentSessionSchema, type AgentActivity, type AgentSession, type Startup } from '../shared/agent'
 import type { CloseKind, CreateResult, Launch, SaveResult, TabRef } from '../shared/ipc'
 
 // A detecção roda quando as pastas dos agentes mudam; a volta periódica só cobre o que não deixa rastro
@@ -82,6 +82,7 @@ const terminals = new Terminals({
   onData: (id, data) => mainWindow?.webContents.send('terminal:data', id, data),
   onExit: (id, exitCode, pid) => {
     registry?.remove(pid)
+    activities.delete(id)
     mainWindow?.webContents.send('terminal:exit', id, exitCode)
   },
   onSpawn: (id, pid) => {
@@ -92,17 +93,24 @@ const terminals = new Terminals({
 
 const watchers = new ProjectWatchers((projectId, change) => mainWindow?.webContents.send('fs:changed', projectId, change))
 
+const agentDirs = {
+  claudeSessions: join(homedir(), '.claude', 'sessions'),
+  codexLocks: join(homedir(), '.codex', 'thread-writer-locks'),
+  codexRollouts: join(homedir(), '.codex', 'sessions')
+}
 const detector = new AgentDetector({
-  claudeSessionsDir: join(homedir(), '.claude', 'sessions'),
-  codexLocksDir: join(homedir(), '.codex', 'thread-writer-locks'),
+  claudeSessionsDir: agentDirs.claudeSessions,
+  codexLocksDir: agentDirs.codexLocks,
   listProcesses,
   creationTime: (p) => withCreationTime(p).createdMs,
-  lockHolders: fileHolders
+  lockHolders: fileHolders,
+  codexRollout: createRolloutFinder(agentDirs.codexRollouts)
 })
 const agentFolders = new FolderWatch(
   [
-    { dir: join(homedir(), '.claude', 'sessions'), recursive: false },
-    { dir: join(homedir(), '.codex', 'thread-writer-locks'), recursive: false }
+    { dir: agentDirs.claudeSessions, recursive: false },
+    { dir: agentDirs.codexLocks, recursive: false },
+    { dir: agentDirs.codexRollouts, recursive: true }
   ],
   () => scheduleDetect()
 )
@@ -162,18 +170,28 @@ function traceIpc(): void {
     })) as typeof ipcMain.on
 }
 
+const activities = new Map<string, AgentActivity | null>()
+
+function setActivity(tabId: string, activity: AgentActivity | null): void {
+  if ((activities.get(tabId) ?? null) === activity) return
+  activities.set(tabId, activity)
+  mainWindow?.webContents.send('tab:activity', tabId, activity)
+}
+
 function detectAgents(): void {
   lag?.note('detectar-sessoes')
   const pids = terminals.pids()
   if (pids.size === 0) return
   try {
-    for (const [tabId, agent] of detector.detect(pids)) bindAgent(tabId, agent)
+    const found = detector.detect(pids)
+    for (const [tabId, { agent }] of found) bindAgent(tabId, agent)
+    for (const tabId of pids.keys()) setActivity(tabId, found.get(tabId)?.activity ?? null)
   } catch (err) {
     console.error('[kora] falha ao detectar sessões', err)
   }
 }
 
-// Rajada de eventos (vários arquivos mudando juntos): no máximo uma detecção a cada DETECT_MIN_GAP_MS,
+// O Codex grava o rollout sem parar enquanto trabalha: no máximo uma detecção a cada DETECT_MIN_GAP_MS,
 // sempre com uma última depois da rajada para o estado final não se perder.
 let detectTimer: NodeJS.Timeout | undefined
 let lastDetect = 0
@@ -254,7 +272,10 @@ function createWindow(): void {
   })
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
   // Um reload da interface descarta as abas; sem isso os shells (e um Claude rodando) ficariam órfãos no main.
-  mainWindow.webContents.on('did-start-loading', () => terminals.killAll())
+  mainWindow.webContents.on('did-start-loading', () => {
+    terminals.killAll()
+    activities.clear()
+  })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     const vitrine = process.env['KORA_VITRINE'] === '1' ? '#vitrine' : ''

@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startupCommand } from '../src/shared/agent'
-import { AgentDetector, claudeSessionForPid } from '../src/main/agent-detect'
+import { AgentDetector, claudeStateForPid } from '../src/main/agent-detect'
 import { fileHolders, listProcesses, withCreationTime } from '../src/main/processes'
 import { Terminals } from '../src/main/terminals'
 
 // Formato real capturado de ~/.claude/sessions/3576.json (Claude Code 2.1.281).
-const claudePidFile = (pid: number, sessionId: string): string =>
+const claudePidFile = (pid: number, sessionId: string, status = 'idle'): string =>
   JSON.stringify({
     pid,
     sessionId,
@@ -21,7 +21,7 @@ const claudePidFile = (pid: number, sessionId: string): string =>
     entrypoint: 'cli',
     name: 'exemplo-75',
     nameSource: 'derived',
-    status: 'idle'
+    status
   })
 
 describe('comando de abertura da aba', () => {
@@ -39,20 +39,22 @@ describe('comando de abertura da aba', () => {
 })
 
 describe('sessão do Claude pelo pid', () => {
-  it('lê o sessionId e o nome do arquivo do pid', () => {
+  it('lê o sessionId, o nome e o estado do arquivo do pid', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kora-claude-'))
     const sessionId = randomUUID()
     writeFileSync(join(dir, '3576.json'), claudePidFile(3576, sessionId), 'utf8')
-    expect(claudeSessionForPid(dir, 3576)).toEqual({ kind: 'claude', sessionId, name: 'exemplo-75' })
+    expect(claudeStateForPid(dir, 3576)).toEqual({ agent: { kind: 'claude', sessionId, name: 'exemplo-75' }, activity: 'waiting' })
+    writeFileSync(join(dir, '3576.json'), claudePidFile(3576, sessionId, 'busy'), 'utf8')
+    expect(claudeStateForPid(dir, 3576)?.activity).toBe('working')
   })
 
   it('ignora arquivo de outro pid ou sem sessão válida', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kora-claude-'))
     writeFileSync(join(dir, '10.json'), claudePidFile(11, randomUUID()), 'utf8')
     writeFileSync(join(dir, '12.json'), claudePidFile(12, 'nao-e-uuid'), 'utf8')
-    expect(claudeSessionForPid(dir, 10)).toBeNull()
-    expect(claudeSessionForPid(dir, 12)).toBeNull()
-    expect(claudeSessionForPid(dir, 99)).toBeNull()
+    expect(claudeStateForPid(dir, 10)).toBeNull()
+    expect(claudeStateForPid(dir, 12)).toBeNull()
+    expect(claudeStateForPid(dir, 99)).toBeNull()
   })
 })
 
@@ -99,18 +101,21 @@ describe('AgentDetector de ponta a ponta (pty real + árvore de processos real +
     const sessionId = randomUUID()
     writeFileSync(join(sessionsDir, `${claudePid}.json`), claudePidFile(claudePid, sessionId), 'utf8')
     await fakeAgentIn(tabCodex, join(locksDir, `${threadId}.lock`))
+    const rollout = join(mkdtempSync(join(tmpdir(), 'kora-rollout-')), `rollout-2026-09-24T10-00-00-${threadId}.jsonl`)
+    writeFileSync(rollout, '{"type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}\n', 'utf8')
 
     const detector = new AgentDetector({
       claudeSessionsDir: sessionsDir,
       codexLocksDir: locksDir,
       listProcesses,
       creationTime: (p) => withCreationTime(p).createdMs,
-      lockHolders: fileHolders
+      lockHolders: fileHolders,
+      codexRollout: (id) => (id === threadId ? rollout : null)
     })
     const found = detector.detect(terminals.pids())
 
-    expect(found.get(tabClaude)).toEqual({ kind: 'claude', sessionId, name: 'exemplo-75' })
-    expect(found.get(tabCodex)).toEqual({ kind: 'codex', sessionId: threadId })
+    expect(found.get(tabClaude)).toEqual({ agent: { kind: 'claude', sessionId, name: 'exemplo-75' }, activity: 'waiting' })
+    expect(found.get(tabCodex)).toEqual({ agent: { kind: 'codex', sessionId: threadId }, activity: 'working' })
     expect(found.has(tabShell)).toBe(false)
   })
 })

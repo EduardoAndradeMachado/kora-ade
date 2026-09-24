@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type { CloseKind, FilesChange, KoraApi } from '../shared/ipc'
-import type { AgentSession } from '../shared/agent'
+import type { AgentActivity, AgentSession } from '../shared/agent'
 import type { UpdateStatus } from '../shared/update'
 
 function subscribe<A extends unknown[]>(channel: string, listener: (...args: A) => void): () => void {
@@ -75,6 +75,7 @@ const api: KoraApi = {
   answerClose: (kind, answer) => ipcRenderer.send('app:close-answer', kind, answer),
   setTabAgent: (tab, agent) => ipcRenderer.invoke('tab:set-agent', tab, agent),
   onTabAgent: (listener) => subscribe<[string, AgentSession | null]>('tab:agent', listener),
+  onTabActivity: (listener) => subscribe<[string, AgentActivity | null]>('tab:activity', listener),
 
   spawnTerminal: (tab, cols, rows, launch) => ipcRenderer.invoke('terminal:spawn', tab, cols, rows, launch),
   savePastedImage: (bytes, mime) => ipcRenderer.invoke('clipboard:save-image', bytes, mime),

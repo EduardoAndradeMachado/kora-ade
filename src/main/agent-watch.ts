@@ -1,6 +1,38 @@
-import { existsSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, readdirSync, watch, type FSWatcher } from 'node:fs'
+import { join } from 'node:path'
 
-// Observa as pastas onde o Claude e o Codex deixam rastro (sessão por pid, locks). Pasta que ainda não
+// O rollout de uma conversa do Codex fica em ~/.codex/sessions/AAAA/MM/DD/rollout-<data>-<threadId>.jsonl;
+// a data é a do início da conversa, então uma retomada antiga continua no arquivo da pasta antiga.
+// Achado uma vez, o caminho fica guardado. Não achado (o Codex cria o rollout junto com o lock, pode
+// ser uma corrida), a busca só se repete depois de missRetryMs, para não varrer a pasta a cada evento.
+export function createRolloutFinder(sessionsDir: string, missRetryMs = 3000, now = Date.now): (threadId: string) => string | null {
+  const found = new Map<string, string>()
+  const missedAt = new Map<string, number>()
+  return (threadId) => {
+    const hit = found.get(threadId)
+    if (hit && existsSync(hit)) return hit
+    const missed = missedAt.get(threadId)
+    if (missed !== undefined && now() - missed < missRetryMs) return null
+    const suffix = `-${threadId}.jsonl`
+    let entries: string[] = []
+    try {
+      entries = readdirSync(sessionsDir, { recursive: true, encoding: 'utf8' })
+    } catch {
+      // Pasta ainda não existe: Codex nunca usado nesta máquina.
+    }
+    const rel = entries.find((e) => e.endsWith(suffix))
+    if (!rel) {
+      missedAt.set(threadId, now())
+      return null
+    }
+    const file = join(sessionsDir, rel)
+    found.set(threadId, file)
+    missedAt.delete(threadId)
+    return file
+  }
+}
+
+// Observa as pastas onde o Claude e o Codex deixam rastro (sessão por pid, locks, rollouts). Pasta que ainda não
 // existe (agente nunca usado) é tentada de novo a cada retryMs; watcher que falha (pasta apagada) também volta.
 export class FolderWatch {
   private readonly watchers = new Map<string, FSWatcher>()

@@ -1,6 +1,6 @@
 import type { Viewer } from '@shared/file-kind'
-import type { AgentSession } from '@shared/agent'
-import { AgentIcon } from '@/components/AgentIcon'
+import type { AgentActivity, AgentSession } from '@shared/agent'
+import { AgentIcon, agentLabel } from '@/components/AgentIcon'
 import { NewTabMenu, type NewTabChoice } from '@/components/NewTabMenu'
 import { EditableTitle } from '@/components/EditableTitle'
 import { cn } from '@/lib/utils'
@@ -9,7 +9,15 @@ import type { Place } from '@shared/arrange'
 import { Icon, type IconName } from '@/brand/icons'
 
 export type Tab =
-  | { kind: 'terminal'; id: string; title: string; titleLocked: boolean; live: boolean; agent: AgentSession | null }
+  | {
+      kind: 'terminal'
+      id: string
+      title: string
+      titleLocked: boolean
+      live: boolean
+      agent: AgentSession | null
+      activity?: AgentActivity | null
+    }
   | {
       kind: 'file'
       id: string
@@ -37,8 +45,38 @@ export function TabIcon({ tab, className }: { tab: Tab; className?: string }): R
     const name: IconName = { markdown: 'arquivo', code: 'codigo', pdf: 'pdf', image: 'imagem' }[tab.viewer] as IconName
     return <Icon name={name} active={false} className={cn('size-3.5', className)} />
   }
-  if (tab.agent) return <AgentIcon kind={tab.agent.kind} className={cn('size-3.5', dim, className)} />
+  if (tab.agent) {
+    const icon = <AgentIcon kind={tab.agent.kind} className={cn('size-3.5', dim, className)} />
+    const activity = tab.live ? tab.activity : null
+    if (!activity) return icon
+    return (
+      <span
+        data-activity={activity}
+        title={`${agentLabel(tab.agent.kind)} ${activity === 'working' ? 'trabalhando' : 'esperando você'}`}
+        className="relative inline-flex shrink-0"
+      >
+        {icon}
+        {activity === 'working' ? <WorkingRing /> : <WaitingDot />}
+      </span>
+    )
+  }
   return <Icon name="terminal" active={!isDormant(tab)} className={cn('size-3.5', dim, className)} />
+}
+
+// Trabalhando: o braço âmbar do símbolo dando voltas em torno do ícone, como no carregamento da identidade.
+function WorkingRing(): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="kora-spin pointer-events-none absolute -inset-[3px] size-[calc(100%+6px)]">
+      <circle cx="12" cy="12" r="10.5" fill="none" stroke="var(--brand-amber)" strokeWidth="2" strokeLinecap="round" strokeDasharray="16 50" />
+    </svg>
+  )
+}
+
+// Esperando você: ponto âmbar no canto, com contorno na cor do fundo para se destacar sobre o ícone.
+function WaitingDot(): React.JSX.Element {
+  return (
+    <span className="pointer-events-none absolute -right-[3px] -top-[3px] size-[7px] rounded-full bg-[var(--brand-amber)] ring-[1.5px] ring-background" />
+  )
 }
 
 interface Props {

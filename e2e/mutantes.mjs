@@ -280,12 +280,37 @@ const MUTANTS = [
     replace: "  error: 'text-muted-foreground',"
   },
   {
+    id: 'M51',
+    grep: 'R51 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'interface ignora o estado do agente que o main publica',
+    find: 'const offActivity = window.kora.onTabActivity((id, activity) => patchTerminal(id, { activity }))',
+    replace: 'const offActivity = () => {}'
+  },
+  {
+    id: 'M51b',
+    grep: 'R51 ',
+    file: 'src/main/agent-activity.ts',
+    bug: 'status "busy" do Claude não vira trabalhando',
+    find: "if (status === 'busy') return 'working'",
+    replace: "if (status === 'running') return 'working'"
+  },
+  {
+    id: 'M51c',
+    grep: 'R51 ',
+    file: 'src/main/agent-detect.ts',
+    bug: 'Codex sem estado (rollout não é lido)',
+    find: 'activity: this.codexActivityOf(lock.threadId)',
+    replace: 'activity: null'
+  },
+  {
     id: 'M52',
-    grep: 'R52 ',
+    grep: 'R5[12] ',
     file: 'src/main/index.ts',
     bug: 'sem o watch das pastas dos agentes (só a volta de 30 s)',
     find: '  agentFolders.start()\n',
-    replace: ''
+    replace: '',
+    expect: { 'R51 ': 'failed', 'R52 ': 'failed' }
   }
 ]
 

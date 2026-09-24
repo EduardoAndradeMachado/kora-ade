@@ -174,12 +174,14 @@ export function App(): React.JSX.Element {
     })
     const offExit = window.kora.onTerminalExit((id) => {
       terminalBus.forget(id)
-      patchTerminal(id, { live: false })
+      patchTerminal(id, { live: false, activity: null })
     })
     const offAgent = window.kora.onTabAgent((id, agent) => patchTerminal(id, { agent }))
+    const offActivity = window.kora.onTabActivity((id, activity) => patchTerminal(id, { activity }))
     return () => {
       offExit()
       offAgent()
+      offActivity()
     }
   }, [patchTerminal])
 

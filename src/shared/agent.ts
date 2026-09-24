@@ -13,6 +13,9 @@ export const AgentSessionSchema = z.object({
 })
 export type AgentSession = z.infer<typeof AgentSessionSchema>
 
+// Estado do agente rodando na aba: trabalhando (respondendo) ou esperando você (parado no prompt ou pedindo permissão).
+export type AgentActivity = 'working' | 'waiting'
+
 export type Startup =
   | { kind: 'claude'; mode: 'new'; sessionId: string }
   | { kind: 'claude' | 'codex'; mode: 'resume'; sessionId: string }
