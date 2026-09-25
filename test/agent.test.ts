@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startupCommand } from '../src/shared/agent'
-import { AgentDetector, claudeStateForPid, UNREADABLE } from '../src/main/agent-detect'
+import { AgentDetector, claudeStateForPid, codexMetaIsSubagent, UNREADABLE } from '../src/main/agent-detect'
 import { fileHolders, listProcesses, withCreationTime } from '../src/main/processes'
 import { Terminals } from '../src/main/terminals'
 
@@ -95,10 +95,10 @@ describe('AgentDetector de ponta a ponta (pty real + árvore de processos real +
   afterEach(() => terminals.killAll())
 
   // Roda um node dentro da aba que grava o próprio pid (e opcionalmente mantém um arquivo aberto).
-  async function fakeAgentIn(tabId: string, holdFile?: string): Promise<number> {
+  async function fakeAgentIn(tabId: string, ...holdFiles: string[]): Promise<number> {
     const markerDir = mkdtempSync(join(tmpdir(), 'kora-marker-'))
     const marker = join(markerDir, 'pid.txt')
-    const hold = holdFile ? `require('fs').openSync(${JSON.stringify(holdFile)}, 'r+');` : ''
+    const hold = holdFiles.map((f) => `require('fs').openSync(${JSON.stringify(f)}, 'r+');`).join(' ')
     const script = join(markerDir, 'agent.js')
     writeFileSync(
       script,
@@ -149,5 +149,92 @@ describe('AgentDetector de ponta a ponta (pty real + árvore de processos real +
     expect(found.get(tabClaude)).toEqual({ agent: { kind: 'claude', sessionId, name: 'exemplo-75' }, activity: 'waiting' })
     expect(found.get(tabCodex)).toEqual({ agent: { kind: 'codex', sessionId: threadId }, activity: 'working' })
     expect(found.has(tabShell)).toBe(false)
+  })
+
+  it('Codex com subagente: o mesmo processo segura os dois locks e a aba fica na conversa principal', async () => {
+    const locksDir = mkdtempSync(join(tmpdir(), 'kora-locks-'))
+    const rolloutsDir = mkdtempSync(join(tmpdir(), 'kora-rollout-'))
+    const mainThread = randomUUID()
+    const subThread = randomUUID()
+    // Primeira linha no formato real do Codex 0.157 (sem os ids de conta); base_instructions deixa a linha com ~22 KB.
+    const meta = (id: string, source: unknown): string =>
+      JSON.stringify({
+        timestamp: '2026-09-25T14:32:35.631Z',
+        ordinal: 0,
+        type: 'session_meta',
+        payload: {
+          id,
+          cwd: 'C:\\Users\\voce\\Documents\\projetos\\exemplo',
+          originator: 'codex-tui',
+          cli_version: '0.157.0',
+          source,
+          base_instructions: { text: 'x'.repeat(22_000) }
+        }
+      }) + '\n'
+    const rollouts = new Map<string, string>()
+    const rollout = (id: string, source: unknown, events: string[]): void => {
+      const file = join(rolloutsDir, `rollout-2026-09-25T11-32-17-${id}.jsonl`)
+      writeFileSync(file, meta(id, source) + events.map((e) => `{"type":"event_msg","payload":{"type":"${e}"}}\n`).join(''), 'utf8')
+      rollouts.set(id, file)
+    }
+    rollout(mainThread, 'cli', ['task_started', 'task_complete'])
+    rollout(
+      subThread,
+      { subagent: { thread_spawn: { parent_thread_id: mainThread, depth: 1, agent_path: '/root/ping', agent_nickname: 'Linnaeus', agent_role: null } } },
+      ['task_started']
+    )
+    writeFileSync(join(locksDir, `${mainThread}.lock`), '')
+    await new Promise((r) => setTimeout(r, 50))
+    writeFileSync(join(locksDir, `${subThread}.lock`), '')
+
+    const tab = randomUUID()
+    terminals.spawn(tab, tmpdir(), 120, 30)
+    await fakeAgentIn(tab, join(locksDir, `${mainThread}.lock`), join(locksDir, `${subThread}.lock`))
+
+    const detector = new AgentDetector({
+      claudeSessionsDir: mkdtempSync(join(tmpdir(), 'kora-sessions-')),
+      codexLocksDir: locksDir,
+      listProcesses,
+      creationTime: (p) => withCreationTime(p).createdMs,
+      lockHolders: fileHolders,
+      codexRollout: (id) => rollouts.get(id) ?? null
+    })
+    expect(detector.detect(terminals.pids()).get(tab), 'subagente trabalhando não prende a aba nem o estado').toEqual({
+      agent: { kind: 'codex', sessionId: mainThread },
+      activity: 'waiting'
+    })
+
+    // Subagente recém-criado cujo rollout ainda não foi achado: a principal, já conhecida, continua na aba.
+    const early = new AgentDetector({
+      claudeSessionsDir: mkdtempSync(join(tmpdir(), 'kora-sessions-')),
+      codexLocksDir: locksDir,
+      listProcesses,
+      creationTime: (p) => withCreationTime(p).createdMs,
+      lockHolders: fileHolders,
+      codexRollout: (id) => (id === mainThread ? rollouts.get(id)! : null)
+    })
+    expect(early.detect(terminals.pids()).get(tab)).toMatchObject({ agent: { kind: 'codex', sessionId: mainThread } })
+
+    // Rollout da principal ainda não achado e o do subagente já lido: o subagente continua fora.
+    const onlySub = new AgentDetector({
+      claudeSessionsDir: mkdtempSync(join(tmpdir(), 'kora-sessions-')),
+      codexLocksDir: locksDir,
+      listProcesses,
+      creationTime: (p) => withCreationTime(p).createdMs,
+      lockHolders: fileHolders,
+      codexRollout: (id) => (id === subThread ? rollouts.get(id)! : null)
+    })
+    expect(onlySub.detect(terminals.pids()).get(tab)).toMatchObject({ agent: { kind: 'codex', sessionId: mainThread } })
+  })
+
+  it('primeira linha do rollout: subagente, principal ou ainda sem leitura', () => {
+    const line = (source: unknown): string => JSON.stringify({ type: 'session_meta', payload: { id: 'x', source } }) + '\n'
+    const sub = line({ subagent: { thread_spawn: { parent_thread_id: 'p', depth: 1 } } })
+    expect(codexMetaIsSubagent(sub)).toBe(true)
+    expect(codexMetaIsSubagent(line('cli'))).toBe(false)
+    expect(codexMetaIsSubagent(line('vscode'))).toBe(false)
+    expect(codexMetaIsSubagent(sub.slice(0, 40)), 'linha ainda sendo gravada').toBeNull()
+    expect(codexMetaIsSubagent('{"type":"event_msg","payload":{}}\n')).toBeNull()
+    expect(codexMetaIsSubagent('')).toBeNull()
   })
 })

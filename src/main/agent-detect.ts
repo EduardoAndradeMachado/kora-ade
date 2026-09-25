@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { SESSION_ID, type AgentActivity, type AgentSession } from '../shared/agent'
 import { claudeActivity, claudeTurnEnded, codexActivity, readTail } from './agent-activity'
@@ -81,15 +81,25 @@ export function codexLocks(dir: string): CodexLock[] {
 export class AgentDetector {
   constructor(private readonly sources: DetectorSources) {}
 
+  private readonly subagentThreads = new Map<string, boolean>()
+
+  // O subagente do Codex roda dentro do processo que o criou, com conversa e lock próprios e mais novos que os da
+  // conversa principal. A aba fica com a principal: é ela que o "Continuar" retoma e é nela que você responde.
+  // Conversa cujo rollout ainda não deu para ler perde para a sabidamente principal: pode ser um subagente recém-criado.
   private codexThreadsByPid(): Map<number, CodexLock> {
-    const byPid = new Map<number, CodexLock>()
+    const byPid = new Map<number, { lock: CodexLock; known: boolean }>()
     for (const lock of codexLocks(this.sources.codexLocksDir)) {
+      const subagent = this.isCodexSubagent(lock.threadId)
+      if (subagent === true) continue
+      const known = subagent === false
       for (const pid of this.sources.lockHolders(lock.file)) {
         const current = byPid.get(pid)
-        if (!current || lock.birthMs > current.birthMs) byPid.set(pid, lock)
+        const better =
+          !current || (known && !current.known) || (known === current.known && lock.birthMs > current.lock.birthMs)
+        if (better) byPid.set(pid, { lock, known })
       }
     }
-    return byPid
+    return new Map([...byPid].map(([pid, { lock }]) => [pid, lock]))
   }
 
   // UNREADABLE para a aba cujo agente não deu para ler nesta volta: quem chama mantém o que sabia dela.
@@ -117,6 +127,22 @@ export class AgentDetector {
     return found
   }
 
+  // null enquanto o rollout não existe ou a primeira linha ainda está sendo gravada.
+  private isCodexSubagent(threadId: string): boolean | null {
+    const known = this.subagentThreads.get(threadId)
+    if (known !== undefined) return known
+    const file = this.sources.codexRollout(threadId)
+    if (!file) return null
+    let subagent: boolean | null
+    try {
+      subagent = codexMetaIsSubagent(readHead(file, CODEX_META_BYTES))
+    } catch {
+      return null
+    }
+    if (subagent !== null) this.subagentThreads.set(threadId, subagent)
+    return subagent
+  }
+
   private codexActivityOf(threadId: string): AgentActivity | null {
     const file = this.sources.codexRollout(threadId)
     if (!file) return null
@@ -125,5 +151,31 @@ export class AgentDetector {
     } catch {
       return null
     }
+  }
+}
+
+// A primeira linha do rollout (session_meta, ~22 KB com as instruções base) não muda depois de gravada.
+const CODEX_META_BYTES = 64 * 1024
+
+function readHead(file: string, bytes: number): string {
+  const fd = openSync(file, 'r')
+  try {
+    const buffer = Buffer.alloc(bytes)
+    return buffer.toString('utf8', 0, readSync(fd, buffer, 0, bytes, 0))
+  } finally {
+    closeSync(fd)
+  }
+}
+
+export function codexMetaIsSubagent(head: string): boolean | null {
+  const newline = head.indexOf('\n')
+  if (newline < 0) return null
+  try {
+    const first = JSON.parse(head.slice(0, newline)) as { type?: unknown; payload?: { source?: unknown } }
+    if (first.type !== 'session_meta') return null
+    const source = first.payload?.source
+    return typeof source === 'object' && source !== null && 'subagent' in source
+  } catch {
+    return null
   }
 }
