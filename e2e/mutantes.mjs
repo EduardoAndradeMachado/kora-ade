@@ -601,6 +601,14 @@ const MUTANTS = [
     bug: 'o fim do turno gravado no transcript não dispara detecção (só a varredura de 30 s)',
     find: '    { dir: agentDirs.claudeProjects, recursive: true, accept: isClaudeTranscript }',
     replace: '    { dir: agentDirs.claudeProjects, recursive: true, accept: () => false }'
+  },
+  {
+    id: 'M70',
+    grep: 'R8 ',
+    file: 'src/shared/agent.ts',
+    bug: 'Codex aberto pelo Kora usa o servidor em segundo plano (lock fora da aba, erro de Acesso negado no Job)',
+    find: "  return startup.mode === 'new' ? 'codex --no-daemon' : `codex resume ${startup.sessionId} --no-daemon`",
+    replace: "  return startup.mode === 'new' ? 'codex' : `codex resume ${startup.sessionId}`"
   }
 ]
 

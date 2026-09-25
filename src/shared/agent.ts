@@ -30,5 +30,7 @@ export function startupCommand(startup: Startup): string {
   if (startup.kind === 'claude') {
     return startup.mode === 'new' ? `claude --session-id ${startup.sessionId}` : `claude --resume ${startup.sessionId}`
   }
-  return startup.mode === 'new' ? 'codex' : `codex resume ${startup.sessionId}`
+  // Desde o 0.157 o Codex sobe um servidor em segundo plano e é ele quem grava a conversa e segura o lock dela;
+  // o Kora liga a aba à conversa pelo processo dono do lock, que precisa ser descendente da aba.
+  return startup.mode === 'new' ? 'codex --no-daemon' : `codex resume ${startup.sessionId} --no-daemon`
 }

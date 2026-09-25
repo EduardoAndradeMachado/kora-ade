@@ -29,8 +29,8 @@ describe('comando de abertura da aba', () => {
     const id = '01a0d12c-6ac8-7591-8c6f-3a67bf0c629e'
     expect(startupCommand({ kind: 'claude', mode: 'new', sessionId: id })).toBe(`claude --session-id ${id}`)
     expect(startupCommand({ kind: 'claude', mode: 'resume', sessionId: id })).toBe(`claude --resume ${id}`)
-    expect(startupCommand({ kind: 'codex', mode: 'resume', sessionId: id })).toBe(`codex resume ${id}`)
-    expect(startupCommand({ kind: 'codex', mode: 'new' })).toBe('codex')
+    expect(startupCommand({ kind: 'codex', mode: 'resume', sessionId: id })).toBe(`codex resume ${id} --no-daemon`)
+    expect(startupCommand({ kind: 'codex', mode: 'new' })).toBe('codex --no-daemon')
   })
 
   it('recusa ID que não é UUID (vai para a linha de comando do PowerShell)', () => {

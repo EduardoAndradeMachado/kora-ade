@@ -139,7 +139,7 @@ test('R8 Codex: aba nova roda codex; após a 1ª mensagem o estado ganha o uuid 
   const first = await kora.launch(env)
   await newTab(first.page, 'Codex')
   const start = await waitFor(() => starts(env, 'codex')[0], 'codex falso subiu')
-  expect(start.args).toEqual([])
+  expect(start.args, 'sem o servidor em segundo plano do Codex 0.157').toEqual(['--no-daemon'])
   await waitFor(() => readState(env).tabs.length === 1, 'aba codex no estado')
   expect(readState(env).tabs[0]!.agent).toBeNull()
 
@@ -156,7 +156,7 @@ test('R8 Codex: aba nova roda codex; após a 1ª mensagem o estado ganha o uuid 
   const second = await kora.launch(env)
   await ui.visibleButton(second.page, 'Continuar chat').click()
   const resumed = await waitFor(() => starts(env, 'codex')[1], 'codex falso retomado')
-  expect(resumed.args).toEqual(['resume', threadId])
+  expect(resumed.args).toEqual(['resume', threadId, '--no-daemon'])
 })
 
 test('R9 claude digitado à mão numa aba Terminal é detectado e vinculado à aba', async ({ kora }) => {
@@ -207,7 +207,7 @@ test('R10 Sessão existente: vincular uuid manualmente (Claude e Codex) e recusa
   await waitFor(() => readState(env).tabs.find((t) => t.agent?.sessionId === codexId && t.agent.kind === 'codex'), 'vínculo Codex salvo')
   await ui.visibleButton(page, 'Continuar chat').click()
   const x = await waitFor(() => starts(env, 'codex')[0], 'codex falso retomado pelo vínculo manual')
-  expect(x.args).toEqual(['resume', codexId])
+  expect(x.args).toEqual(['resume', codexId, '--no-daemon'])
 })
 
 test('R13 renomear aba (duplo clique e menu Renomear): nome persiste e não é sobrescrito pelo título do terminal', async ({ kora }) => {
