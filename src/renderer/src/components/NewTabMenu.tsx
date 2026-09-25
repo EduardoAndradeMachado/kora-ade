@@ -70,7 +70,7 @@ export function NewTabMenu({ onChoose, className, iconClassName }: Props): React
               className={cn('flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-secondary')}
             >
               {o.choice === 'shell' ? (
-                <Icon name="terminal" active={false} className="text-muted-foreground" />
+                <Icon name="terminal" className="text-muted-foreground" />
               ) : o.choice === 'existing' ? (
                 <Icon name="fixar" className="text-muted-foreground" />
               ) : (

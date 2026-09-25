@@ -334,7 +334,7 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
   const creationRow = (parent: string, depth: number): React.ReactNode =>
     creating?.parent === parent && (
       <div style={{ paddingLeft: 4 + depth * 12 + 16 }} className="flex h-6 items-center gap-1 pr-2">
-        <Icon name={creating.kind === 'dir' ? 'projeto' : 'arquivo'} active={false} className="size-3.5" />
+        <Icon name={creating.kind === 'dir' ? 'projeto' : 'arquivo'} className="size-3.5" />
         <input
           autoFocus
           placeholder={creating.kind === 'dir' ? 'nome da pasta' : 'nome do arquivo'}
@@ -388,7 +388,7 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
                 name="expandir"
                 className={cn('size-3 transition-transform', open && 'rotate-90', !entry.isDir && 'invisible')}
               />
-              <Icon name={icon} active={false} className={cn('size-3.5', isIgnored && 'opacity-40')} />
+              <Icon name={icon} className={cn('size-3.5', isIgnored && 'opacity-40')} />
               {renaming === entry.path ? (
                 <input
                   autoFocus

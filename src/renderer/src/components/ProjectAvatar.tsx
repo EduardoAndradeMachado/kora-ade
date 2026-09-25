@@ -4,9 +4,10 @@ import { Icon } from '@/brand/icons'
 interface Props {
   projectId: string
   version: number
+  open: boolean
 }
 
-export function ProjectAvatar({ projectId, version }: Props): React.JSX.Element {
+export function ProjectAvatar({ projectId, version, open }: Props): React.JSX.Element {
   const [src, setSrc] = useState<string | null>(null)
   const [broken, setBroken] = useState(false)
 
@@ -26,5 +27,5 @@ export function ProjectAvatar({ projectId, version }: Props): React.JSX.Element 
   if (src && !broken) {
     return <img src={src} alt="" onError={() => setBroken(true)} className="size-4 shrink-0 rounded-[3px] object-contain" />
   }
-  return <Icon name="projeto" />
+  return <Icon name="projeto" active={open} />
 }

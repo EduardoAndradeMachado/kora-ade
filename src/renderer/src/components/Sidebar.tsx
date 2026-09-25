@@ -256,7 +256,7 @@ export function Sidebar(props: Props): React.JSX.Element {
           >
             <Icon name="expandir" className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
           </button>
-          <ProjectAvatar projectId={project.id} version={iconVersion[project.id] ?? 0} />
+          <ProjectAvatar projectId={project.id} version={iconVersion[project.id] ?? 0} open={open && tabs.length > 0} />
           <span className="flex-1 truncate font-medium">{project.name}</span>
           {!open && tabs.length > 0 && (
             <span className="text-[11px] tabular-nums text-muted-foreground group-hover:hidden">
@@ -347,10 +347,10 @@ export function Sidebar(props: Props): React.JSX.Element {
         <span className="text-xs font-medium text-muted-foreground">Projetos</span>
         <div className="flex items-center gap-0.5">
           <button type="button" title="Nova categoria" onClick={() => setCreatingIn({ parentId: null })} className={iconButton}>
-            <Icon name="novaCategoria" />
+            <Icon name="novaCategoria" active />
           </button>
           <button type="button" title="Adicionar projeto" onClick={props.onAdd} className={iconButton}>
-            <Icon name="novoProjeto" />
+            <Icon name="novoProjeto" active />
           </button>
         </div>
       </div>
@@ -498,7 +498,7 @@ function SideTabs(props: SideTabsProps): React.JSX.Element {
               hintClass(drag.hint, tab.id, 'y')
             )}
           >
-            <TabIcon tab={tab} />
+            <TabIcon tab={tab} selected={active} />
             <EditableTitle
               value={tab.title}
               editable={tab.kind === 'terminal'}

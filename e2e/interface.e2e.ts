@@ -823,3 +823,35 @@ test('R68 nome dado à aba vira o nome da conversa na aba Sessões, também com 
   await expect(row(agentTitle)).toBeVisible()
   await expect(row('Inscrição SBPROPPG')).toHaveCount(0)
 })
+
+test('R69 âmbar só no que está aberto ou selecionado: pasta do projeto aberta, aba selecionada e as ações de criar', async ({ kora }) => {
+  const env = kora.env()
+  writeFileSync(join(env.project, 'app.ts'), 'export const a = 1\n')
+  const run = await kora.launch(env)
+  const page = run.page
+  const lit = async (icon: import('@playwright/test').Locator): Promise<boolean> => {
+    await expect(icon).toHaveCount(1)
+    return (await icon.locator('[stroke="var(--icon-accent)"], [fill="var(--icon-accent)"]').count()) > 0
+  }
+  const projectFolder = () => page.locator('aside nav div[title]').first().locator('svg[data-icon="projeto"]')
+
+  expect(await lit(projectFolder()), 'projeto fechado, sem abas').toBe(false)
+  expect(await lit(page.getByTitle('Configurações').locator('svg')), 'configurações').toBe(false)
+  expect(await lit(page.getByTitle('Adicionar projeto').locator('svg')), 'adicionar projeto').toBe(true)
+  expect(await lit(page.getByTitle('Nova categoria').locator('svg')), 'nova categoria').toBe(true)
+
+  await newTab(page, 'Terminal')
+  expect(await lit(projectFolder()), 'projeto aberto, com abas').toBe(true)
+  const terminalIcon = () => ui.tabBar(page).locator('div.group').first().locator('svg[data-icon="terminal"]')
+  expect(await lit(terminalIcon()), 'terminal selecionado').toBe(true)
+
+  await rightPanel(page).locator('div[title="app.ts"]').click()
+  await expect(ui.barTab(page, 'app.ts')).toBeVisible()
+  const fileIcon = () => ui.barTab(page, 'app.ts').locator('svg[data-icon="codigo"]')
+  expect(await lit(fileIcon()), 'arquivo selecionado').toBe(true)
+  expect(await lit(terminalIcon()), 'terminal fora de foco').toBe(false)
+
+  await ui.tabBar(page).locator('div.group').first().click()
+  expect(await lit(fileIcon()), 'arquivo fora de foco').toBe(false)
+  expect(await lit(terminalIcon())).toBe(true)
+})

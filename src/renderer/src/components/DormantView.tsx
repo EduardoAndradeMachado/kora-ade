@@ -62,7 +62,7 @@ export function DormantView(props: Props): React.JSX.Element {
           </>
         ) : (
           <>
-            <Icon name="terminal" active={false} className="size-8 text-muted-foreground" />
+            <Icon name="terminal" className="size-8 text-muted-foreground" />
             <div className="text-sm text-muted-foreground">Terminal sem sessão de agente vinculada.</div>
             <Button onClick={onShell}>Abrir terminal</Button>
           </>

@@ -42,11 +42,11 @@ export interface RenameRequest {
 
 export const isDormant = (tab: Tab): boolean => tab.kind === 'terminal' && !tab.live
 
-export function TabIcon({ tab, className }: { tab: Tab; className?: string }): React.JSX.Element {
+export function TabIcon({ tab, selected, className }: { tab: Tab; selected: boolean; className?: string }): React.JSX.Element {
   const dim = isDormant(tab) && 'opacity-50'
   if (tab.kind === 'file') {
     const name: IconName = { markdown: 'arquivo', code: 'codigo', pdf: 'pdf', image: 'imagem' }[tab.viewer] as IconName
-    return <Icon name={name} active={false} className={cn('size-3.5', className)} />
+    return <Icon name={name} active={selected} className={cn('size-3.5', className)} />
   }
   if (tab.agent) {
     const icon = <AgentIcon kind={tab.agent.kind} className={cn('size-3.5', dim, className)} />
@@ -75,7 +75,7 @@ export function TabIcon({ tab, className }: { tab: Tab; className?: string }): R
       </span>
     )
   }
-  return <Icon name="terminal" active={!isDormant(tab)} className={cn('size-3.5', dim, className)} />
+  return <Icon name="terminal" active={selected && !isDormant(tab)} className={cn('size-3.5', dim, className)} />
 }
 
 // Trabalhando: o braço âmbar do símbolo dando voltas em torno do ícone, como no carregamento da identidade.
@@ -151,7 +151,7 @@ export function TabBar(props: Props): React.JSX.Element {
               hintClass(drag.hint, tab.id, 'x')
             )}
           >
-            <TabIcon tab={tab} />
+            <TabIcon tab={tab} selected={tab.id === props.activeId} />
             <EditableTitle
               value={tab.title}
               editable={tab.kind === 'terminal'}

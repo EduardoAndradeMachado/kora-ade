@@ -23,11 +23,11 @@ export function ModeToggle({ editing, previewDisabledReason, onChange }: Props):
         onClick={() => onChange(false)}
         className={option(!editing, !!previewDisabledReason && editing)}
       >
-        <Icon name="visualizar" className="size-3.5" />
+        <Icon name="visualizar" active={!editing} className="size-3.5" />
         Visualizar
       </button>
       <button type="button" onClick={() => onChange(true)} className={option(editing, false)}>
-        <Icon name="editar" className="size-3.5" />
+        <Icon name="editar" active={editing} className="size-3.5" />
         Editar
       </button>
     </div>

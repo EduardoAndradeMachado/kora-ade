@@ -633,6 +633,30 @@ const MUTANTS = [
     bug: 'conversa com nome reabre sem travar o nome (o título do terminal passa por cima)',
     find: '    const titleLocked = session.named === true',
     replace: '    const titleLocked = false'
+  },
+  {
+    id: 'M69',
+    grep: 'R69 ',
+    file: 'src/renderer/src/brand/icons.tsx',
+    bug: 'ícones acesos por padrão (âmbar em tudo)',
+    find: 'export function Icon({ name, active = false, className }: Props): React.JSX.Element {',
+    replace: 'export function Icon({ name, active = true, className }: Props): React.JSX.Element {'
+  },
+  {
+    id: 'M69b',
+    grep: 'R69 ',
+    file: 'src/renderer/src/components/ProjectAvatar.tsx',
+    bug: 'pasta do projeto fechada com âmbar',
+    find: '  return <Icon name="projeto" active={open} />',
+    replace: '  return <Icon name="projeto" active />'
+  },
+  {
+    id: 'M69c',
+    grep: 'R69 ',
+    file: 'src/renderer/src/components/TabBar.tsx',
+    bug: 'aba de arquivo fora de foco continua com âmbar',
+    find: "    return <Icon name={name} active={selected} className={cn('size-3.5', className)} />",
+    replace: "    return <Icon name={name} active className={cn('size-3.5', className)} />"
   }
 ]
 

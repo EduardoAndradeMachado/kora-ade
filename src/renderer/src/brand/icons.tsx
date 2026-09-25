@@ -241,11 +241,13 @@ export type IconName = keyof typeof BRAND
 
 interface Props {
   name: IconName
+  // Detalhe âmbar: só no que está aberto, selecionado ou em uso agora (e nas ações de criar projeto e
+  // categoria). Ícone aceso por padrão deixava a tela inteira parecendo "em uso".
   active?: boolean
   className?: string
 }
 
-export function Icon({ name, active = true, className }: Props): React.JSX.Element {
+export function Icon({ name, active = false, className }: Props): React.JSX.Element {
   return (
     <svg
       viewBox="0 0 24 24"
