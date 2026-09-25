@@ -6,7 +6,12 @@ import { ConfirmProvider } from './components/ConfirmDialog'
 
 // Vitrine de desenvolvimento: fora do build de produção (import.meta.env.DEV some no empacotamento).
 const vitrine = import.meta.env.DEV && location.hash === '#vitrine'
-if (vitrine) void import('./dev/Vitrine').then(({ Vitrine }) => createRoot(document.getElementById('root')!).render(<Vitrine />))
+if (vitrine) {
+  // O index.html nasce com "dark"; na vitrine cada amostra escolhe o tema, então a página começa clara.
+  document.documentElement.classList.remove('dark')
+  window.kora.setWindowDark(false)
+  void import('./dev/Vitrine').then(({ Vitrine }) => createRoot(document.getElementById('root')!).render(<Vitrine />))
+}
 
 const dark = window.matchMedia('(prefers-color-scheme: dark)')
 const applyTheme = (): void => {
