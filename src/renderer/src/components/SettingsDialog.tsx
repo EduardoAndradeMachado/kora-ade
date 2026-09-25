@@ -8,6 +8,7 @@ import { Icon } from '@/brand/icons'
 import { Lockup } from '@/brand/Logo'
 import { cn } from '@/lib/utils'
 import { ipcErrorMessage } from '@/lib/ipc-error'
+import { useWindowDim } from '@/lib/use-window-dim'
 
 const SITE_URL = 'https://kora-ade.vercel.app/'
 const REPO_URL = 'https://github.com/EduardoAndradeMachado/kora-ade'
@@ -252,6 +253,7 @@ export function SettingsPanel(props: SettingsPanelProps): React.JSX.Element {
 
 export function SettingsDialog(props: SettingsPanelProps): React.JSX.Element {
   const { onClose } = props
+  useWindowDim()
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose()

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/brand/Button'
+import { useWindowDim } from '@/lib/use-window-dim'
 
 export interface ConfirmOptions {
   title: string
@@ -54,6 +55,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }): Re
 
 function Dialog({ request, onAnswer }: { request: Request; onAnswer(choice: Choice): void }): React.JSX.Element {
   const confirmRef = useRef<HTMLButtonElement>(null)
+  useWindowDim()
 
   useEffect(() => {
     confirmRef.current?.focus()

@@ -521,6 +521,30 @@ const MUTANTS = [
     bug: 'copiar o ID pelo menu da aba não avisa',
     find: ".then(() => flash('ID da sessão copiado'))",
     replace: ''
+  },
+  {
+    id: 'M64',
+    grep: 'R64 ',
+    file: 'src/main/index.ts',
+    bug: 'botões de janela ignoram o pedido de escurecer com diálogo aberto',
+    find: '    color: windowDimmed ? dim(color) : color,',
+    replace: '    color,'
+  },
+  {
+    id: 'M64b',
+    grep: 'R64 ',
+    file: 'src/renderer/src/components/ConfirmDialog.tsx',
+    bug: 'diálogo de confirmação não escurece os botões de janela',
+    find: '  useWindowDim()',
+    replace: ''
+  },
+  {
+    id: 'M64c',
+    grep: 'R64 ',
+    file: 'src/renderer/src/components/SettingsDialog.tsx',
+    bug: 'Configurações não escurecem os botões de janela',
+    find: '  useWindowDim()',
+    replace: ''
   }
 ]
 

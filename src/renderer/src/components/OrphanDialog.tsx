@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Button } from '@/brand/Button'
 import { AgentIcon, agentLabel } from '@/components/AgentIcon'
+import { useWindowDim } from '@/lib/use-window-dim'
 
 export interface OrphanSurvivor {
   key: string
@@ -32,6 +33,7 @@ export function OrphanDialog(props: OrphanDialogProps): React.JSX.Element | null
 
 function Dialog({ survivors, onKillAll, onKeep, onKill }: OrphanDialogProps): React.JSX.Element {
   const keepRef = useRef<HTMLButtonElement>(null)
+  useWindowDim()
 
   // Esc e o foco inicial ficam em "Manter": nenhuma ação por teclado pode encerrar processos sem querer.
   useEffect(() => {

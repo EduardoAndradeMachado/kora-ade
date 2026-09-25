@@ -108,6 +108,8 @@ export interface KoraApi {
   appVersion(): Promise<string>
   // Tema que a interface aplicou: os botões de janela (desenhados pelo Windows) pegam as mesmas cores.
   setWindowDark(dark: boolean): void
+  // Diálogo com véu aberto: os botões de janela (do Windows, fora da página) escurecem junto.
+  setWindowDimmed(dimmed: boolean): void
   revealInExplorer(projectId: string, rel: string): Promise<void>
   trashEntry(projectId: string, rel: string): Promise<void>
   openInBrowser(projectId: string, rel: string): Promise<void>

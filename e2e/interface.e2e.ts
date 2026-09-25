@@ -745,3 +745,37 @@ test('R60 digitar e fechar na hora (Ctrl+W ou X da janela) pergunta antes de per
   await dialog.getByRole('button', { name: 'Salvar e fechar' }).click()
   await expect.poll(() => readFileSync(join(env.project, 'notas.txt'), 'utf8')).toBe('antes\nz')
 })
+
+test('R64 diálogo aberto escurece também os botões de janela (desenhados pelo Windows, fora do véu da página)', async ({ kora }) => {
+  const run = await kora.launch(kora.env())
+  const page = run.page
+  await run.app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0]!
+    const g = globalThis as unknown as { __overlays: string[] }
+    g.__overlays = []
+    const original = win.setTitleBarOverlay.bind(win)
+    win.setTitleBarOverlay = (options) => {
+      g.__overlays.push(`${options.color}/${options.symbolColor}`)
+      original(options)
+    }
+  })
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.emulateMedia({ colorScheme: 'light' })
+  const last = () => run.app.evaluate(() => (globalThis as unknown as { __overlays: string[] }).__overlays.at(-1) ?? '')
+  const normal = '#f6f7f9/#15171b'
+  // Fundo e símbolos claros misturados com preto a 50%, como o véu bg-black/50 dos diálogos.
+  const dimmed = '#7b7c7d/#0b0c0e'
+  await expect.poll(last).toBe(normal)
+
+  await page.getByTitle('Configurações').click()
+  await expect.poll(last, 'Configurações abertas').toBe(dimmed)
+  await page.keyboard.press('Escape')
+  await expect.poll(last, 'Configurações fechadas').toBe(normal)
+
+  await page.locator('aside nav [data-project-row]').first().click({ button: 'right' })
+  await ui.menuItem(page, 'Remover da lista').click()
+  await expect(page.locator('[role=dialog]')).toBeVisible()
+  await expect.poll(last, 'confirmação aberta').toBe(dimmed)
+  await page.locator('[role=dialog]').getByRole('button', { name: 'Cancelar' }).click()
+  await expect.poll(last, 'confirmação fechada').toBe(normal)
+})

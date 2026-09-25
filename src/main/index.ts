@@ -216,11 +216,19 @@ function scheduleDetect(): void {
 const TOP_ROW_PX = 40
 // Até a interface carregar vale o tema do Windows; depois ela informa o tema que de fato desenhou.
 let rendererDark: boolean | null = null
+// Com diálogo aberto a página fica sob um véu preto a 50%; os botões de janela recebem a mesma mistura.
+let windowDimmed = false
+const DIM_ALPHA = 0.5
+const dim = (hex: string): string =>
+  `#${[1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * (1 - DIM_ALPHA)).toString(16).padStart(2, '0')).join('')}`
+
 function titleBarOverlay(): Electron.TitleBarOverlayOptions {
   const dark = rendererDark ?? nativeTheme.shouldUseDarkColors
+  const color = dark ? '#16171b' : '#f6f7f9'
+  const symbolColor = dark ? '#eceef2' : '#15171b'
   return {
-    color: dark ? '#16171b' : '#f6f7f9',
-    symbolColor: dark ? '#eceef2' : '#15171b',
+    color: windowDimmed ? dim(color) : color,
+    symbolColor: windowDimmed ? dim(symbolColor) : symbolColor,
     height: Math.round(TOP_ROW_PX * state.settings.zoom)
   }
 }
@@ -460,6 +468,10 @@ function registerIpc(): void {
       'utf8'
     )
     return result.filePath
+  })
+  ipcMain.on('window:dimmed', (_e, dimmed: unknown) => {
+    windowDimmed = dimmed === true
+    mainWindow?.setTitleBarOverlay(titleBarOverlay())
   })
   ipcMain.on('window:dark', (_e, dark: unknown) => {
     rendererDark = dark === true
