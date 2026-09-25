@@ -425,6 +425,38 @@ const MUTANTS = [
     bug: 'status "shell" do Claude (comando rodando) sem estado: o turno não termina como "trabalhando → esperando" e o sino não toca',
     find: "if (status === 'busy' || status === 'shell') return 'working'",
     replace: "if (status === 'busy') return 'working'"
+  },
+  {
+    id: 'M60',
+    grep: 'R59 ',
+    file: 'src/renderer/src/main.tsx',
+    bug: 'erro de script na interface não vai para o log',
+    find: "window.addEventListener('error', (event) => window.kora.reportError(errorText(event.error, event.message)))",
+    replace: ''
+  },
+  {
+    id: 'M60b',
+    grep: 'R59 ',
+    file: 'src/main/index.ts',
+    bug: 'exceção não tratada no main sem captura (diálogo nativo, nada no log)',
+    find: "process.on('uncaughtException', (err) => {",
+    replace: "process.on('sem-captura' as 'uncaughtException', (err) => {"
+  },
+  {
+    id: 'M60c',
+    grep: 'R59 ',
+    file: 'src/main/index.ts',
+    bug: 'console.error do main não vai para o log',
+    find: "  errorLog.record('main', args.map(errorText).join(' '))",
+    replace: '  void args'
+  },
+  {
+    id: 'M60d',
+    grep: 'R59 ',
+    file: 'src/main/index.ts',
+    bug: 'Salvar arquivo falha quando a pasta Downloads não resolve',
+    find: '      folder = homedir()',
+    replace: "      throw new Error('sem pasta de downloads')"
   }
 ]
 

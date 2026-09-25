@@ -18,6 +18,14 @@ if (!vitrine) {
   dark.addEventListener('change', applyTheme)
 }
 
+// Erro de script ou promessa rejeitada sem tratamento na interface vai para o log de erros do main.
+const errorText = (error: unknown, fallback: string): string =>
+  error instanceof Error ? (error.stack ?? `${error.name}: ${error.message}`) : error === undefined ? fallback : String(error)
+window.addEventListener('error', (event) => window.kora.reportError(errorText(event.error, event.message)))
+window.addEventListener('unhandledrejection', (event) =>
+  window.kora.reportError(`promessa rejeitada sem tratamento: ${errorText(event.reason, 'sem motivo')}`)
+)
+
 // Tarefa longa na interface (clique que não responde) vai para o lag.log do main, junto com os travamentos dele.
 const LONG_TASK_MS = 300
 try {

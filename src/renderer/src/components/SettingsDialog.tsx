@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { UpdateStatus } from '@shared/update'
 import type { Alerts } from '@shared/state'
+import type { ErrorSummary } from '@shared/ipc'
 import { Button } from '@/brand/Button'
 import { Icon } from '@/brand/icons'
 import { Lockup } from '@/brand/Logo'
@@ -20,6 +21,70 @@ export interface SettingsPanelProps {
   alerts: Alerts
   onAlertsChange(next: Alerts): void
   onPreviewSound(): void
+  support: SupportActions
+}
+
+export interface SupportActions {
+  // null enquanto carrega.
+  errors: ErrorSummary | null
+  // Devolvem o que aconteceu, para o painel mostrar; o "Salvar" devolve null se o usuário cancelou.
+  copyRecent(): Promise<void>
+  saveFile(): Promise<string | null>
+  openFolder(): Promise<void>
+}
+
+const dateTime = (iso: string): string =>
+  new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+function Support({ support }: { support: SupportActions }): React.JSX.Element {
+  const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null)
+  const run = (task: () => Promise<string | null>): void => {
+    setFeedback(null)
+    task().then(
+      (text) => text && setFeedback({ text, error: false }),
+      (err: unknown) => setFeedback({ text: err instanceof Error ? err.message : String(err), error: true })
+    )
+  }
+  const { errors } = support
+  const none = errors?.count === 0
+  return (
+    <section className="flex flex-col gap-2.5 border-t px-4 py-3.5">
+      <h3 className="text-xs font-semibold">Suporte</h3>
+      <p data-errors-summary className="text-xs text-muted-foreground">
+        {errors === null
+          ? 'Lendo o log de erros…'
+          : none
+            ? 'Nenhum erro registrado.'
+            : `${errors.count} ${errors.count === 1 ? 'erro registrado' : 'erros registrados'}${errors.lastAt ? `, o último em ${dateTime(errors.lastAt)}` : ''}.`}
+      </p>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        O log fica só neste computador. Para pedir ajuda, copie os últimos erros ou salve o arquivo completo e envie junto.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="secondary" disabled={errors === null || none} onClick={() => run(async () => (await support.copyRecent(), 'Copiado para a área de transferência.'))}>
+          Copiar últimos erros
+        </Button>
+        <Button variant="secondary" onClick={() => run(async () => {
+          const path = await support.saveFile()
+          return path ? `Salvo em ${path}` : null
+        })}>
+          Salvar arquivo…
+        </Button>
+        <button
+          type="button"
+          onClick={() => run(async () => (await support.openFolder(), null))}
+          className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        >
+          Abrir pasta
+        </button>
+      </div>
+      {feedback && (
+        <p role="status" className={cn('break-all text-[11px]', feedback.error ? 'text-destructive' : 'text-muted-foreground')}>
+          {feedback.text}
+        </p>
+      )}
+    </section>
+  )
 }
 
 function Toggle(props: { checked: boolean; label: string; detail: string; onChange(checked: boolean): void; children?: React.ReactNode }): React.JSX.Element {
@@ -174,6 +239,8 @@ export function SettingsPanel(props: SettingsPanelProps): React.JSX.Element {
           onChange={(windowsNotification) => props.onAlertsChange({ ...props.alerts, windowsNotification })}
         />
       </section>
+
+      <Support support={props.support} />
 
       <section className="flex flex-wrap gap-x-4 gap-y-1 border-t px-4 py-3 text-xs">
         <Links />

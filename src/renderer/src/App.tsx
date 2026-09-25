@@ -4,7 +4,7 @@ import type { AgentSession } from '@shared/agent'
 import { viewerFor } from '@shared/file-kind'
 import { arrangeProjects, reorder, sortBySection, type Place, type ProjectDrop } from '@shared/arrange'
 import { moveAmongSiblings, nestGroup, placeGroup, removeGroup, setGroupHidden } from '@shared/groups'
-import type { CloseKind, Launch, SessionSummary, TabRef } from '@shared/ipc'
+import type { CloseKind, ErrorSummary, Launch, SessionSummary, TabRef } from '@shared/ipc'
 import { Sidebar, type GroupAction } from '@/components/Sidebar'
 import { TabBar, type Tab } from '@/components/TabBar'
 import { TerminalView } from '@/components/TerminalView'
@@ -110,6 +110,12 @@ export function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [installing, setInstalling] = useState(false)
   const closeSettings = useCallback(() => setSettingsOpen(false), [])
+  const [errorSummary, setErrorSummary] = useState<ErrorSummary | null>(null)
+  useEffect(() => {
+    if (!settingsOpen) return
+    setErrorSummary(null)
+    window.kora.errorSummary().then(setErrorSummary, () => setErrorSummary({ count: 0, lastAt: null }))
+  }, [settingsOpen])
 
   useEffect(() => {
     window.kora.updateStatus().then(setUpdate, () => {})
@@ -128,11 +134,17 @@ export function App(): React.JSX.Element {
     sizesRef.current = { zoom, terminalFontSize, fileFontSize }
   }
 
-  const flash = useCallback((text: string) => {
+  const flash = useCallback((text: string, ms = 1200) => {
     setToast(text)
     clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(null), 1200)
+    toastTimer.current = setTimeout(() => setToast(null), ms)
   }, [])
+
+  // Exceção não tratada no main já não abre o diálogo nativo do Electron: o aviso é este, e o detalhe fica no log.
+  useEffect(
+    () => window.kora.onAppError(() => flash('Algo deu errado e ficou registrado em Configurações › Suporte.', 6000)),
+    [flash]
+  )
 
   const stepSize = useCallback(
     (key: keyof Sizes, direction: 1 | -1 | 0) => {
@@ -931,6 +943,12 @@ export function App(): React.JSX.Element {
           alerts={state.settings.alerts}
           onAlertsChange={(alerts) => void window.kora.setAlerts(alerts).then(setState)}
           onPreviewSound={playChime}
+          support={{
+            errors: errorSummary,
+            copyRecent: async () => navigator.clipboard.writeText(await window.kora.recentErrors()),
+            saveFile: () => window.kora.saveDiagnostic(),
+            openFolder: () => window.kora.openLogsFolder()
+          }}
         />
       )}
 

@@ -10,6 +10,7 @@ import {
   pngBytes,
   pressNative,
   processSnapshot,
+  readClipboardText,
   readLog,
   readState,
   restoreClipboard,
@@ -413,4 +414,71 @@ test('R36 versão pronta aparece na lateral; com arquivo não salvo, Atualizar a
   expect(readFileSync(join(env.project, 'notas.txt'), 'utf8')).toBe('antes\ndepois')
   await expect(banner.getByRole('button', { name: 'Atualizar agora' })).toBeEnabled()
   expect(isAlive(run.pid)).toBe(true)
+})
+
+test('R59 log de erros para suporte: erros da interface e do main ficam registrados; Configurações conta, copia e salva o diagnóstico; o app segue vivo', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  const errorsFile = join(env.userData, 'logs', 'errors.log')
+  const openSupport = async () => {
+    await page.getByTitle('Configurações').click()
+    return page.getByRole('dialog', { name: 'Configurações' })
+  }
+
+  let dialog = await openSupport()
+  await expect(dialog.locator('[data-errors-summary]')).toHaveText('Nenhum erro registrado.')
+  await expect(dialog.getByRole('button', { name: 'Copiar últimos erros' })).toBeDisabled()
+  await page.keyboard.press('Escape')
+
+  await page.evaluate(() => {
+    setTimeout(() => {
+      throw new Error('erro de teste na interface')
+    })
+    void Promise.reject(new Error('rejeição de teste na interface'))
+  })
+  await run.app.evaluate(() => {
+    console.error('[kora] falha simulada no main')
+    setTimeout(() => {
+      throw new Error('erro de teste no main')
+    })
+  })
+  await expect(page.getByText('Algo deu errado e ficou registrado em Configurações › Suporte.')).toBeVisible()
+  await waitFor(() => {
+    const text = existsSync(errorsFile) ? readFileSync(errorsFile, 'utf8') : ''
+    return ['erro de teste na interface', 'rejeição de teste na interface', 'falha simulada no main', 'erro de teste no main'].every((m) =>
+      text.includes(m)
+    )
+  }, 'os quatro erros no errors.log')
+  expect(readFileSync(errorsFile, 'utf8')).toMatch(/\[interface\] .*Error: erro de teste na interface\n {4}at /)
+  expect(isAlive(run.pid), 'exceção não tratada no main não derruba o app').toBe(true)
+
+  dialog = await openSupport()
+  await expect(dialog.locator('[data-errors-summary]')).toContainText('4 erros registrados')
+
+  const saved = await saveClipboard(run)
+  try {
+    await dialog.getByRole('button', { name: 'Copiar últimos erros' }).click()
+    await expect(dialog.getByText('Copiado para a área de transferência.')).toBeVisible()
+    const copied = await readClipboardText(run)
+    expect(copied).toContain('erro de teste no main')
+    expect(copied).toContain('erro de teste na interface')
+  } finally {
+    await restoreClipboard(run, saved)
+  }
+
+  const target = join(env.root, 'diagnostico.txt')
+  await run.app.evaluate(({ dialog: native }, file) => {
+    native.showSaveDialog = (async () => ({ canceled: false, filePath: file })) as typeof native.showSaveDialog
+  }, target)
+  await dialog.getByRole('button', { name: 'Salvar arquivo…' }).click()
+  await expect(dialog.getByText(`Salvo em ${target}`)).toBeVisible()
+  const file = readFileSync(target, 'utf8')
+  expect(file).toContain('===== Ambiente =====')
+  expect(file).toMatch(/Versão do Kora: \d+\.\d+\.\d+/)
+  expect(file).toContain('===== Erros =====')
+  expect(file).toContain('erro de teste no main')
+  expect(file).toContain('===== Travamentos (lag.log) =====')
+  expect(file).toContain('===== Atualização (updater.log) =====')
+  expect(await run.nativeDialogs(), 'nenhum diálogo nativo de erro').toEqual([])
 })

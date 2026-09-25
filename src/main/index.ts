@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, release } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -20,6 +20,7 @@ import { ProcessRegistry, type Survivor } from './process-registry'
 import { ProjectWatchers } from './project-watcher'
 import { createLagMonitor } from './lag-monitor'
 import { autoUpdater } from 'electron-updater'
+import { createErrorLog, errorText } from './error-log'
 import { startUpdates, type Updates } from './updater'
 import type { UpdateStatus } from '../shared/update'
 import { resolveTerminalLink } from './terminal-links'
@@ -414,6 +415,49 @@ function registerIpc(): void {
     commit({ ...state, settings: { ...state.settings, alerts: AlertsSchema.parse(alerts) } })
   )
   ipcMain.on('window:focus', () => showWindow())
+  ipcMain.on('errors:report', (_e, text: unknown) => errorLog.record('interface', String(text)))
+  ipcMain.handle('errors:summary', () => errorLog.summary())
+  // Cabe numa mensagem de chat ou num e-mail; o arquivo completo sai pelo "Salvar arquivo".
+  ipcMain.handle('errors:recent', () => errorLog.recent(8000))
+  ipcMain.handle('errors:open-folder', async () => {
+    const error = await shell.openPath(dirname(errorLog.file))
+    if (error) throw new Error(error)
+  })
+  ipcMain.handle('errors:save', async () => {
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-')
+    // getPath('downloads') lança quando a pasta conhecida não existe ou não resolve; aí o diálogo abre na pasta do usuário.
+    let folder: string
+    try {
+      folder = app.getPath('downloads')
+    } catch {
+      folder = homedir()
+    }
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      title: 'Salvar arquivo de diagnóstico',
+      defaultPath: join(folder, `kora-diagnostico-${stamp}.txt`),
+      filters: [{ name: 'Texto', extensions: ['txt'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    const env = {
+      'Versão do Kora': app.getVersion(),
+      Instalado: app.isPackaged ? 'sim' : 'não (desenvolvimento)',
+      Windows: `${release()} (${process.arch})`,
+      Electron: process.versions.electron ?? '',
+      Chrome: process.versions.chrome ?? '',
+      Node: process.versions.node,
+      'Gerado em': new Date().toISOString()
+    }
+    const userData = app.getPath('userData')
+    writeFileSync(
+      result.filePath,
+      errorLog.diagnostic(env, [
+        { name: 'Travamentos (lag.log)', file: join(userData, 'lag.log') },
+        { name: 'Atualização (updater.log)', file: join(userData, 'updater.log') }
+      ]),
+      'utf8'
+    )
+    return result.filePath
+  })
   ipcMain.on('window:dark', (_e, dark: unknown) => {
     rendererDark = dark === true
     mainWindow?.setTitleBarOverlay(titleBarOverlay())
@@ -577,6 +621,28 @@ protocol.registerSchemesAsPrivileged(KORA_FILE_PRIVILEGED_SCHEMES)
 // A instância de desenvolvimento tem dados próprios: assim roda ao lado da instalada sem disputar o estado nem a trava de instância única.
 if (process.env['KORA_USER_DATA']) app.setPath('userData', process.env['KORA_USER_DATA'])
 else if (!app.isPackaged) app.setPath('userData', join(app.getPath('appData'), 'Kora ADE Dev'))
+
+// Log de erros para suporte, ligado antes de tudo: o console.error dos módulos, exceção não tratada, promessa
+// rejeitada sem tratamento e processo que cai viram entradas no errors.log. Nada sai do computador sozinho.
+const errorLog = createErrorLog({ dir: join(app.getPath('userData'), 'logs') })
+const consoleError = console.error.bind(console)
+console.error = (...args: unknown[]) => {
+  consoleError(...args)
+  errorLog.record('main', args.map(errorText).join(' '))
+}
+// Com o handler o Electron não mostra mais o diálogo nativo de erro; a interface avisa que ficou registrado.
+process.on('uncaughtException', (err) => {
+  errorLog.record('main', err, 'exceção não tratada')
+  mainWindow?.webContents.send('app:error')
+})
+process.on('unhandledRejection', (reason) => errorLog.record('main', reason, 'promessa rejeitada sem tratamento'))
+app.on('render-process-gone', (_e, _contents, details) =>
+  errorLog.record('processo', `interface caiu: ${details.reason} (código ${details.exitCode})`)
+)
+app.on('child-process-gone', (_e, details) => {
+  if (details.reason === 'clean-exit') return
+  errorLog.record('processo', `${details.type} caiu: ${details.reason} (código ${details.exitCode})`)
+})
 
 // Duas instâncias gravariam o mesmo kora-state.json e uma apagaria os projetos da outra.
 if (!app.requestSingleInstanceLock()) app.quit()

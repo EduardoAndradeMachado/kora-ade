@@ -52,6 +52,11 @@ export interface TabRef {
 // Por que o app pediu para a interface resolver os arquivos não salvos: o X esconde na bandeja, o resto encerra.
 export type CloseKind = 'hide' | 'quit'
 
+export interface ErrorSummary {
+  count: number
+  lastAt: string | null
+}
+
 export interface KoraApi {
   windowsBuild: number
 
@@ -61,6 +66,15 @@ export interface KoraApi {
   setAlerts(alerts: Alerts): Promise<KoraState>
   // Traz a janela para a frente (clique na notificação do Windows).
   focusWindow(): void
+
+  // Log de erros local para suporte: nada sai do computador sem o usuário copiar ou salvar.
+  reportError(text: string): void
+  errorSummary(): Promise<ErrorSummary>
+  recentErrors(): Promise<string>
+  // Caminho do arquivo salvo, ou null se o usuário cancelou.
+  saveDiagnostic(): Promise<string | null>
+  openLogsFolder(): Promise<void>
+  onAppError(listener: () => void): () => void
   addProject(): Promise<KoraState>
   addProjectPath(path: string): Promise<KoraState>
   removeProject(id: string): Promise<KoraState>
