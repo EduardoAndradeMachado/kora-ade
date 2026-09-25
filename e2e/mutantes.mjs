@@ -489,6 +489,30 @@ const MUTANTS = [
     bug: 'mensagem de erro da seção Suporte sai com o texto técnico do IPC',
     find: 'setFeedback({ text: ipcErrorMessage(err), error: true })',
     replace: 'setFeedback({ text: String(err), error: true })'
+  },
+  {
+    id: 'M63',
+    grep: 'R62 ',
+    file: 'src/renderer/src/components/DormantView.tsx',
+    bug: 'aba adormecida com sessão volta a oferecer trocar a sessão vinculada',
+    find: '{agent ? null : !editing ? (',
+    replace: '{!editing ? ('
+  },
+  {
+    id: 'M63b',
+    grep: 'R62 ',
+    file: 'src/renderer/src/components/DormantView.tsx',
+    bug: 'copiar o ID da sessão não mostra confirmação',
+    find: '      setCopied(true)',
+    replace: '      void setCopied'
+  },
+  {
+    id: 'M63c',
+    grep: 'R62 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'copiar o ID pelo menu da aba não avisa',
+    find: ".then(() => flash('ID da sessão copiado'))",
+    replace: ''
   }
 ]
 

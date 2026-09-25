@@ -7,8 +7,11 @@ import {
   isAlive,
   newTab,
   processSnapshot,
+  readClipboardText,
   readLog,
   readState,
+  restoreClipboard,
+  saveClipboard,
   starts,
   typeLine,
   ui,
@@ -512,4 +515,47 @@ test('R58 easter egg: sino tocando em outra sessão faz o símbolo da tela vazia
   })
   expect(swing?.state, 'animação kora-balanca rodando no símbolo').toBe('running')
   expect(swing!.turns.filter((t) => /rotate\(-?[1-9]/.test(t)).length, 'etapas com rotação').toBeGreaterThan(2)
+})
+
+test('R62 aba adormecida com sessão mostra só Continuar chat e o ID; aba sem sessão mantém Abrir terminal e Vincular', async ({ kora }) => {
+  const env = kora.env()
+  const sessionId = randomUUID()
+  writeState(env, {
+    version: 2,
+    projects: [{ id: 'p1', name: 'proj-teste', path: env.project }],
+    tabs: [
+      { id: 't1', projectId: 'p1', title: 'Com sessão', titleLocked: true, agent: { kind: 'claude', sessionId } },
+      { id: 't2', projectId: 'p1', title: 'Sem sessão', titleLocked: true, agent: null }
+    ]
+  })
+  const run = await kora.launch(env)
+  const page = run.page
+  const view = page.locator('[data-dormant]').filter({ visible: true })
+
+  await ui.sideTab(page, 'Com sessão').click()
+  await expect(view.getByRole('button', { name: 'Continuar chat' })).toBeVisible()
+  const copy = view.getByTitle('Copiar ID da sessão')
+  await expect(copy).toContainText(sessionId)
+  await expect(view.getByText('Abrir terminal vazio')).toHaveCount(0)
+  await expect(view.getByText('Trocar a sessão vinculada')).toHaveCount(0)
+  await expect(view.getByRole('button'), 'só Continuar chat e o ID').toHaveCount(2)
+
+  const saved = await saveClipboard(run)
+  try {
+    await expect(view.getByText('Copiado')).toHaveCount(0)
+    await copy.click()
+    await expect(view.getByText('Copiado'), 'confirmação na hora, no próprio botão').toBeVisible()
+    expect(await readClipboardText(run)).toBe(sessionId)
+    await expect(view.getByText('Copiado')).toHaveCount(0, { timeout: 5000 })
+
+    await ui.sideTab(page, 'Com sessão').click({ button: 'right' })
+    await ui.menuItem(page, 'Copiar ID da sessão').click()
+    await expect(page.getByText('ID da sessão copiado'), 'aviso ao copiar pelo menu').toBeVisible()
+  } finally {
+    await restoreClipboard(run, saved)
+  }
+
+  await ui.sideTab(page, 'Sem sessão').click()
+  await expect(view.getByRole('button', { name: 'Abrir terminal' })).toBeVisible()
+  await expect(view.getByText('Vincular uma sessão manualmente')).toBeVisible()
 })

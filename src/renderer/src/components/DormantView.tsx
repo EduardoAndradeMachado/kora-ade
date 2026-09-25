@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Icon } from '@/brand/icons'
 import { Button } from '@/brand/Button'
 import { SESSION_ID, type AgentKind, type AgentSession } from '@shared/agent'
@@ -20,9 +20,19 @@ export function DormantView(props: Props): React.JSX.Element {
   const [kind, setKind] = useState<AgentKind>(agent?.kind ?? 'claude')
   const [sessionId, setSessionId] = useState(agent?.sessionId ?? '')
   const valid = SESSION_ID.test(sessionId.trim())
+  const [copied, setCopied] = useState(false)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(copiedTimer.current), [])
+  const copyId = (id: string): void => {
+    void navigator.clipboard.writeText(id).then(() => {
+      setCopied(true)
+      clearTimeout(copiedTimer.current)
+      copiedTimer.current = setTimeout(() => setCopied(false), 1500)
+    })
+  }
 
   return (
-    <div className={cn('absolute inset-0 flex items-center justify-center bg-canvas px-6', !visible && 'invisible')}>
+    <div data-dormant className={cn('absolute inset-0 flex items-center justify-center bg-canvas px-6', !visible && 'invisible')}>
       <div className="flex w-full max-w-md flex-col items-center gap-4 text-center">
         {agent ? (
           <>
@@ -35,22 +45,20 @@ export function DormantView(props: Props): React.JSX.Element {
               <button
                 type="button"
                 title="Copiar ID da sessão"
-                onClick={() => void navigator.clipboard.writeText(agent.sessionId)}
+                onClick={() => copyId(agent.sessionId)}
                 className="mx-auto flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground"
               >
                 {agent.sessionId}
-                <Icon name="copiar" className="size-3" />
+                <Icon name={copied ? 'ok' : 'copiar'} className={cn('size-3', copied && 'text-[var(--brand-amber)]')} />
               </button>
+              <span role="status" className="h-4 text-[11px] text-[var(--brand-amber)]">
+                {copied ? 'Copiado' : ''}
+              </span>
             </div>
-            <div className="flex gap-2">
-              <Button onClick={onResume}>
-                <Icon name="retomar" className="size-3.5" />
-                Continuar chat
-              </Button>
-              <Button variant="secondary" onClick={onShell}>
-                Abrir terminal vazio
-              </Button>
-            </div>
+            <Button onClick={onResume}>
+              <Icon name="retomar" className="size-3.5" />
+              Continuar chat
+            </Button>
           </>
         ) : (
           <>
@@ -60,13 +68,14 @@ export function DormantView(props: Props): React.JSX.Element {
           </>
         )}
 
-        {!editing ? (
+        {/* Vincular à mão só na aba sem sessão (é o caminho do "Sessão existente"); a aba com sessão só continua. */}
+        {agent ? null : !editing ? (
           <button
             type="button"
             onClick={() => setEditing(true)}
             className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           >
-            {agent ? 'Trocar a sessão vinculada' : 'Vincular uma sessão manualmente'}
+            Vincular uma sessão manualmente
           </button>
         ) : (
           <form
@@ -103,18 +112,6 @@ export function DormantView(props: Props): React.JSX.Element {
             />
             {sessionId && !valid && <span className="text-[11px] text-destructive">Formato esperado: UUID.</span>}
             <div className="flex justify-end gap-2">
-              {agent && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSetAgent(null)
-                    setEditing(false)
-                  }}
-                  className="mr-auto rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-destructive"
-                >
-                  Desvincular
-                </button>
-              )}
               <button
                 type="button"
                 onClick={() => setEditing(false)}

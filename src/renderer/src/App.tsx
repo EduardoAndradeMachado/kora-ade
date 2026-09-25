@@ -743,7 +743,10 @@ export function App(): React.JSX.Element {
     }
     if (tab.agent) {
       const sessionId = tab.agent.sessionId
-      items.push({ label: 'Copiar ID da sessão', onSelect: () => void navigator.clipboard.writeText(sessionId) })
+      items.push({
+        label: 'Copiar ID da sessão',
+        onSelect: () => void navigator.clipboard.writeText(sessionId).then(() => flash('ID da sessão copiado'))
+      })
     }
     return [...items, 'separator', close]
   }
