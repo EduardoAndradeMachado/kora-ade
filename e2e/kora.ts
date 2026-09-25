@@ -14,7 +14,11 @@ const electronPath = createRequire(join(ROOT, 'package.json'))('electron') as un
 const PACKAGED = process.env['KORA_E2E_EXE']
 const appExe = PACKAGED ?? electronPath
 // gc() exposto no main: o teste de memória coleta o lixo antes de medir, senão o heap pequeno cresce até o V8 decidir coletar.
-const appArgs = PACKAGED ? ['--js-flags=--expose-gc'] : ['--js-flags=--expose-gc', BUILD_DIR]
+// Sem o rastreador de janela encoberta do Windows: com a janela fora da tela (ou coberta por outra) ele pode
+// marcá-la como encoberta no meio da suíte, e aí o Chromium para de desenhar e não dispara eventos que só saem
+// no desenho, como a troca de tema (prefers-color-scheme).
+const chromiumFlags = ['--js-flags=--expose-gc', '--disable-features=CalculateNativeWinOcclusion']
+const appArgs = PACKAGED ? chromiumFlags : [...chromiumFlags, BUILD_DIR]
 
 export interface KoraEnv {
   root: string
