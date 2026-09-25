@@ -309,6 +309,20 @@ export async function launch(env: KoraEnv): Promise<KoraRun> {
     env: appEnv(env),
     timeout: 60_000
   })
+  // A janela nasce fora da tela e sem tirar o foco do Windows de quem está usando a máquina: o mouse físico não
+  // passa por cima dela (hover e arrasto dos testes) e o que se digita não cai no app de teste. Para o Chromium ela
+  // continua visível e com foco (animação, timers, área de transferência e barra da janela iguais).
+  // KORA_E2E_VISIBLE=1 abre na tela, para acompanhar um teste.
+  if (!process.env['KORA_E2E_VISIBLE']) {
+    await app.evaluate(({ app: electronApp, BrowserWindow }) => {
+      const park = (w: Electron.BrowserWindow): void => {
+        w.setPosition(-4000, -4000)
+        w.show = () => w.showInactive()
+      }
+      BrowserWindow.getAllWindows().forEach(park)
+      electronApp.on('browser-window-created', (_e, w) => park(w))
+    })
+  }
   await app.evaluate(({ dialog }) => {
     const g = globalThis as { __koraNativeDialogs?: string[] }
     g.__koraNativeDialogs = []
