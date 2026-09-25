@@ -15,6 +15,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          # As notas comparam com a tag anterior: precisa do histórico e das tags.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
@@ -30,12 +33,15 @@ jobs:
           [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME, package.json $version"; exit 1; }
       - run: pnpm check
       - run: pnpm exec electron-vite build
+      - name: Notas da Release pelos commits desde a tag anterior
+        shell: bash
+        run: node scripts/release-notes.ts "$GITHUB_REF_NAME" > release-notes.md && cat release-notes.md
       # O electron-builder cria a Release em paralelo para cada arquivo e às vezes cria duas com a mesma tag
       # (aconteceu na 0.1.1 e na 0.1.2): a "última" podia ficar só com o .blockmap e o atualizador recebia 404
       # no latest.yml. Com um rascunho já criado, ele só envia os arquivos para ele.
       - name: Cria a Release como rascunho
         shell: bash
-        run: gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "${GITHUB_REF_NAME#v}" --notes ""
+        run: gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "${GITHUB_REF_NAME#v}" --notes-file release-notes.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: pnpm exec electron-builder --win --publish always
@@ -51,6 +57,6 @@ jobs:
           for file in "Kora-ADE-Setup-$version.exe" "Kora-ADE-Setup-$version.exe.blockmap" latest.yml; do
             case "$assets" in *" $file "*) ;; *) echo "falta $file na Release (tem:$assets)"; exit 1 ;; esac
           done
-          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest --notes-file release-notes.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
