@@ -10,6 +10,7 @@ import { currentTerminalLook, onThemeChange } from '@/lib/terminal-theme'
 import { TERMINAL_FONT } from '@shared/state'
 import { cn } from '@/lib/utils'
 import { FILE_MIME } from '@/lib/drag'
+import { isCopiedPath } from '@/lib/copied-path'
 import { findPathCandidates } from '@shared/terminal-links'
 
 const cssVar = (name: string): string =>
@@ -119,6 +120,13 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
     // Print colado com Ctrl+V vira arquivo e o terminal recebe o caminho, como se fosse arrastado:
     // Claude/Codex anexam imagem a partir do caminho colado. Texto segue o fluxo normal do xterm.
     const onPaste = (event: ClipboardEvent): void => {
+      const text = event.clipboardData?.getData('text/plain') ?? ''
+      if (isCopiedPath(text)) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        window.kora.writeTerminal(id, text)
+        return
+      }
       const item = [...(event.clipboardData?.items ?? [])].find((i) => i.kind === 'file' && i.type.startsWith('image/'))
       const file = item?.getAsFile()
       if (!file) return

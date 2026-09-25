@@ -45,8 +45,8 @@ const cleanup = () => rmSync(pidFile, { force: true })
 // O Claude real troca o título do terminal enquanto trabalha; isso testa se o nome dado pelo usuário resiste.
 let turns = 0
 onLines(
-  (line) => {
-    log('claude', 'input', { sessionId, line })
+  (line, pasted) => {
+    log('claude', 'input', { sessionId, line, pasted })
     if (line.trim() === '/exit') {
       cleanup()
       log('claude', 'exit', { sessionId })

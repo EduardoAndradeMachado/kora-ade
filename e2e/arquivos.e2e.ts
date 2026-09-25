@@ -603,3 +603,44 @@ test('R55 arquivos soltos do Explorer do Windows numa pasta da árvore (ou na á
   await expect(row(run, 'print.png')).toBeVisible()
   expect(existsSync(join(env.project, 'print.png')), 'solto na área vazia vai para a raiz').toBe(true)
 })
+
+test('R65 "Copiar caminho" de imagem e Ctrl+V no chat chega como texto digitado; arrastar a imagem continua chegando como colar', async ({ kora }) => {
+  const env = kora.env()
+  writeFileSync(join(env.project, 'tela.png'), pngBytes())
+  const image = join(env.project, 'tela.png')
+  const run = await kora.launch(env)
+  const page = run.page
+  await newTab(page, 'Claude')
+  await waitFor(() => starts(env, 'claude')[0], 'claude falso subiu')
+  const inputs = () => readLog(env).filter((e) => e.event === 'input')
+  const sendLine = async (): Promise<{ line?: string; pasted?: boolean }> => {
+    const before = inputs().length
+    await ui.terminal(page).click()
+    await page.keyboard.press('Enter')
+    return waitFor(() => inputs()[before], 'claude falso recebeu a linha')
+  }
+
+  // Arrastar: o Claude real anexa a imagem porque recebe um colar com o caminho.
+  await row(run, 'tela.png').dragTo(ui.terminal(page))
+  const dragged = await sendLine()
+  expect(dragged.line?.trim()).toBe(image)
+  expect(dragged.pasted, 'arrastar chega como colar').toBe(true)
+
+  const saved = await saveClipboard(run)
+  try {
+    await row(run, 'tela.png').click({ button: 'right' })
+    await page.locator('body > div.fixed button').filter({ hasText: /^Copiar caminho$/ }).click()
+    await ui.terminal(page).click()
+    await page.keyboard.press('Control+V')
+    expect(await sendLine(), '"Copiar caminho" do Kora chega digitado: o Claude não converte em imagem').toMatchObject({ line: image, pasted: false })
+
+    // Caminho que veio de fora do Kora segue o comportamento normal do terminal.
+    const outside = join(env.root, 'outra.png')
+    await run.app.evaluate(({ clipboard }, text) => clipboard.writeText(text), outside)
+    await ui.terminal(page).click()
+    await page.keyboard.press('Control+V')
+    expect(await sendLine()).toMatchObject({ line: outside, pasted: true })
+  } finally {
+    await restoreClipboard(run, saved)
+  }
+})

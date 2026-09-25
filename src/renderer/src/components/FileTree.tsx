@@ -8,6 +8,7 @@ import { ipcErrorMessage, isNotFound } from '@/lib/ipc-error'
 import { cn } from '@/lib/utils'
 import { FILE_MIME } from '@/lib/drag'
 import { windowsFileUrl } from '@shared/file-url'
+import { copyPath } from '@/lib/copied-path'
 
 interface Props {
   projectId: string
@@ -295,8 +296,8 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
       return [...creation, 'separator', { label: 'Abrir pasta do projeto no Explorer', onSelect: () => act(() => window.kora.revealInExplorer(projectId, '')) }]
     }
     const copy: MenuItem[] = [
-      { label: 'Copiar caminho', onSelect: () => act(() => navigator.clipboard.writeText(absolute(target.path))) },
-      { label: 'Copiar caminho relativo', onSelect: () => act(() => navigator.clipboard.writeText(target.path)) }
+      { label: 'Copiar caminho', onSelect: () => act(() => copyPath(absolute(target.path))) },
+      { label: 'Copiar caminho relativo', onSelect: () => act(() => copyPath(target.path)) }
     ]
     if (target.isDir) {
       return [

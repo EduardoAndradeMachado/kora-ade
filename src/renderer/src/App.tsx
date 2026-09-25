@@ -23,6 +23,7 @@ import { SymbolMark } from '@/brand/Logo'
 import { OrphanDialog, type OrphanSurvivor } from '@/components/OrphanDialog'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { playChime } from '@/lib/chime'
+import { copyPath } from '@/lib/copied-path'
 import { finishedUnseen } from '@/lib/alerts'
 import { agentLabel } from '@/components/AgentIcon'
 import type { UpdateStatus } from '@shared/update'
@@ -723,7 +724,7 @@ export function App(): React.JSX.Element {
     if (tab.kind === 'file') {
       return [
         { label: 'Mostrar no Explorer', onSelect: () => void window.kora.revealInExplorer(projectId, tab.path) },
-        { label: 'Copiar caminho relativo', onSelect: () => void navigator.clipboard.writeText(tab.path) },
+        { label: 'Copiar caminho relativo', onSelect: () => void copyPath(tab.path) },
         'separator',
         close
       ]

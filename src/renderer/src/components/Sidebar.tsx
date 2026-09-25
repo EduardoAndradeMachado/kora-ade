@@ -10,6 +10,7 @@ import { UsageFooter } from '@/components/UsageFooter'
 import { SizeControl } from '@/components/SizeControl'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { cn } from '@/lib/utils'
+import { copyPath } from '@/lib/copied-path'
 import { Icon, type IconName } from '@/brand/icons'
 import { Wordmark } from '@/brand/Logo'
 import { hintClass, mergeDragHandlers, mimeFor, useReorderDrag } from '@/lib/drag'
@@ -195,7 +196,7 @@ export function Sidebar(props: Props): React.JSX.Element {
           .then(() => setIconVersion((v) => ({ ...v, [project.id]: (v[project.id] ?? 0) + 1 })))
     },
     { label: 'Abrir no Explorer', onSelect: () => void window.kora.revealInExplorer(project.id, '') },
-    { label: 'Copiar caminho', onSelect: () => void navigator.clipboard.writeText(project.path) },
+    { label: 'Copiar caminho', onSelect: () => void copyPath(project.path) },
     'separator',
     {
       label: project.hidden ? 'Mover para Ativos' : 'Ocultar',

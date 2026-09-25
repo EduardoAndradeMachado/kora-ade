@@ -545,6 +545,14 @@ const MUTANTS = [
     bug: 'Configurações não escurecem os botões de janela',
     find: '  useWindowDim()',
     replace: ''
+  },
+  {
+    id: 'M65',
+    grep: 'R65 ',
+    file: 'src/renderer/src/components/TerminalView.tsx',
+    bug: '"Copiar caminho" do Kora colado no chat chega como colar e o Claude converte em imagem',
+    find: '      if (isCopiedPath(text)) {',
+    replace: '      if (false) {'
   }
 ]
 

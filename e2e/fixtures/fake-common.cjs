@@ -32,18 +32,22 @@ function setTitle(title) {
   process.stdout.write(`\x1b]0;${title}\x07`)
 }
 
-// Lê a entrada crua do console e entrega linha a linha, sem depender do modo cozido do ConPTY.
+// Lê a entrada crua do console e entrega linha a linha, sem depender do modo cozido do ConPTY. Como o Claude real,
+// pede ao terminal a marcação de colar (modo 2004): texto colado chega entre ESC[200~ e ESC[201~, texto digitado
+// chega sem ela. O segundo argumento do handler diz qual dos dois foi.
 function onLines(handler, onClose) {
   let buffer = ''
   if (process.stdin.isTTY) process.stdin.setRawMode(true)
+  process.stdout.write('\x1b[?2004h')
   process.stdin.setEncoding('utf8')
   process.stdin.on('data', (chunk) => {
     for (const ch of chunk) {
       if (ch === '\r' || ch === '\n') {
+        const pasted = buffer.includes('\x1b[200~')
         const line = stripControl(buffer)
         buffer = ''
         process.stdout.write('\r\n')
-        handler(line)
+        handler(line, pasted)
       } else if (ch === '\x03') {
         handler('\x03')
       } else if (ch === '\x7f' || ch === '\b') {

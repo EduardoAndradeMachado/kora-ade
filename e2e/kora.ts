@@ -39,6 +39,8 @@ export interface FakeEvent {
   threadId?: string | null
   resumed?: string | null
   line?: string
+  // A linha chegou colada (marcação de colar do terminal) em vez de digitada.
+  pasted?: boolean
 }
 
 export interface SavedState {
