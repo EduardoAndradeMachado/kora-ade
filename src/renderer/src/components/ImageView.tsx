@@ -8,6 +8,7 @@ interface Props {
   projectId: string
   path: string
   visible: boolean
+  onOpenPath(rel: string, line: number | null): void
 }
 
 type Zoom = 'fit' | 'actual'
@@ -20,7 +21,7 @@ const CHECKERBOARD: React.CSSProperties = {
 const zoomButton = (active: boolean): string =>
   cn('rounded-md px-1.5 py-0.5 hover:bg-secondary hover:text-foreground', active && 'bg-secondary text-foreground')
 
-export function ImageView({ projectId, path, visible }: Props): React.JSX.Element {
+export function ImageView({ projectId, path, visible, onOpenPath }: Props): React.JSX.Element {
   const [version, setVersion] = useState(0)
   const [zoom, setZoom] = useState<Zoom>('fit')
   const [size, setSize] = useState<{ width: number; height: number } | null>(null)
@@ -41,7 +42,7 @@ export function ImageView({ projectId, path, visible }: Props): React.JSX.Elemen
 
   return (
     <div className={cn('absolute inset-0 flex flex-col bg-canvas', !visible && 'invisible')}>
-      <ViewerHeader path={path} onReload={reload} onOpenExternal={openExternal}>
+      <ViewerHeader projectId={projectId} path={path} onOpenPath={onOpenPath} onReload={reload} onOpenExternal={openExternal}>
         {size && (
           <span className="shrink-0 tabular-nums">
             {size.width} × {size.height}

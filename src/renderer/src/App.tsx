@@ -819,9 +819,27 @@ export function App(): React.JSX.Element {
             list.map((tab) => {
               const visible = projectId === selectedId && activeTab[projectId] === tab.id
               if (tab.kind === 'file') {
-                if (tab.viewer === 'pdf') return <PdfView key={tab.id} projectId={projectId} path={tab.path} visible={visible} />
+                if (tab.viewer === 'pdf') {
+                  return (
+                    <PdfView
+                      key={tab.id}
+                      projectId={projectId}
+                      path={tab.path}
+                      visible={visible}
+                      onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                    />
+                  )
+                }
                 if (tab.viewer === 'image') {
-                  return <ImageView key={tab.id} projectId={projectId} path={tab.path} visible={visible} />
+                  return (
+                    <ImageView
+                      key={tab.id}
+                      projectId={projectId}
+                      path={tab.path}
+                      visible={visible}
+                      onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                    />
+                  )
                 }
                 if (tab.viewer === 'markdown' && !tab.editing) {
                   return (
@@ -832,6 +850,7 @@ export function App(): React.JSX.Element {
                       visible={visible}
                       fontSize={state.settings.fileFontSize}
                       onEdit={() => patchFile(tab.id, { editing: true })}
+                      onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
                     />
                   )
                 }
@@ -845,6 +864,7 @@ export function App(): React.JSX.Element {
                       onDirtyChange={(dirty) => markDirty(tab.id, dirty)}
                       onSaveHandle={(save) => (save ? fileSavers.current.set(tab.id, save) : fileSavers.current.delete(tab.id))}
                       jump={tab.jump}
+                      onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
                       headerExtra={
                         tab.viewer === 'markdown' && (
                           <ModeToggle

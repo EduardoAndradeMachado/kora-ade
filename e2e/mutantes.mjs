@@ -553,6 +553,38 @@ const MUTANTS = [
     bug: '"Copiar caminho" do Kora colado no chat chega como colar e o Claude converte em imagem',
     find: '      if (isCopiedPath(text)) {',
     replace: '      if (false) {'
+  },
+  {
+    id: 'M66',
+    grep: 'R66 ',
+    file: 'src/renderer/src/components/ViewerHeader.tsx',
+    bug: 'clicar no caminho do topo não copia nada',
+    find: '    void copyPath(path).then(() => {',
+    replace: "    void copyPath('').then(() => {"
+  },
+  {
+    id: 'M66b',
+    grep: 'R66 ',
+    file: 'src/renderer/src/components/ViewerHeader.tsx',
+    bug: 'caminho inexistente fecha a edição sem avisar',
+    find: "      setError('Arquivo não encontrado neste projeto')\n      return",
+    replace: '      return onDone()'
+  },
+  {
+    id: 'M66c',
+    grep: 'R66 ',
+    file: 'src/renderer/src/components/ViewerHeader.tsx',
+    bug: 'o :linha digitado no caminho é ignorado',
+    find: '    onOpen(target.rel, target.line)',
+    replace: '    onOpen(target.rel, null)'
+  },
+  {
+    id: 'M66d',
+    grep: 'R66 ',
+    file: 'src/renderer/src/components/ViewerHeader.tsx',
+    bug: 'Esc não cancela a edição do caminho',
+    find: "          else if (e.key === 'Escape') onDone()",
+    replace: "          else if (e.key === 'Escape') void 0"
   }
 ]
 

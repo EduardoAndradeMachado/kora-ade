@@ -644,3 +644,56 @@ test('R65 "Copiar caminho" de imagem e Ctrl+V no chat chega como texto digitado;
     await restoreClipboard(run, saved)
   }
 })
+
+test('R66 caminho no topo do arquivo: clique copia; o lápis edita o caminho e abre outro arquivo (relativo, absoluto, com :linha)', async ({ kora }) => {
+  const env = kora.env()
+  mkdirSync(join(env.project, 'src'))
+  mkdirSync(join(env.project, 'lib'))
+  writeFileSync(join(env.project, 'src', 'app.ts'), 'export const a = 1\n')
+  writeFileSync(join(env.project, 'lib', 'util.ts'), 'const a = 1\nconst b = 2\nconst c = 3\n')
+  writeFileSync(join(env.project, 'foto.png'), pngBytes())
+  const run = await kora.launch(env)
+  const page = run.page
+  const header = () => page.locator('div.border-b').filter({ visible: true, has: page.getByTitle('Recarregar arquivo') })
+  const pencil = () => header().getByTitle('Editar caminho para abrir outro arquivo')
+  const input = () => header().getByLabel('Caminho do arquivo')
+
+  await row(run, 'src').click()
+  await row(run, 'src\\app.ts').click()
+  await expect(ui.barTab(page, 'app.ts')).toBeVisible()
+
+  const saved = await saveClipboard(run)
+  try {
+    await header().getByTitle(/Clique para copiar o caminho/).click()
+    await expect(header().getByRole('status')).toHaveText('Copiado')
+    expect(await readClipboardText(run)).toBe('src\\app.ts')
+  } finally {
+    await restoreClipboard(run, saved)
+  }
+
+  await pencil().click()
+  await expect(input()).toHaveValue('src\\app.ts')
+  await page.keyboard.press('Escape')
+  await expect(input()).toHaveCount(0)
+  await expect(header().locator('[data-path]')).toHaveText('src\\app.ts')
+
+  await pencil().click()
+  await input().fill('src\\nada.ts')
+  await page.keyboard.press('Enter')
+  await expect(header().getByRole('alert')).toHaveText('Arquivo não encontrado neste projeto')
+  await expect(input(), 'caminho errado mantém a edição aberta').toBeVisible()
+
+  await input().fill('lib/util.ts:3')
+  await page.keyboard.press('Enter')
+  await expect(ui.barTab(page, 'util.ts')).toBeVisible()
+  await expect(header().locator('[data-path]')).toHaveText('lib\\util.ts')
+  await expect(row(run, 'lib\\util.ts'), 'o arquivo aberto aparece na árvore').toBeVisible()
+  const editor = page.locator('.monaco-editor').filter({ visible: true })
+  await expect(editor.locator('.active-line-number')).toHaveText('3')
+
+  await pencil().click()
+  await input().fill(join(env.project, 'foto.png'))
+  await page.keyboard.press('Enter')
+  await expect(ui.barTab(page, 'foto.png')).toBeVisible()
+  await expect(header().locator('[data-path]')).toHaveText('foto.png')
+})

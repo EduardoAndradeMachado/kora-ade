@@ -16,6 +16,7 @@ interface Props {
   // Deixa quem fecha a aba salvar antes; o salvamento pode não acontecer (conflito, erro) e aí devolve false.
   onSaveHandle?(save: (() => Promise<boolean>) | null): void
   jump?: { line: number; n: number }
+  onOpenPath(rel: string, line: number | null): void
 }
 
 type Load = { status: 'loading' } | { status: 'ready' } | { status: 'error'; message: string }
@@ -34,7 +35,17 @@ const contentOf = (model: monaco.editor.ITextModel): string =>
 
 const bannerButton = 'rounded-md border border-current/30 px-2 py-0.5 hover:bg-white/10 disabled:opacity-50'
 
-export function CodeView({ projectId, path, visible, fontSize, onDirtyChange, headerExtra, onSaveHandle, jump }: Props): React.JSX.Element {
+export function CodeView({
+  projectId,
+  path,
+  visible,
+  fontSize,
+  onDirtyChange,
+  headerExtra,
+  onSaveHandle,
+  jump,
+  onOpenPath
+}: Props): React.JSX.Element {
   const confirm = useConfirm()
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -228,7 +239,7 @@ export function CodeView({ projectId, path, visible, fontSize, onDirtyChange, he
 
   return (
     <div className={cn('absolute inset-0 flex flex-col bg-canvas', !visible && 'invisible')}>
-      <ViewerHeader path={path} onReload={() => void onHeaderReload()}>
+      <ViewerHeader projectId={projectId} path={path} onOpenPath={onOpenPath} onReload={() => void onHeaderReload()}>
         {busy ? (
           <span className="shrink-0">Salvando…</span>
         ) : (

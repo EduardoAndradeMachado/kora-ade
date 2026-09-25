@@ -11,9 +11,10 @@ interface Props {
   visible: boolean
   fontSize: number
   onEdit(): void
+  onOpenPath(rel: string, line: number | null): void
 }
 
-export function MarkdownView({ projectId, path, visible, fontSize, onEdit }: Props): React.JSX.Element {
+export function MarkdownView({ projectId, path, visible, fontSize, onEdit, onOpenPath }: Props): React.JSX.Element {
   const [source, setSource] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -36,7 +37,7 @@ export function MarkdownView({ projectId, path, visible, fontSize, onEdit }: Pro
 
   return (
     <div className={cn('absolute inset-0 flex flex-col bg-canvas', !visible && 'invisible')}>
-      <ViewerHeader path={path} onReload={() => setReloadKey((k) => k + 1)}>
+      <ViewerHeader projectId={projectId} path={path} onOpenPath={onOpenPath} onReload={() => setReloadKey((k) => k + 1)}>
         <ModeToggle editing={false} onChange={(editing) => editing && onEdit()} />
       </ViewerHeader>
       <div className="min-h-0 flex-1 overflow-y-auto">
