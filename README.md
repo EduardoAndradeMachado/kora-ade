@@ -97,6 +97,13 @@ Feito com Electron, React, TypeScript, xterm.js, node-pty e Monaco.
 Beta: funciona no dia a dia, mas ainda muda e pode ter falhas. Encontrou um problema? Abra uma
 [issue](https://github.com/EduardoAndradeMachado/kora-ade/issues).
 
+## Licença
+
+Código disponível sob a [PolyForm Internal Use 1.0.0](LICENSE), com permissão adicional para uso pessoal.
+
+- **Pode:** baixar, instalar, clonar, compilar e modificar o Kora para uso pessoal ou dentro da sua empresa.
+- **Não pode:** distribuir o Kora, original ou modificado, nem vender ou publicar uma versão sua dele.
+
 ---
 
 Kora ADE é um projeto independente, sem vínculo com a Anthropic ou a OpenAI. Claude, Claude Code e Codex são marcas

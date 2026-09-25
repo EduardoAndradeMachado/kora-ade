@@ -61,6 +61,7 @@
   },
   "description": "Ambiente de desenvolvimento com agentes (Claude Code e Codex) por projeto",
   "author": "Eduardo Andrade Machado",
+  "license": "SEE LICENSE IN LICENSE",
   "homepage": "https://kora-ade.vercel.app/",
   "repository": {
     "type": "git",
