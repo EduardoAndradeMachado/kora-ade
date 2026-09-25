@@ -40,7 +40,6 @@
     "electron": "44.4.5",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
-    "lucide-react": "1.48.0",
     "marked": "18.0.14",
     "monaco-editor": "0.56.0",
     "oxlint": "1.85.0",

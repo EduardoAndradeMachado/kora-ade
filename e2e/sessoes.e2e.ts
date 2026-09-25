@@ -399,7 +399,7 @@ test('R56 sessão que para sem você olhar: símbolo e sino na aba, som da corda
   const page = run.page
   const { spy, setFocused } = await installAlertSpies(page)
   const claudeAlert = ui.barTab(page, /Claude/).locator('[data-alert]')
-  const claudeBell = ui.barTab(page, /Claude/).locator('svg.lucide-bell')
+  const claudeBell = ui.barTab(page, /Claude/).locator('[data-icon="sino"]')
 
   await openClaude(run, env)
   await newTab(page, 'Terminal')
@@ -470,7 +470,7 @@ test('R57 aviso de sessão parada também no Codex: símbolo e sino na aba e som
   await ui.sideTab(page, 'Terminal').click()
 
   await expect(codexAlert).toHaveCount(1, { timeout: 15_000 })
-  await expect(ui.barTab(page, /Codex/).locator('svg.lucide-bell')).toHaveCount(1)
+  await expect(ui.barTab(page, /Codex/).locator('[data-icon="sino"]')).toHaveCount(1)
   await expect(ui.sideTab(page, /Codex/).locator('[data-alert]')).toHaveCount(1)
   expect(await spy()).toEqual({ chimes: 1, notifications: [] })
 
