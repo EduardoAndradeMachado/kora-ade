@@ -473,6 +473,22 @@ const MUTANTS = [
     bug: 'main não fica sabendo na hora que há arquivo não salvo (X fecha sem perguntar)',
     find: 'window.kora.setUnsaved(dirtyFiles.current.size > 0)',
     replace: 'void 0'
+  },
+  {
+    id: 'M62',
+    grep: 'R61 ',
+    file: 'src/main/index.ts',
+    bug: 'Abrir pasta sem nenhum erro registrado manda caminho inexistente ao Explorer',
+    find: '    mkdirSync(folder, { recursive: true })',
+    replace: '    void mkdirSync'
+  },
+  {
+    id: 'M62b',
+    grep: 'R61 ',
+    file: 'src/renderer/src/components/SettingsDialog.tsx',
+    bug: 'mensagem de erro da seção Suporte sai com o texto técnico do IPC',
+    find: 'setFeedback({ text: ipcErrorMessage(err), error: true })',
+    replace: 'setFeedback({ text: String(err), error: true })'
   }
 ]
 

@@ -1,5 +1,5 @@
 import { dirname, join } from 'node:path'
-import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, release } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, shell, Tray } from 'electron'
@@ -419,9 +419,12 @@ function registerIpc(): void {
   ipcMain.handle('errors:summary', () => errorLog.summary())
   // Cabe numa mensagem de chat ou num e-mail; o arquivo completo sai pelo "Salvar arquivo".
   ipcMain.handle('errors:recent', () => errorLog.recent(8000))
+  // A pasta só nasce no primeiro erro gravado; sem nenhum erro ainda, o Explorer recebia um caminho inexistente.
   ipcMain.handle('errors:open-folder', async () => {
-    const error = await shell.openPath(dirname(errorLog.file))
-    if (error) throw new Error(error)
+    const folder = dirname(errorLog.file)
+    mkdirSync(folder, { recursive: true })
+    const error = await shell.openPath(folder)
+    if (error) throw new Error(`Não foi possível abrir a pasta dos logs (${folder}): ${error}`)
   })
   ipcMain.handle('errors:save', async () => {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-')

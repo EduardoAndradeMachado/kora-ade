@@ -7,6 +7,7 @@ import { Button } from '@/brand/Button'
 import { Icon } from '@/brand/icons'
 import { Lockup } from '@/brand/Logo'
 import { cn } from '@/lib/utils'
+import { ipcErrorMessage } from '@/lib/ipc-error'
 
 const SITE_URL = 'https://kora-ade.vercel.app/'
 const REPO_URL = 'https://github.com/EduardoAndradeMachado/kora-ade'
@@ -42,7 +43,7 @@ function Support({ support }: { support: SupportActions }): React.JSX.Element {
     setFeedback(null)
     task().then(
       (text) => text && setFeedback({ text, error: false }),
-      (err: unknown) => setFeedback({ text: err instanceof Error ? err.message : String(err), error: true })
+      (err: unknown) => setFeedback({ text: ipcErrorMessage(err), error: true })
     )
   }
   const { errors } = support

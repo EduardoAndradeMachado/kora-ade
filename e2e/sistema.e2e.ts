@@ -482,3 +482,38 @@ test('R59 log de erros para suporte: erros da interface e do main ficam registra
   expect(file).toContain('===== Atualização (updater.log) =====')
   expect(await run.nativeDialogs(), 'nenhum diálogo nativo de erro').toEqual([])
 })
+
+test('R61 Abrir pasta dos logs funciona mesmo sem nenhum erro registrado; falha real aparece sem o texto técnico do IPC', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  // Como o shell.openPath real: pasta que não existe devolve "Failed to open path" (o Explorer não é aberto no teste).
+  await run.app.evaluate(({ shell }) => {
+    const g = globalThis as unknown as { __opened: string[]; __failOpen: boolean }
+    g.__opened = []
+    g.__failOpen = false
+    const { existsSync } = process.getBuiltinModule('node:fs') as typeof import('node:fs')
+    shell.openPath = async (path: string) => {
+      g.__opened.push(path)
+      if (g.__failOpen) return 'Access denied'
+      return existsSync(path) ? '' : 'Failed to open path'
+    }
+  })
+  const opened = () => run.app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened)
+
+  await page.getByTitle('Configurações').click()
+  const dialog = page.getByRole('dialog', { name: 'Configurações' })
+  await expect(dialog.locator('[data-errors-summary]')).toHaveText('Nenhum erro registrado.')
+  await dialog.getByRole('button', { name: 'Abrir pasta' }).click()
+  await expect.poll(opened).toEqual([join(env.userData, 'logs')])
+  await page.waitForTimeout(300)
+  await expect(dialog.locator('p[role=status].text-destructive'), 'sem erro ao abrir a pasta').toHaveCount(0)
+
+  await run.app.evaluate(() => {
+    ;(globalThis as unknown as { __failOpen: boolean }).__failOpen = true
+  })
+  await dialog.getByRole('button', { name: 'Abrir pasta' }).click()
+  const failure = dialog.locator('p[role=status].text-destructive')
+  await expect(failure).toContainText('Não foi possível abrir a pasta dos logs')
+  await expect(failure).not.toContainText('invoking remote method')
+})
