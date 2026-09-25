@@ -1,12 +1,14 @@
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 import type { AgentActivity } from '../shared/agent'
 
-// O Claude grava em ~/.claude/sessions/<pid>.json o estado da tela: "busy" enquanto responde, "shell" enquanto
-// roda um comando no terminal (a própria tela dele mostra os dois como "working"), "waiting" quando pede
-// permissão ou resposta, "idle" parado no prompt. Valor desconhecido fica sem indicador.
+// O Claude grava em ~/.claude/sessions/<pid>.json o estado da tela: "busy" enquanto responde (ou com subagente em
+// segundo plano), "waiting" quando pede permissão ou resposta, "idle" parado no prompt e "shell" parado no prompt
+// com um comando em segundo plano ainda aberto (no código dele: idle && alguma tarefa local_bash não terminada).
+// A tela do Claude mostra "shell" como working; aqui vale o que importa para o aviso: o turno acabou e ele
+// espera você. Valor desconhecido fica sem indicador.
 export function claudeActivity(status: unknown): AgentActivity | null {
-  if (status === 'busy' || status === 'shell') return 'working'
-  if (status === 'waiting' || status === 'idle') return 'waiting'
+  if (status === 'busy') return 'working'
+  if (status === 'waiting' || status === 'idle' || status === 'shell') return 'waiting'
   return null
 }
 

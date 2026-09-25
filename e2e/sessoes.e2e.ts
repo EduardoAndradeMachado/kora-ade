@@ -559,3 +559,24 @@ test('R62 aba adormecida com sessão mostra só Continuar chat e o ID; aba sem s
   await expect(view.getByRole('button', { name: 'Abrir terminal' })).toBeVisible()
   await expect(view.getByText('Vincular uma sessão manualmente')).toBeVisible()
 })
+
+test('R63 Claude que termina deixando comando em segundo plano ("shell") está esperando você: sino toca e a rodinha para', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  const { spy } = await installAlertSpies(page)
+  const claudeTab = () => ui.barTab(page, /Claude/)
+
+  await openClaude(run, env)
+  await newTab(page, 'Terminal')
+  await ui.sideTab(page, /Claude/).click()
+  await typeLine(page, 'trabalhe-bg 7')
+  await expect(claudeTab().locator('[data-activity]')).toHaveAttribute('data-activity', 'working', { timeout: 5000 })
+  await ui.sideTab(page, 'Terminal').click()
+
+  await expect(claudeTab().locator('[data-alert]'), 'aviso de sessão parada').toHaveCount(1, { timeout: 15_000 })
+  expect((await spy()).chimes, 'a corda tocou').toBe(1)
+  await ui.sideTab(page, /Claude/).click()
+  await expect(claudeTab().locator('[data-activity]'), 'sem rodinha: esperando você').toHaveAttribute('data-activity', 'waiting')
+  await expect(claudeTab().locator('.kora-spin')).toHaveCount(0)
+})

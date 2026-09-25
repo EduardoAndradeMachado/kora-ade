@@ -55,20 +55,18 @@ onLines(
     if (line.trim() === 'trabalhe') writeStatus('busy')
     if (line.trim() === 'pare') writeStatus('idle')
     // "trabalhe 5": turno de 5 s que termina sozinho, como um turno que acaba enquanto você está em outra aba.
-    // Como o Claude real usando ferramentas, alterna entre "busy" (respondendo) e "shell" (rodando comando).
-    const timed = /^trabalhe (\d+)$/.exec(line.trim())
+    // "trabalhe-bg 5": igual, mas termina deixando um comando em segundo plano aberto; o Claude real grava "shell"
+    // nesse caso (parado no prompt, com tarefa local_bash ainda rodando), não "idle". O arquivo é reescrito algumas
+    // vezes durante o turno, como o real faz ao atualizar o status.
+    const timed = /^trabalhe(-bg)? (\d+)$/.exec(line.trim())
     if (timed) {
-      const until = Date.now() + Number(timed[1]) * 1000
-      let shell = false
+      const until = Date.now() + Number(timed[2]) * 1000
+      const endStatus = timed[1] ? 'shell' : 'idle'
       writeStatus('busy')
-      const flip = setInterval(() => {
-        if (Date.now() >= until) {
-          clearInterval(flip)
-          writeStatus('idle')
-          return
-        }
-        shell = !shell
-        writeStatus(shell ? 'shell' : 'busy')
+      const tick = setInterval(() => {
+        if (Date.now() < until) return writeStatus('busy')
+        clearInterval(tick)
+        writeStatus(endStatus)
       }, 700)
     }
     turns++

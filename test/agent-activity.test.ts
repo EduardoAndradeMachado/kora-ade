@@ -17,9 +17,9 @@ const quoted =
 const lines = (...l: string[]): string => l.join('\n') + '\n'
 
 describe('estado do Claude pelo arquivo do pid', () => {
-  it('busy e shell (comando rodando) são trabalhando; waiting e idle são esperando você; o resto fica sem indicador', () => {
+  it('busy é trabalhando; waiting, idle e shell (parado com comando em segundo plano) são esperando você; o resto fica sem indicador', () => {
     expect(claudeActivity('busy')).toBe('working')
-    expect(claudeActivity('shell')).toBe('working')
+    expect(claudeActivity('shell')).toBe('waiting')
     expect(claudeActivity('waiting')).toBe('waiting')
     expect(claudeActivity('idle')).toBe('waiting')
     expect(claudeActivity('outro')).toBeNull()

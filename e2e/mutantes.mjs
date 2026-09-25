@@ -420,11 +420,19 @@ const MUTANTS = [
   },
   {
     id: 'M59',
-    grep: 'R56 ',
+    grep: 'R63 ',
     file: 'src/main/agent-activity.ts',
-    bug: 'status "shell" do Claude (comando rodando) sem estado: o turno não termina como "trabalhando → esperando" e o sino não toca',
-    find: "if (status === 'busy' || status === 'shell') return 'working'",
-    replace: "if (status === 'busy') return 'working'"
+    bug: 'status "shell" (parado com comando em segundo plano) sem estado, como na 0.1.3: o sino não toca',
+    find: "if (status === 'waiting' || status === 'idle' || status === 'shell') return 'waiting'",
+    replace: "if (status === 'waiting' || status === 'idle') return 'waiting'"
+  },
+  {
+    id: 'M59b',
+    grep: 'R63 ',
+    file: 'src/main/agent-activity.ts',
+    bug: 'status "shell" tratado como trabalhando, como na 0.1.4: rodinha girando para sempre e sino mudo',
+    find: "  if (status === 'busy') return 'working'",
+    replace: "  if (status === 'busy' || status === 'shell') return 'working'"
   },
   {
     id: 'M60',
