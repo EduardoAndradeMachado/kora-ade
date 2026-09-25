@@ -478,8 +478,9 @@ export function App(): React.JSX.Element {
       return
     }
     const agent: AgentSession = { kind: session.kind, sessionId: session.sessionId }
-    const ref: TabRef = { id: crypto.randomUUID(), projectId: project.id, title: session.title, titleLocked: false }
-    const tab: Tab = { kind: 'terminal', id: ref.id, title: ref.title, titleLocked: false, live: false, agent }
+    const titleLocked = session.named === true
+    const ref: TabRef = { id: crypto.randomUUID(), projectId: project.id, title: session.title, titleLocked }
+    const tab: Tab = { kind: 'terminal', id: ref.id, title: ref.title, titleLocked, live: false, agent }
     setTabs((prev) => ({ ...prev, [project.id]: [...(prev[project.id] ?? []), tab] }))
     void window.kora.setTabAgent(ref, agent)
     if (launchNow) launch(project.id, ref, { type: 'resume', agent })
@@ -936,8 +937,12 @@ export function App(): React.JSX.Element {
         <RightPanel
           key={selected.id}
           project={selected}
-          openSessionIds={
-            new Set(projectTabs.flatMap((t) => (t.kind === 'terminal' && t.agent ? [t.agent.sessionId] : [])))
+          openSessions={
+            new Map(
+              projectTabs.flatMap((t) =>
+                t.kind === 'terminal' && t.agent ? [[t.agent.sessionId, t.titleLocked ? t.title : null] as const] : []
+              )
+            )
           }
           onOpenFile={(path) => openFile(selected, path)}
           onOpenSession={(session) => openSession(selected, session, true)}

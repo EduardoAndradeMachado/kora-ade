@@ -2,6 +2,7 @@ import { basename, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { KoraState, ProjectGroup, SavedTab } from '../shared/state'
 import { descendantIds } from '../shared/groups'
+import type { SessionSummary } from '../shared/ipc'
 
 const samePath = (a: string, b: string): boolean =>
   resolve(a).toLowerCase() === resolve(b).toLowerCase()
@@ -69,9 +70,45 @@ export function mergeTabs(
       titleLocked: t.titleLocked ?? false,
       agent: known.get(t.id)?.agent ?? null
     }))
-  return { ...state, tabs }
+  return syncSessionNames(state, { ...state, tabs })
 }
 
 export function setTabAgent(state: KoraState, tabId: string, agent: SavedTab['agent']): KoraState {
-  return { ...state, tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, agent } : t)) }
+  return syncSessionNames(state, { ...state, tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, agent } : t)) })
+}
+
+export const sessionKey = (agent: { kind: string; sessionId: string }): string => `${agent.kind}:${agent.sessionId}`
+
+// Aba com nome dado pelo usuário nomeia a conversa ligada a ela, inclusive a aba renomeada antes da primeira
+// mensagem, que só ganha a conversa depois. Apagar o nome da aba (volta ao automático) apaga o da conversa.
+function syncSessionNames(before: KoraState, after: KoraState): KoraState {
+  const previous = new Map(before.tabs.map((t) => [t.id, t]))
+  const names = { ...after.sessionNames }
+  let changed = false
+  for (const tab of after.tabs) {
+    if (!tab.agent) continue
+    const key = sessionKey(tab.agent)
+    if (tab.titleLocked && names[key] !== tab.title) {
+      names[key] = tab.title
+      changed = true
+    } else if (!tab.titleLocked && previous.get(tab.id)?.titleLocked && key in names) {
+      delete names[key]
+      changed = true
+    }
+  }
+  return changed ? { ...after, sessionNames: names } : after
+}
+
+export function namedSessions(state: KoraState, sessions: SessionSummary[]): SessionSummary[] {
+  return sessions.map((s) => {
+    const name = state.sessionNames?.[sessionKey(s)]
+    return name ? { ...s, title: name, named: true, agentTitle: s.title } : s
+  })
+}
+
+export function forgetSessionName(state: KoraState, agent: { kind: string; sessionId: string }): KoraState {
+  const key = sessionKey(agent)
+  if (!state.sessionNames || !(key in state.sessionNames)) return state
+  const { [key]: _removed, ...rest } = state.sessionNames
+  return { ...state, sessionNames: rest }
 }

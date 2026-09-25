@@ -54,6 +54,7 @@ export interface SavedState {
     agent: { kind: 'claude' | 'codex'; sessionId: string; name?: string } | null
   }[]
   settings?: { theme?: string; zoom?: number; terminalFontSize?: number; fileFontSize?: number; alerts?: { sound: boolean; windowsNotification: boolean } }
+  sessionNames?: Record<string, string>
 }
 
 const cmdShim = (script: string): string => `@echo off\r\n"${process.execPath}" "${join(FIXTURES, script)}" %*\r\n`

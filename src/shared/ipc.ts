@@ -40,6 +40,9 @@ export interface SessionSummary {
   sessionId: string
   title: string
   updatedAt: number
+  // O título é o nome que o usuário deu à aba dessa conversa; agentTitle guarda o do Claude/Codex.
+  named?: boolean
+  agentTitle?: string
 }
 
 export interface TabRef {

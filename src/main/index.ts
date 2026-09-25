@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, shell, Tray } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { loadState, saveState } from './store'
-import { addProject, applyLayout, mergeTabs, removeProject, setTabAgent } from './projects'
+import { addProject, applyLayout, forgetSessionName, mergeTabs, namedSessions, removeProject, setTabAgent } from './projects'
 import { Terminals } from './terminals'
 import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from './files'
 import { AgentDetector, UNREADABLE } from './agent-detect'
@@ -558,8 +558,8 @@ function registerIpc(): void {
     survivors.clear()
   })
 
-  ipcMain.handle('sessions:list', (_e, projectId: string) =>
-    listProjectSessions(join(homedir(), '.claude'), join(homedir(), '.codex'), projectRoot(projectId))
+  ipcMain.handle('sessions:list', async (_e, projectId: string) =>
+    namedSessions(state, await listProjectSessions(join(homedir(), '.claude'), join(homedir(), '.codex'), projectRoot(projectId)))
   )
 
   // Conversa ligada a uma aba (rodando ou adormecida) não é apagada: o "Continuar" dela passaria a falhar.
@@ -573,6 +573,7 @@ function registerIpc(): void {
     })
     if (files.length === 0) throw new Error('Conversa não encontrada no disco.')
     for (const file of files) await shell.trashItem(file)
+    commit(forgetSessionName(state, { kind, sessionId }))
   })
 
   ipcMain.on('app:unsaved', (_e, value: unknown) => {

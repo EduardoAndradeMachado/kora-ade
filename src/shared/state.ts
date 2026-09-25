@@ -87,7 +87,10 @@ export const StateSchema = z.object({
   projects: z.array(ProjectSchema),
   tabs: z.array(SavedTabSchema),
   groups: z.array(ProjectGroupSchema).default([]),
-  settings: SettingsSchema.default(defaultSettings)
+  settings: SettingsSchema.default(defaultSettings),
+  // Nome dado pelo usuário à aba, guardado por conversa ("claude:<id>", "codex:<id>"): vale na aba Sessões
+  // mesmo depois de a aba fechar.
+  sessionNames: z.record(z.string(), z.string()).optional()
 })
 
 export type Project = z.infer<typeof ProjectSchema>

@@ -10,7 +10,7 @@ import { ipcErrorMessage } from '@/lib/ipc-error'
 interface Props {
   projectId: string
   reloadKey: number
-  openSessionIds: Set<string>
+  openSessions: Map<string, string | null>
   onOpen(session: SessionSummary): void
   onPin(session: SessionSummary): void
 }
@@ -28,7 +28,7 @@ function relativeTime(ms: number): string {
   return new Date(ms).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
 
-export function SessionsPanel({ projectId, reloadKey, openSessionIds, onOpen, onPin }: Props): React.JSX.Element {
+export function SessionsPanel({ projectId, reloadKey, openSessions, onOpen, onPin }: Props): React.JSX.Element {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -63,11 +63,22 @@ export function SessionsPanel({ projectId, reloadKey, openSessionIds, onOpen, on
     }
   }, [projectId, reloadKey])
 
+  // Conversa com aba aberta mostra o nome atual da aba: o main só grava o nome depois do save das abas.
+  const named = useMemo(
+    () =>
+      (sessions ?? []).map((s): SessionSummary => {
+        if (!openSessions.has(s.sessionId)) return s
+        const tabName = openSessions.get(s.sessionId)
+        return tabName ? { ...s, title: tabName, named: true } : { ...s, title: s.agentTitle ?? s.title, named: false }
+      }),
+    [sessions, openSessions]
+  )
+
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase()
-    if (!sessions || !q) return sessions ?? []
-    return sessions.filter((s) => s.title.toLowerCase().includes(q) || s.sessionId.startsWith(q))
-  }, [sessions, filter])
+    if (!q) return named
+    return named.filter((s) => s.title.toLowerCase().includes(q) || s.sessionId.startsWith(q))
+  }, [named, filter])
 
   if (error) return <p className="p-3 text-xs text-destructive">{error}</p>
   if (!sessions) {
@@ -97,7 +108,7 @@ export function SessionsPanel({ projectId, reloadKey, openSessionIds, onOpen, on
       )}
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
         {visible.map((s) => {
-          const open = openSessionIds.has(s.sessionId)
+          const open = openSessions.has(s.sessionId)
           return (
             <div
               key={`${s.kind}:${s.sessionId}`}

@@ -779,3 +779,47 @@ test('R64 diálogo aberto escurece também os botões de janela (desenhados pelo
   await page.locator('[role=dialog]').getByRole('button', { name: 'Cancelar' }).click()
   await expect.poll(last, 'confirmação fechada').toBe(normal)
 })
+
+test('R68 nome dado à aba vira o nome da conversa na aba Sessões, também com a aba fechada; apagar o nome volta ao do agente', async ({ kora }) => {
+  const env = kora.env()
+  const { claudeId } = seedSessions(env)
+  const run = await kora.launch(env)
+  const page = run.page
+  const panel = rightPanel(page)
+  await panel.getByRole('button', { name: 'Sessões' }).click()
+  const row = (text: string) => panel.locator('div.group').filter({ hasText: text })
+  const reload = () => panel.getByTitle('Recarregar').click()
+
+  await row('Conversa Claude semeada').click()
+  await waitFor(() => readState(env).tabs.find((t) => t.agent?.sessionId === claudeId), 'aba ligada à conversa')
+  await ui.tabBar(page).locator('div.group').first().locator('span.truncate').dblclick()
+  const input = ui.tabBar(page).locator('input')
+  await input.fill('Inscrição SBPROPPG')
+  await input.press('Enter')
+  await expect(row('Inscrição SBPROPPG'), 'aba aberta: o nome aparece na hora').toBeVisible()
+  await expect(row('Conversa Claude semeada')).toHaveCount(0)
+  await waitFor(() => readState(env).sessionNames?.[`claude:${claudeId}`] === 'Inscrição SBPROPPG', 'nome guardado no estado')
+
+  await ui.terminal(page).click()
+  await page.keyboard.press('Control+W')
+  await page.keyboard.press('Enter')
+  await waitFor(() => readState(env).tabs.length === 0, 'aba fechada')
+  await reload()
+  await expect(row('Inscrição SBPROPPG'), 'aba fechada: o nome continua na lista').toBeVisible()
+
+  await row('Inscrição SBPROPPG').click()
+  const reopened = await waitFor(() => readState(env).tabs.find((t) => t.agent?.sessionId === claudeId), 'conversa reaberta')
+  expect(reopened, 'reabre com o nome travado, sem o título do terminal por cima').toMatchObject({ title: 'Inscrição SBPROPPG', titleLocked: true })
+
+  await ui.tabBar(page).locator('div.group').first().locator('span.truncate').dblclick()
+  await input.fill('')
+  await input.press('Enter')
+  // O Claude falso grava um título novo ao ser retomado, como o real ao gerar o título da conversa.
+  const agentTitle = `Título falso ${claudeId.slice(0, 8)}`
+  await expect(row(agentTitle), 'nome apagado: volta o título do Claude').toBeVisible()
+  await expect(row('Inscrição SBPROPPG')).toHaveCount(0)
+  await waitFor(() => readState(env).sessionNames?.[`claude:${claudeId}`] === undefined, 'nome esquecido no estado')
+  await reload()
+  await expect(row(agentTitle)).toBeVisible()
+  await expect(row('Inscrição SBPROPPG')).toHaveCount(0)
+})

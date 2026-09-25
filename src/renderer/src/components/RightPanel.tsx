@@ -18,7 +18,8 @@ const VIEWS: { view: View; title: string; icon: IconName }[] = [
 
 interface Props {
   project: Project
-  openSessionIds: Set<string>
+  // Conversas com aba aberta e o nome dado a essa aba (null: aba sem nome do usuário).
+  openSessions: Map<string, string | null>
   onOpenFile(path: string): void
   onOpenSession(session: SessionSummary): void
   onPinSession(session: SessionSummary): void
@@ -104,7 +105,7 @@ export function RightPanel(props: Props): React.JSX.Element {
         <SessionsPanel
           projectId={props.project.id}
           reloadKey={reloadKey}
-          openSessionIds={props.openSessionIds}
+          openSessions={props.openSessions}
           onOpen={props.onOpenSession}
           onPin={props.onPinSession}
         />

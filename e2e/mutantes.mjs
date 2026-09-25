@@ -609,6 +609,30 @@ const MUTANTS = [
     bug: 'Codex aberto pelo Kora usa o servidor em segundo plano (lock fora da aba, erro de Acesso negado no Job)',
     find: "  return startup.mode === 'new' ? 'codex --no-daemon' : `codex resume ${startup.sessionId} --no-daemon`",
     replace: "  return startup.mode === 'new' ? 'codex' : `codex resume ${startup.sessionId}`"
+  },
+  {
+    id: 'M68',
+    grep: 'R68 ',
+    file: 'src/main/projects.ts',
+    bug: 'lista de sessões ignora o nome guardado (aba fechada volta ao título do agente)',
+    find: '    const name = state.sessionNames?.[sessionKey(s)]',
+    replace: '    const name = undefined as string | undefined'
+  },
+  {
+    id: 'M68b',
+    grep: 'R68 ',
+    file: 'src/renderer/src/components/SessionsPanel.tsx',
+    bug: 'aba aberta renomeada só aparece na lista depois de recarregar',
+    find: '        if (!openSessions.has(s.sessionId)) return s',
+    replace: '        if (openSessions.size >= 0) return s'
+  },
+  {
+    id: 'M68c',
+    grep: 'R68 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'conversa com nome reabre sem travar o nome (o título do terminal passa por cima)',
+    find: '    const titleLocked = session.named === true',
+    replace: '    const titleLocked = false'
   }
 ]
 
