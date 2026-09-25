@@ -457,6 +457,22 @@ const MUTANTS = [
     bug: 'Salvar arquivo falha quando a pasta Downloads não resolve',
     find: '      folder = homedir()',
     replace: "      throw new Error('sem pasta de downloads')"
+  },
+  {
+    id: 'M61',
+    grep: 'R60 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'Ctrl+W olha o "não salvo" do último desenho da tela e fecha sem perguntar logo depois de digitar',
+    find: "    if (tab?.kind === 'file' && isDirty(tab)) {",
+    replace: "    if (tab?.kind === 'file' && tab.dirty) {"
+  },
+  {
+    id: 'M61b',
+    grep: 'R60 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'main não fica sabendo na hora que há arquivo não salvo (X fecha sem perguntar)',
+    find: 'window.kora.setUnsaved(dirtyFiles.current.size > 0)',
+    replace: 'void 0'
   }
 ]
 

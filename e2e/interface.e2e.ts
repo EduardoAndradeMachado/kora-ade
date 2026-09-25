@@ -714,3 +714,34 @@ test('R53 voltar para um projeto onde uma aba foi renomeada antes não reabre a 
   await page.waitForTimeout(300)
   await expect(editing).toHaveCount(0)
 })
+
+test('R60 digitar e fechar na hora (Ctrl+W ou X da janela) pergunta antes de perder a edição', async ({ kora }) => {
+  const env = kora.env()
+  writeFileSync(join(env.project, 'notas.txt'), 'antes\n')
+  const run = await kora.launch(env)
+  const page = run.page
+  const dialog = page.locator('[role=dialog]')
+  const openAndType = async (): Promise<void> => {
+    await rightPanel(page).locator('div[title="notas.txt"]').click()
+    const editor = page.locator('.monaco-editor').filter({ visible: true })
+    await expect(editor).toContainText('antes')
+    await editor.locator('.view-lines').click()
+    await page.keyboard.press('Control+End')
+    await page.keyboard.type('z')
+  }
+
+  // Sem esperar a tela mostrar "Não salvo": é a corrida entre a edição e o atalho que perdia o texto.
+  for (let round = 0; round < 3; round++) {
+    await openAndType()
+    await page.keyboard.press('Control+W')
+    await expect(dialog, `rodada ${round + 1}: Ctrl+W logo depois de digitar pergunta`).toContainText('Salvar "notas.txt" antes de fechar?')
+    await dialog.getByRole('button', { name: 'Fechar sem salvar' }).click()
+    await expect(ui.barTab(page, 'notas.txt')).toHaveCount(0)
+  }
+
+  await openAndType()
+  await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
+  await expect(dialog, 'X logo depois de digitar pergunta').toContainText('Salvar "notas.txt" antes de fechar?')
+  await dialog.getByRole('button', { name: 'Salvar e fechar' }).click()
+  await expect.poll(() => readFileSync(join(env.project, 'notas.txt'), 'utf8')).toBe('antes\nz')
+})

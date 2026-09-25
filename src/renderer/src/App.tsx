@@ -103,6 +103,10 @@ export function App(): React.JSX.Element {
   const confirm = useConfirm()
   const choose = useChoose()
   const fileSavers = useRef(new Map<string, () => Promise<boolean>>())
+  // Fonte da verdade do "não salvo", atualizada na hora da edição. O estado das abas só muda no próximo desenho:
+  // Ctrl+W logo depois de digitar via a aba ainda limpa e fechava sem perguntar, perdendo a edição.
+  const dirtyFiles = useRef(new Set<string>())
+  const isDirty = (tab: Tab): boolean => tab.kind === 'file' && (tab.dirty || dirtyFiles.current.has(tab.id))
   const [toast, setToast] = useState<string | null>(null)
   const [orphans, setOrphans] = useState<OrphanSurvivor[]>([])
   const [update, setUpdate] = useState<UpdateStatus>({ state: 'idle' })
@@ -233,8 +237,13 @@ export function App(): React.JSX.Element {
 
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
-  const unsavedFiles = Object.values(tabs).some((list) => list.some((t) => t.kind === 'file' && t.dirty))
-  useEffect(() => window.kora.setUnsaved(unsavedFiles), [unsavedFiles])
+  // O main segura o X e o Sair enquanto houver arquivo não salvo; avisado na hora, pelo mesmo motivo do Ctrl+W.
+  const markDirty = (tabId: string, dirty: boolean): void => {
+    if (dirty) dirtyFiles.current.add(tabId)
+    else dirtyFiles.current.delete(tabId)
+    window.kora.setUnsaved(dirtyFiles.current.size > 0)
+    patchFile(tabId, { dirty })
+  }
 
   // Arquivo aberto não volta ao reabrir o app: fechar o programa (X para a bandeja) fecha as abas de arquivo.
   const closeFileTabs = useCallback((): void => {
@@ -255,7 +264,7 @@ export function App(): React.JSX.Element {
   const resolveUnsaved = useCallback(
     async (kind: CloseKind): Promise<boolean> => {
       const dirty = Object.entries(tabsRef.current).flatMap(([pid, list]) =>
-        list.flatMap((t) => (t.kind === 'file' && t.dirty ? [{ projectId: pid, tab: t }] : []))
+        list.flatMap((t) => (t.kind === 'file' && isDirty(t) ? [{ projectId: pid, tab: t }] : []))
       )
       if (dirty.length === 0) return true
       const names = dirty.map((d) => d.tab.title)
@@ -504,7 +513,7 @@ export function App(): React.JSX.Element {
     }))
 
   const hasUnsavedUnder = (projectId: string, rel: string): boolean =>
-    (tabs[projectId] ?? []).some((t) => t.kind === 'file' && t.dirty && isUnder(t.path, rel))
+    (tabs[projectId] ?? []).some((t) => t.kind === 'file' && isDirty(t) && isUnder(t.path, rel))
 
   const [reveal, setReveal] = useState<{ path: string; n: number } | null>(null)
 
@@ -561,7 +570,7 @@ export function App(): React.JSX.Element {
   const closeTab = async (projectId: string, tabId: string): Promise<void> => {
     const list = tabs[projectId] ?? []
     const tab = list.find((t) => t.id === tabId)
-    if (tab?.kind === 'file' && tab.dirty) {
+    if (tab?.kind === 'file' && isDirty(tab)) {
       const choice = await choose({
         title: `Salvar "${tab.title}" antes de fechar?`,
         message: 'Fechando sem salvar, as alterações feitas desde o último Ctrl+S são perdidas.',
@@ -829,7 +838,7 @@ export function App(): React.JSX.Element {
                       path={tab.path}
                       visible={visible}
                       fontSize={state.settings.fileFontSize}
-                      onDirtyChange={(dirty) => patchFile(tab.id, { dirty })}
+                      onDirtyChange={(dirty) => markDirty(tab.id, dirty)}
                       onSaveHandle={(save) => (save ? fileSavers.current.set(tab.id, save) : fileSavers.current.delete(tab.id))}
                       jump={tab.jump}
                       headerExtra={
