@@ -12,7 +12,26 @@ export function claudeActivity(status: unknown): AgentActivity | null {
   return null
 }
 
-const TURN_EVENT = /"type":"event_msg","payload":\{"type":"(task_started|task_complete|turn_aborted)"/g
+// Com subagente em segundo plano o status fica "busy" mesmo depois do turno encerrado, com o Claude parado
+// esperando você (no código dele: isLoading || delegatedActive). O transcript diferencia: todo turno que termina
+// sem interrupção grava a entrada system/turn_duration, e o turno seguinte começa com uma mensagem (seu pedido ou
+// o aviso do subagente). Turno interrompido com Esc não grava a entrada e continua contando como trabalhando.
+export function claudeTurnEnded(tail: string): boolean {
+  const lines = tail.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let entry: { type?: unknown; subtype?: unknown }
+    try {
+      entry = JSON.parse(lines[i]!) as typeof entry
+    } catch {
+      continue
+    }
+    if (entry.type === 'user' || entry.type === 'assistant') return false
+    if (entry.type === 'system' && entry.subtype === 'turn_duration') return true
+  }
+  return false
+}
+
+const TURN_EVENT =/"type":"event_msg","payload":\{"type":"(task_started|task_complete|turn_aborted)"/g
 
 // No rollout do Codex cada turno abre com task_started e fecha com task_complete ou turn_aborted.
 // Um turno longo pode empurrar o início para fora do trecho lido; sem marcador nenhum, o turno ainda corre.

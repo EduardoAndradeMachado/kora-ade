@@ -32,14 +32,26 @@ export function createRolloutFinder(sessionsDir: string, missRetryMs = 3000, now
   }
 }
 
+// ~/.claude/projects/<pasta>/<sessão>.jsonl. As subpastas de cada sessão (subagentes, resultados de ferramenta)
+// mudam o tempo todo enquanto ele trabalha e não dizem nada sobre o fim do turno.
+export const isClaudeTranscript = (name: string): boolean =>
+  /^[^\\/]+[\\/][0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/i.test(name)
+
 // Observa as pastas onde o Claude e o Codex deixam rastro (sessão por pid, locks, rollouts). Pasta que ainda não
 // existe (agente nunca usado) é tentada de novo a cada retryMs; watcher que falha (pasta apagada) também volta.
+export interface WatchTarget {
+  dir: string
+  recursive: boolean
+  // Nome relativo à pasta vigiada; sem filtro (ou sem nome no evento), qualquer mudança dispara.
+  accept?(name: string): boolean
+}
+
 export class FolderWatch {
   private readonly watchers = new Map<string, FSWatcher>()
   private retry?: NodeJS.Timeout
 
   constructor(
-    private readonly targets: { dir: string; recursive: boolean }[],
+    private readonly targets: WatchTarget[],
     private readonly onChange: () => void,
     private readonly retryMs = 3000
   ) {}
@@ -50,10 +62,12 @@ export class FolderWatch {
   }
 
   private attach(): void {
-    for (const { dir, recursive } of this.targets) {
+    for (const { dir, recursive, accept } of this.targets) {
       if (this.watchers.has(dir) || !existsSync(dir)) continue
       try {
-        const watcher = watch(dir, { recursive }, () => this.onChange())
+        const watcher = watch(dir, { recursive }, (_event, name) => {
+          if (!accept || !name || accept(name)) this.onChange()
+        })
         watcher.on('error', () => {
           watcher.close()
           this.watchers.delete(dir)

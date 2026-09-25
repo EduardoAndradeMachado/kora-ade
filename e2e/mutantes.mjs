@@ -585,6 +585,22 @@ const MUTANTS = [
     bug: 'Esc não cancela a edição do caminho',
     find: "          else if (e.key === 'Escape') onDone()",
     replace: "          else if (e.key === 'Escape') void 0"
+  },
+  {
+    id: 'M67',
+    grep: 'R67 ',
+    file: 'src/main/agent-detect.ts',
+    bug: 'Claude com subagente em segundo plano fica "trabalhando" com o turno encerrado',
+    find: "    activity: data.status === 'busy' && claudeTurnEndedFor(dir, data.cwd, data.sessionId) ? 'waiting' : claudeActivity(data.status)",
+    replace: '    activity: claudeActivity(data.status)'
+  },
+  {
+    id: 'M67b',
+    grep: 'R67 ',
+    file: 'src/main/index.ts',
+    bug: 'o fim do turno gravado no transcript não dispara detecção (só a varredura de 30 s)',
+    find: '    { dir: agentDirs.claudeProjects, recursive: true, accept: isClaudeTranscript }',
+    replace: '    { dir: agentDirs.claudeProjects, recursive: true, accept: () => false }'
   }
 ]
 

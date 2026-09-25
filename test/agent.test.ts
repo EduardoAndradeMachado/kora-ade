@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -45,6 +45,30 @@ describe('sessão do Claude pelo pid', () => {
     writeFileSync(join(dir, '3576.json'), claudePidFile(3576, sessionId), 'utf8')
     expect(claudeStateForPid(dir, 3576)).toEqual({ agent: { kind: 'claude', sessionId, name: 'exemplo-75' }, activity: 'waiting' })
     writeFileSync(join(dir, '3576.json'), claudePidFile(3576, sessionId, 'busy'), 'utf8')
+    expect(claudeStateForPid(dir, 3576)).toMatchObject({ activity: 'working' })
+  })
+
+  it('busy com o turno encerrado no transcript (subagente em segundo plano) é esperando você', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kora-claude-root-'))
+    const dir = join(root, 'sessions')
+    const projectDir = join(root, 'projects', 'C--Users-voce-Documents-projetos-exemplo')
+    mkdirSync(dir)
+    mkdirSync(projectDir, { recursive: true })
+    const sessionId = randomUUID()
+    writeFileSync(join(dir, '3576.json'), claudePidFile(3576, sessionId, 'busy'), 'utf8')
+    expect(claudeStateForPid(dir, 3576), 'sem transcript: vale o status').toMatchObject({ activity: 'working' })
+
+    const transcript = join(projectDir, `${sessionId}.jsonl`)
+    const entry = (data: object): void => appendFileSync(transcript, JSON.stringify(data) + '\n', 'utf8')
+    entry({ type: 'user', message: { role: 'user', content: 'rode o subagente' } })
+    expect(claudeStateForPid(dir, 3576)).toMatchObject({ activity: 'working' })
+    entry({ type: 'assistant', message: { role: 'assistant', stop_reason: 'end_turn', content: [] } })
+    entry({ type: 'system', subtype: 'turn_duration', durationMs: 5000, pendingBackgroundAgentCount: 1 })
+    entry({ type: 'queue-operation', operation: 'enqueue' })
+    expect(claudeStateForPid(dir, 3576)).toMatchObject({ activity: 'waiting' })
+
+    // O aviso do subagente chega como mensagem e abre um turno novo.
+    entry({ type: 'user', message: { role: 'user', content: '<task-notification>' } })
     expect(claudeStateForPid(dir, 3576)).toMatchObject({ activity: 'working' })
   })
 

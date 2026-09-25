@@ -59,6 +59,20 @@ onLines(
     // nesse caso (parado no prompt, com tarefa local_bash ainda rodando), não "idle". O arquivo é reescrito algumas
     // vezes durante o turno, como o real faz ao atualizar o status.
     const timed = /^trabalhe(-bg)? (\d+)$/.exec(line.trim())
+    // "trabalhe-sub 5": turno de 5 s que termina com um subagente ainda rodando. O Claude real continua gravando
+    // "busy" no arquivo do pid (nem reescreve: o status não mudou); o fim do turno só aparece no histórico, na
+    // entrada system/turn_duration, seguida de entradas que não são conversa.
+    const withSubagent = /^trabalhe-sub (\d+)$/.exec(line.trim())
+    if (withSubagent) {
+      const entry = (data) => appendFileSync(history, JSON.stringify({ sessionId, cwd, isSidechain: false, ...data }) + '\n', 'utf8')
+      entry({ type: 'user', message: { role: 'user', content: line.trim() } })
+      writeStatus('busy')
+      setTimeout(() => {
+        entry({ type: 'assistant', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: 'ok' }] } })
+        entry({ type: 'system', subtype: 'turn_duration', durationMs: 5000, messageCount: 3, pendingBackgroundAgentCount: 1 })
+        entry({ type: 'queue-operation', operation: 'enqueue' })
+      }, Number(withSubagent[1]) * 1000)
+    }
     if (timed) {
       const until = Date.now() + Number(timed[2]) * 1000
       const endStatus = timed[1] ? 'shell' : 'idle'

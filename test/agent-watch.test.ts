@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createRolloutFinder, FolderWatch } from '../src/main/agent-watch'
+import { createRolloutFinder, FolderWatch, isClaudeTranscript } from '../src/main/agent-watch'
 
 const settle = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -77,6 +77,27 @@ describe('watch das pastas dos agentes', () => {
     await settle(150)
     const before = changes
     writeFileSync(join(dir, '2026', '09', '24', 'rollout.jsonl'), 'x\n')
+    await settle(300)
+    expect(changes).toBeGreaterThan(before)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('transcripts do Claude: avisa o transcript da sessão, ignora subagentes e resultados de ferramenta', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kora-claude-projects-'))
+    const sessionId = randomUUID()
+    const project = join(dir, 'C--Users-voce-projeto')
+    mkdirSync(join(project, sessionId, 'subagents'), { recursive: true })
+    mkdirSync(join(project, sessionId, 'tool-results'), { recursive: true })
+    let changes = 0
+    watch = new FolderWatch([{ dir, recursive: true, accept: isClaudeTranscript }], () => changes++, 100)
+    watch.start()
+    await settle(150)
+    const before = changes
+    writeFileSync(join(project, sessionId, 'subagents', `agent-${randomUUID()}.jsonl`), 'x\n')
+    writeFileSync(join(project, sessionId, 'tool-results', 'saida.txt'), 'x\n')
+    await settle(300)
+    expect(changes, 'escrita dos subagentes não dispara detecção').toBe(before)
+    writeFileSync(join(project, `${sessionId}.jsonl`), 'x\n')
     await settle(300)
     expect(changes).toBeGreaterThan(before)
     rmSync(dir, { recursive: true, force: true })

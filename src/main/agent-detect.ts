@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { SESSION_ID, type AgentActivity, type AgentSession } from '../shared/agent'
-import { claudeActivity, codexActivity, readTail } from './agent-activity'
+import { claudeActivity, claudeTurnEnded, codexActivity, readTail } from './agent-activity'
 import { descendants, type ProcInfo } from './processes'
+import { claudeProjectDir } from './sessions'
 
 export interface DetectorSources {
   claudeSessionsDir: string
@@ -39,7 +40,7 @@ export function claudeStateForPid(dir: string, pid: number): Detected | typeof U
   } catch {
     return null
   }
-  let data: { pid?: number; sessionId?: string; name?: string; status?: unknown }
+  let data: { pid?: number; sessionId?: string; name?: string; cwd?: string; status?: unknown }
   try {
     data = JSON.parse(text) as typeof data
   } catch {
@@ -48,7 +49,20 @@ export function claudeStateForPid(dir: string, pid: number): Detected | typeof U
   if (data.pid !== pid || !data.sessionId || !SESSION_ID.test(data.sessionId)) return null
   return {
     agent: { kind: 'claude', sessionId: data.sessionId, ...(data.name ? { name: data.name } : {}) },
-    activity: claudeActivity(data.status)
+    activity: data.status === 'busy' && claudeTurnEndedFor(dir, data.cwd, data.sessionId) ? 'waiting' : claudeActivity(data.status)
+  }
+}
+
+const CLAUDE_TAIL_BYTES = 64 * 1024
+
+// Transcript ausente ou fim de turno fora do trecho lido: vale o status do arquivo do pid.
+function claudeTurnEndedFor(sessionsDir: string, cwd: string | undefined, sessionId: string): boolean {
+  if (!cwd) return false
+  const transcript = join(claudeProjectDir(dirname(sessionsDir), cwd), `${sessionId}.jsonl`)
+  try {
+    return claudeTurnEnded(readTail(transcript, CLAUDE_TAIL_BYTES))
+  } catch {
+    return false
   }
 }
 

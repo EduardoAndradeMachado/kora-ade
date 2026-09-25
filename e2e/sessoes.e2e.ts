@@ -580,3 +580,24 @@ test('R63 Claude que termina deixando comando em segundo plano ("shell") está e
   await expect(claudeTab().locator('[data-activity]'), 'sem rodinha: esperando você').toHaveAttribute('data-activity', 'waiting')
   await expect(claudeTab().locator('.kora-spin')).toHaveCount(0)
 })
+
+test('R67 Claude que encerra o turno com subagente em segundo plano (arquivo do pid segue "busy") está esperando você', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  const { spy } = await installAlertSpies(page)
+  const claudeTab = () => ui.barTab(page, /Claude/)
+
+  await openClaude(run, env)
+  await newTab(page, 'Terminal')
+  await ui.sideTab(page, /Claude/).click()
+  await typeLine(page, 'trabalhe-sub 7')
+  await expect(claudeTab().locator('[data-activity]')).toHaveAttribute('data-activity', 'working', { timeout: 5000 })
+  await ui.sideTab(page, 'Terminal').click()
+
+  await expect(claudeTab().locator('[data-alert]'), 'aviso de sessão parada').toHaveCount(1, { timeout: 12_000 })
+  expect((await spy()).chimes, 'a corda tocou').toBe(1)
+  await ui.sideTab(page, /Claude/).click()
+  await expect(claudeTab().locator('[data-activity]'), 'sem rodinha: esperando você').toHaveAttribute('data-activity', 'waiting')
+  await expect(claudeTab().locator('.kora-spin')).toHaveCount(0)
+})

@@ -9,7 +9,7 @@ import { addProject, applyLayout, mergeTabs, removeProject, setTabAgent } from '
 import { Terminals } from './terminals'
 import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from './files'
 import { AgentDetector, UNREADABLE } from './agent-detect'
-import { createRolloutFinder, FolderWatch } from './agent-watch'
+import { createRolloutFinder, FolderWatch, isClaudeTranscript } from './agent-watch'
 import { listProjectSessions, sessionArtifacts } from './sessions'
 import { createEntry, openInDefaultBrowser, renameEntry } from './file-actions'
 import { ProjectIcons } from './project-icons'
@@ -97,7 +97,8 @@ const watchers = new ProjectWatchers((projectId, change) => mainWindow?.webConte
 const agentDirs = {
   claudeSessions: join(homedir(), '.claude', 'sessions'),
   codexLocks: join(homedir(), '.codex', 'thread-writer-locks'),
-  codexRollouts: join(homedir(), '.codex', 'sessions')
+  codexRollouts: join(homedir(), '.codex', 'sessions'),
+  claudeProjects: join(homedir(), '.claude', 'projects')
 }
 const detector = new AgentDetector({
   claudeSessionsDir: agentDirs.claudeSessions,
@@ -111,7 +112,9 @@ const agentFolders = new FolderWatch(
   [
     { dir: agentDirs.claudeSessions, recursive: false },
     { dir: agentDirs.codexLocks, recursive: false },
-    { dir: agentDirs.codexRollouts, recursive: true }
+    { dir: agentDirs.codexRollouts, recursive: true },
+    // Com subagente em segundo plano, o fim do turno só aparece no transcript; o arquivo do pid segue "busy".
+    { dir: agentDirs.claudeProjects, recursive: true, accept: isClaudeTranscript }
   ],
   () => scheduleDetect()
 )
