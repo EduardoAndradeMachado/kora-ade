@@ -659,14 +659,6 @@ const MUTANTS = [
     replace: "    return <Icon name={name} active className={cn('size-3.5', className)} />"
   },
   {
-    id: 'M73',
-    grep: 'R72 ',
-    file: 'src/main/index.ts',
-    bug: 'qualquer carregamento (o iframe do PDF) encerra todos os terminais, como antes',
-    find: "  mainWindow.webContents.on('did-start-navigation', (details) => {\n    if (!details.isMainFrame || details.isSameDocument) return\n",
-    replace: "  mainWindow.webContents.on('did-start-loading', () => {\n"
-  },
-  {
     id: 'M71',
     grep: 'R71 ',
     file: 'src/renderer/src/components/Sidebar.tsx',
@@ -681,6 +673,30 @@ const MUTANTS = [
     bug: 'aba criada pelo + num projeto recolhido fica escondida',
     find: '                expand(project.id)\n',
     replace: ''
+  },
+  {
+    id: 'M72',
+    grep: 'R69 ',
+    file: 'src/renderer/src/components/Sidebar.tsx',
+    bug: 'criar projeto e categoria não acendem no hover',
+    find: "const accentOnHover = 'hover:[--icon-accent-idle:var(--icon-accent)]'",
+    replace: "const accentOnHover = ''"
+  },
+  {
+    id: 'M72b',
+    grep: 'R69 ',
+    file: 'src/renderer/src/components/Sidebar.tsx',
+    bug: 'adicionar projeto volta a ficar âmbar parado',
+    find: '            <Icon name="novoProjeto" />',
+    replace: '            <Icon name="novoProjeto" active />'
+  },
+  {
+    id: 'M73',
+    grep: 'R72 ',
+    file: 'src/main/index.ts',
+    bug: 'qualquer carregamento (o iframe do PDF) encerra todos os terminais, como antes',
+    find: "  mainWindow.webContents.on('did-start-navigation', (details) => {\n    if (!details.isMainFrame || details.isSameDocument) return\n",
+    replace: "  mainWindow.webContents.on('did-start-loading', () => {\n"
   }
 ]
 

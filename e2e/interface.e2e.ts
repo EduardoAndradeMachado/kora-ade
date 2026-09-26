@@ -824,7 +824,7 @@ test('R68 nome dado à aba vira o nome da conversa na aba Sessões, também com 
   await expect(row('Inscrição SBPROPPG')).toHaveCount(0)
 })
 
-test('R69 âmbar só no que está aberto ou selecionado: pasta do projeto aberta, aba selecionada e as ações de criar', async ({ kora }) => {
+test('R69 âmbar só no que está aberto ou selecionado: pasta do projeto aberta, aba selecionada; criar projeto e categoria só no hover', async ({ kora }) => {
   const env = kora.env()
   writeFileSync(join(env.project, 'app.ts'), 'export const a = 1\n')
   const run = await kora.launch(env)
@@ -837,8 +837,26 @@ test('R69 âmbar só no que está aberto ou selecionado: pasta do projeto aberta
 
   expect(await lit(projectFolder()), 'projeto fechado, sem abas').toBe(false)
   expect(await lit(page.getByTitle('Configurações').locator('svg')), 'configurações').toBe(false)
-  expect(await lit(page.getByTitle('Adicionar projeto').locator('svg')), 'adicionar projeto').toBe(true)
-  expect(await lit(page.getByTitle('Nova categoria').locator('svg')), 'nova categoria').toBe(true)
+  // Criar projeto e categoria: neutros parados, detalhe âmbar só com o mouse em cima (a cor muda por CSS no hover).
+  const amber = await page.evaluate(() => {
+    const probe = document.createElement('span')
+    probe.style.color = 'var(--brand-amber)'
+    document.body.append(probe)
+    const color = getComputedStyle(probe).color
+    probe.remove()
+    return color
+  })
+  const accentStroke = (button: import('@playwright/test').Locator) =>
+    button.locator('[stroke="var(--icon-accent-idle)"]').first().evaluate((el) => getComputedStyle(el).stroke)
+  for (const title of ['Adicionar projeto', 'Nova categoria']) {
+    const button = page.getByTitle(title)
+    expect(await lit(button.locator('svg')), `${title}: sem âmbar parado`).toBe(false)
+    await page.mouse.move(0, 0)
+    expect(await accentStroke(button), `${title}: parado, detalhe cinza`).not.toBe(amber)
+    await button.hover()
+    await expect.poll(() => accentStroke(button), `${title}: âmbar com o mouse em cima`).toBe(amber)
+  }
+  await page.mouse.move(0, 0)
 
   await newTab(page, 'Terminal')
   expect(await lit(projectFolder()), 'projeto aberto, com abas').toBe(true)

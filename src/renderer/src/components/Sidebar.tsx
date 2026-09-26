@@ -66,6 +66,8 @@ const THEMES: { theme: ThemePreference; label: string; icon: IconName }[] = [
 
 const iconButton =
   'rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground'
+// O detalhe do ícone acende em âmbar só com o mouse em cima.
+const accentOnHover = 'hover:[--icon-accent-idle:var(--icon-accent)]'
 
 const HIDDEN_OPEN_KEY = 'kora.sidebar.ocultosAbertos'
 function readHiddenOpen(): boolean {
@@ -362,11 +364,16 @@ export function Sidebar(props: Props): React.JSX.Element {
         )}
         <span className="text-xs font-medium text-muted-foreground">Projetos</span>
         <div className="flex items-center gap-0.5">
-          <button type="button" title="Nova categoria" onClick={() => setCreatingIn({ parentId: null })} className={iconButton}>
-            <Icon name="novaCategoria" active />
+          <button
+            type="button"
+            title="Nova categoria"
+            onClick={() => setCreatingIn({ parentId: null })}
+            className={cn(iconButton, accentOnHover)}
+          >
+            <Icon name="novaCategoria" />
           </button>
-          <button type="button" title="Adicionar projeto" onClick={props.onAdd} className={iconButton}>
-            <Icon name="novoProjeto" active />
+          <button type="button" title="Adicionar projeto" onClick={props.onAdd} className={cn(iconButton, accentOnHover)}>
+            <Icon name="novoProjeto" />
           </button>
         </div>
       </div>
