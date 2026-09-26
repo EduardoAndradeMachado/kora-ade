@@ -7,6 +7,7 @@ import {
   installShellSpy,
   isAlive,
   newTab,
+  pdfBytes,
   pngBytes,
   pressNative,
   processSnapshot,
@@ -516,4 +517,24 @@ test('R61 Abrir pasta dos logs funciona mesmo sem nenhum erro registrado; falha 
   const failure = dialog.locator('p[role=status].text-destructive')
   await expect(failure).toContainText('Não foi possível abrir a pasta dos logs')
   await expect(failure).not.toContainText('invoking remote method')
+})
+
+test('R72 abrir um PDF não encerra os terminais abertos; recarregar a interface encerra (sem órfãos)', async ({ kora }) => {
+  const env = kora.env()
+  writeFileSync(join(env.project, 'doc.pdf'), pdfBytes())
+  const run = await kora.launch(env)
+  const page = run.page
+  await newTab(page, 'Terminal')
+  await expect.poll(() => shells(run).length, { timeout: 30_000 }).toBe(1)
+  const shellPid = shells(run)[0]!.pid
+
+  await page.locator('aside').last().locator('div[title="doc.pdf"]').click()
+  await expect(ui.barTab(page, 'doc.pdf')).toBeVisible()
+  await expect.poll(() => page.frames().some((f) => f.url().startsWith('kora-file://project/p1/doc.pdf'))).toBe(true)
+  await page.waitForTimeout(1500)
+  expect(isAlive(shellPid), 'o PowerShell da aba continua vivo depois de abrir o PDF').toBe(true)
+  expect(shells(run).map((p) => p.pid)).toContain(shellPid)
+
+  await page.reload()
+  await expect.poll(() => isAlive(shellPid), { timeout: 15_000, message: 'recarregar a interface encerra o terminal' }).toBe(false)
 })

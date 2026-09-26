@@ -657,6 +657,14 @@ const MUTANTS = [
     bug: 'aba de arquivo fora de foco continua com âmbar',
     find: "    return <Icon name={name} active={selected} className={cn('size-3.5', className)} />",
     replace: "    return <Icon name={name} active className={cn('size-3.5', className)} />"
+  },
+  {
+    id: 'M73',
+    grep: 'R72 ',
+    file: 'src/main/index.ts',
+    bug: 'qualquer carregamento (o iframe do PDF) encerra todos os terminais, como antes',
+    find: "  mainWindow.webContents.on('did-start-navigation', (details) => {\n    if (!details.isMainFrame || details.isSameDocument) return\n",
+    replace: "  mainWindow.webContents.on('did-start-loading', () => {\n"
   }
 ]
 

@@ -287,7 +287,10 @@ function createWindow(): void {
   })
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
   // Um reload da interface descarta as abas; sem isso os shells (e um Claude rodando) ficariam órfãos no main.
-  mainWindow.webContents.on('did-start-loading', () => {
+  // Só a navegação da página principal: iframe (o visualizador de PDF) também dispara did-start-loading, e abrir
+  // um PDF encerrava todos os terminais.
+  mainWindow.webContents.on('did-start-navigation', (details) => {
+    if (!details.isMainFrame || details.isSameDocument) return
     terminals.killAll()
     activities.clear()
   })
