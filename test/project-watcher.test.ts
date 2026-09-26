@@ -2,7 +2,8 @@ import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ProjectWatchers, classify } from '../src/main/project-watcher'
+import { MAX_FILES, ProjectWatchers, classify, merge } from '../src/main/project-watcher'
+import { touchesFile } from '../src/shared/file-change'
 import type { FilesChange } from '../src/shared/ipc'
 
 let root: string
@@ -29,13 +30,27 @@ afterEach(() => {
 const settle = (ms = 400): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 describe('o que cada evento do disco muda para a interface', () => {
-  it('criar, apagar ou mover muda a listagem da pasta (raiz como vazio) e o status do git', () => {
-    expect(classify('rename', 'docs\\svg\\logo.svg')).toEqual({ dirs: ['docs\\svg'], git: true, ignoreRules: false, rescan: false })
+  it('criar, apagar ou mover muda a listagem da pasta (raiz como vazio), o arquivo e o status do git', () => {
+    expect(classify('rename', 'docs\\svg\\logo.svg')).toEqual({
+      dirs: ['docs\\svg'],
+      files: ['docs\\svg\\logo.svg'],
+      allFiles: false,
+      git: true,
+      ignoreRules: false,
+      rescan: false
+    })
     expect(classify('rename', 'README.md').dirs).toEqual([''])
   })
 
-  it('editar conteúdo não muda a listagem, mas muda o status do git', () => {
-    expect(classify('change', 'src\\app.ts')).toEqual({ dirs: [], git: true, ignoreRules: false, rescan: false })
+  it('editar conteúdo não muda a listagem, mas avisa o arquivo e o status do git', () => {
+    expect(classify('change', 'src\\app.ts')).toEqual({
+      dirs: [],
+      files: ['src\\app.ts'],
+      allFiles: false,
+      git: true,
+      ignoreRules: false,
+      rescan: false
+    })
   })
 
   it('.gitignore editado (em qualquer pasta) muda as regras de ignorados', () => {
@@ -45,15 +60,49 @@ describe('o que cada evento do disco muda para a interface', () => {
   })
 
   it('dentro do .git só index, HEAD e refs mexem no status; objetos e travas não avisam nada', () => {
+    const nothing = { dirs: [], files: [], allFiles: false, git: false, ignoreRules: false, rescan: false }
     expect(classify('change', '.git\\index').git).toBe(true)
+    expect(classify('change', '.git\\index').files).toEqual([])
     expect(classify('change', '.git\\HEAD').git).toBe(true)
     expect(classify('rename', '.git\\refs\\heads\\main').git).toBe(true)
-    expect(classify('rename', '.git\\index.lock')).toEqual({ dirs: [], git: false, ignoreRules: false, rescan: false })
-    expect(classify('rename', '.git\\objects\\ab\\cdef')).toEqual({ dirs: [], git: false, ignoreRules: false, rescan: false })
+    expect(classify('rename', '.git\\index.lock')).toEqual(nothing)
+    expect(classify('rename', '.git\\objects\\ab\\cdef')).toEqual(nothing)
   })
 
   it('evento sem nome (buffer do Windows estourou) pede para reler tudo', () => {
-    expect(classify('rename', null)).toEqual({ dirs: [], git: true, ignoreRules: true, rescan: true })
+    expect(classify('rename', null)).toEqual({ dirs: [], files: [], allFiles: true, git: true, ignoreRules: true, rescan: true })
+  })
+})
+
+const edit = (rel: string): FilesChange => classify('change', rel)
+
+describe('arquivos avisados numa rajada', () => {
+  it('juntam sem repetir', () => {
+    expect(merge(merge(edit('a.ts'), edit('b.ts')), edit('a.ts')).files).toEqual(['a.ts', 'b.ts'])
+  })
+
+  it('passado o teto viram "confira todos os abertos", sem mandar a lista', () => {
+    let change = edit('0.ts')
+    for (let i = 1; i <= MAX_FILES; i++) change = merge(change, edit(`${i}.ts`))
+    expect(change).toMatchObject({ files: [], allFiles: true })
+    expect(merge(change, edit('outro.ts'))).toMatchObject({ files: [], allFiles: true })
+  })
+})
+
+describe('aviso que diz respeito a um arquivo aberto', () => {
+  it('mesmo arquivo com "/" ou outra caixa (NTFS não diferencia)', () => {
+    expect(touchesFile(edit('src\\App.ts'), 'src/app.ts')).toBe(true)
+    expect(touchesFile(edit('src\\app.ts'), 'src\\app.ts')).toBe(true)
+  })
+
+  it('outro arquivo, ou só o .git, não', () => {
+    expect(touchesFile(edit('src\\app.tsx'), 'src\\app.ts')).toBe(false)
+    expect(touchesFile(edit('.git\\index'), 'src\\app.ts')).toBe(false)
+  })
+
+  it('rajada que estourou o teto ou o buffer vale para todos', () => {
+    expect(touchesFile(classify('rename', null), 'src\\app.ts')).toBe(true)
+    expect(touchesFile({ ...edit('x'), files: [], allFiles: true }, 'src\\app.ts')).toBe(true)
   })
 })
 
@@ -84,6 +133,16 @@ describe('observador de pastas do projeto (watcher real)', () => {
     expect(calls.length).toBeGreaterThan(0)
     expect(calls.every((c) => c.change.dirs.length === 0 && !c.change.ignoreRules)).toBe(true)
     expect(calls.some((c) => c.change.git)).toBe(true)
+    expect(calls.some((c) => touchesFile(c.change, 'README.md'))).toBe(true)
+  })
+
+  it('arquivo gravado por cima com renomear (temporário → nome final) avisa o arquivo final', async () => {
+    watchers.watch('p1', root)
+    await settle(100)
+    writeFileSync(join(root, 'docs', 'README.md.tmp'), '# novo\n')
+    renameSync(join(root, 'docs', 'README.md.tmp'), join(root, 'README.md'))
+    await settle()
+    expect(calls.some((c) => touchesFile(c.change, 'README.md'))).toBe(true)
   })
 
   it('objeto novo e trava dentro do .git não avisam', async () => {

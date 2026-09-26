@@ -2,8 +2,11 @@ import { watch, type FSWatcher } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import type { FilesChange } from '../shared/ipc'
 
-const NOTHING: FilesChange = { dirs: [], git: false, ignoreRules: false, rescan: false }
-const EVERYTHING: FilesChange = { dirs: [], git: true, ignoreRules: true, rescan: true }
+const NOTHING: FilesChange = { dirs: [], files: [], allFiles: false, git: false, ignoreRules: false, rescan: false }
+const EVERYTHING: FilesChange = { dirs: [], files: [], allFiles: true, git: true, ignoreRules: true, rescan: true }
+// Rajada grande (pnpm install, checkout) não vira uma lista de milhares de caminhos pelo IPC: passado o teto,
+// a interface confere todos os arquivos abertos, que são poucos.
+export const MAX_FILES = 500
 
 // O que um evento do disco muda para a interface. Dentro do .git só importa o que altera o status
 // (index, HEAD, refs) e as regras de ignorados (info/exclude); objetos e logs mudam a todo commit sem efeito.
@@ -22,17 +25,25 @@ export function classify(event: string, filename: string | null): FilesChange {
   const dir = dirname(filename)
   return {
     dirs: event === 'rename' ? [dir === '.' ? '' : dir] : [],
+    // 'rename' também é conteúdo novo: agente e editor costumam gravar num temporário e renomear por cima.
+    files: [filename],
+    allFiles: false,
     git: true,
     ignoreRules: basename(filename).toLowerCase() === '.gitignore',
     rescan: false
   }
 }
 
-const isEmpty = (c: FilesChange): boolean => !c.git && !c.ignoreRules && !c.rescan && c.dirs.length === 0
+const isEmpty = (c: FilesChange): boolean =>
+  !c.git && !c.ignoreRules && !c.rescan && !c.allFiles && c.dirs.length === 0 && c.files.length === 0
 
-function merge(a: FilesChange, b: FilesChange): FilesChange {
+export function merge(a: FilesChange, b: FilesChange): FilesChange {
+  const files = a.allFiles || b.allFiles ? [] : [...new Set([...a.files, ...b.files])]
+  const allFiles = a.allFiles || b.allFiles || files.length > MAX_FILES
   return {
     dirs: [...new Set([...a.dirs, ...b.dirs])],
+    files: allFiles ? [] : files,
+    allFiles,
     git: a.git || b.git,
     ignoreRules: a.ignoreRules || b.ignoreRules,
     rescan: a.rescan || b.rescan

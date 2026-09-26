@@ -16,10 +16,13 @@ export interface TextFile {
 }
 
 // O que mudou no disco de um projeto, por quem quer que seja: pastas cuja listagem mudou ('' = raiz),
+// arquivos que podem ter mudado de conteúdo (allFiles quando a lista não cabe ou não dá para saber),
 // status do Git possivelmente diferente, regras de ignorados (.gitignore) alteradas, ou "releia tudo"
 // quando não dá para saber (buffer do watcher estourado, watcher perdido).
 export interface FilesChange {
   dirs: string[]
+  files: string[]
+  allFiles: boolean
   git: boolean
   ignoreRules: boolean
   rescan: boolean

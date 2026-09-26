@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { cn } from '@/lib/utils'
+import { touchesFile } from '@shared/file-change'
 import { ViewerHeader } from '@/components/ViewerHeader'
 import { ModeToggle } from '@/components/ModeToggle'
 
@@ -29,6 +30,22 @@ export function MarkdownView({ projectId, path, visible, fontSize, onEdit, onOpe
       cancelled = true
     }
   }, [projectId, path, reloadKey])
+
+  // Só leitura, sem nada a perder: mudou no disco, relê. Arquivo que sumiu fica com o último conteúdo.
+  useEffect(() => {
+    let cancelled = false
+    const off = window.kora.onFilesChanged((changedProject, change) => {
+      if (changedProject !== projectId || !touchesFile(change, path)) return
+      window.kora.readText(projectId, path).then(
+        (file) => !cancelled && setSource(file.content),
+        () => {}
+      )
+    })
+    return () => {
+      cancelled = true
+      off()
+    }
+  }, [projectId, path])
 
   const html = useMemo(
     () => (source === null ? '' : DOMPurify.sanitize(marked.parse(source, { async: false, gfm: true }))),

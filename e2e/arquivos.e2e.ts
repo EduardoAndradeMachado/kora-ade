@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { test, expect } from './harness'
@@ -263,35 +263,113 @@ test('R17 explorador com git: modificado com cor e M, não rastreado com U, past
   expect(await row(run, 'src').locator('svg').nth(1).evaluate((e) => getComputedStyle(e).opacity)).toBe('1')
 })
 
-test('R18 editor: .ts abre no Monaco, Ctrl+S grava; mudança no disco gera aviso de conflito e não sobrescreve', async ({ kora }) => {
+const changedOutside = (page: KoraRun['page']) => page.getByText('O arquivo mudou no disco').filter({ visible: true })
+const unsaved = (page: KoraRun['page']) => page.getByText('Não salvo').filter({ visible: true })
+
+async function openAppTs(run: KoraRun) {
+  await row(run, 'src').click()
+  await row(run, 'src\\app.ts').click()
+  const lines = run.page.locator('.monaco-editor').filter({ visible: true }).locator('.view-lines')
+  await expect(lines).toContainText('export const valor = 1')
+  return lines
+}
+
+test('R18 editor: .ts abre no Monaco, Ctrl+S grava; seguir digitando logo depois de salvar não vira aviso de mudança por fora', async ({ kora }) => {
   const env = kora.env()
   seedRepo(env)
   const file = join(env.project, 'src', 'app.ts')
   const run = await kora.launch(env)
   const page = run.page
 
-  await row(run, 'src').click()
-  await row(run, 'src\\app.ts').click()
-  const editor = page.locator('.monaco-editor').filter({ visible: true })
-  await expect(editor).toBeVisible()
-  await expect(editor.locator('.view-lines')).toContainText('export const valor = 1')
-  await editor.locator('.view-lines').click()
+  const lines = await openAppTs(run)
+  await lines.click()
   await page.keyboard.press('Control+End')
   await page.keyboard.type('// editado no kora')
-  await expect(page.getByText('Não salvo').filter({ visible: true })).toBeVisible()
+  await expect(unsaved(page)).toBeVisible()
   await page.keyboard.press('Control+S')
   await expect.poll(() => readFileSync(file, 'utf8')).toContain('// editado no kora')
-  await expect(page.getByText('Não salvo').filter({ visible: true })).toHaveCount(0)
+  await expect(unsaved(page)).toHaveCount(0)
+
+  // O watcher avisa a gravação do próprio Kora: com o texto já diferente do disco, isso não pode parecer conflito.
+  await page.keyboard.type(' mais')
+  await expect(unsaved(page)).toBeVisible()
+  await page.waitForTimeout(1500)
+  await expect(changedOutside(page)).toHaveCount(0)
+  await expect(lines).toContainText('// editado no kora mais')
+})
+
+test('R73 arquivo aberto sem alteração e mudado por fora (gravação direta ou renomear por cima) aparece sozinho, sem aviso; Ctrl+Z volta', async ({ kora }) => {
+  const env = kora.env()
+  seedRepo(env)
+  const file = join(env.project, 'src', 'app.ts')
+  const run = await kora.launch(env)
+  const page = run.page
+
+  const lines = await openAppTs(run)
+  writeFileSync(file, 'export const valor = 2 // do agente\n')
+  await expect(lines).toContainText('export const valor = 2 // do agente')
+
+  const tmp = join(env.project, 'src', 'app.ts.tmp')
+  writeFileSync(tmp, 'export const valor = 3 // renomeado por cima\n')
+  renameSync(tmp, file)
+  await expect(lines).toContainText('export const valor = 3 // renomeado por cima')
+  await expect(changedOutside(page)).toHaveCount(0)
+  await expect(unsaved(page)).toHaveCount(0)
+
+  await lines.click()
+  await page.keyboard.press('Control+Z')
+  await expect(lines).toContainText('export const valor = 2 // do agente')
+  await expect(unsaved(page)).toBeVisible()
+})
+
+test('R74 com edição pendente, mudança por fora avisa na hora sem esperar o Ctrl+S; Ctrl+S não sobrescreve; Sobrescrever e Recarregar resolvem', async ({ kora }) => {
+  const env = kora.env()
+  seedRepo(env)
+  const file = join(env.project, 'src', 'app.ts')
+  const run = await kora.launch(env)
+  const page = run.page
+
+  const lines = await openAppTs(run)
+  await lines.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type('// meu')
+  await expect(unsaved(page)).toBeVisible()
 
   writeFileSync(file, 'externo\n')
-  const later = new Date(Date.now() + 5000)
-  utimesSync(file, later, later)
-  await editor.locator('.view-lines').click()
-  await page.keyboard.press('Control+End')
-  await page.keyboard.type(' mais')
+  await expect(changedOutside(page)).toBeVisible()
+  await expect(lines).toContainText('// meu')
+
+  await lines.click()
   await page.keyboard.press('Control+S')
-  await expect(page.getByText('O arquivo mudou no disco').filter({ visible: true })).toBeVisible()
+  await page.waitForTimeout(500)
   expect(readFileSync(file, 'utf8')).toBe('externo\n')
+  await expect(changedOutside(page)).toBeVisible()
+
+  await ui.visibleButton(page, 'Sobrescrever').click()
+  await expect.poll(() => readFileSync(file, 'utf8')).toContain('// meu')
+  await expect(changedOutside(page)).toHaveCount(0)
+  await expect(unsaved(page)).toHaveCount(0)
+
+  await lines.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type(' de novo')
+  writeFileSync(file, 'do agente outra vez\n')
+  await expect(changedOutside(page)).toBeVisible()
+  await ui.visibleButton(page, 'Recarregar do disco').click()
+  await expect(lines).toContainText('do agente outra vez')
+  await expect(changedOutside(page)).toHaveCount(0)
+  await expect(unsaved(page)).toHaveCount(0)
+})
+
+test('R75 Visualizar do Markdown acompanha o arquivo alterado por fora', async ({ kora }) => {
+  const env = kora.env()
+  seedRepo(env)
+  const run = await kora.launch(env)
+  await row(run, 'README.md').click()
+  const article = run.page.locator('article.markdown').filter({ visible: true })
+  await expect(article.locator('h1')).toHaveText('Título do README')
+  writeFileSync(join(env.project, 'README.md'), '# Título novo do agente\n')
+  await expect(article.locator('h1')).toHaveText('Título novo do agente')
 })
 
 test('R19 Markdown abre renderizado com Visualizar | Editar; Editar abre o Monaco', async ({ kora }) => {

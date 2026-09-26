@@ -3,6 +3,7 @@ import { Icon } from '@/brand/icons'
 import { EDITOR_OPTIONS, monaco, themeForDocument } from '@/lib/monaco'
 import { ipcErrorMessage } from '@/lib/ipc-error'
 import { cn } from '@/lib/utils'
+import { touchesFile } from '@shared/file-change'
 import { useConfirm } from '@/components/ConfirmDialog'
 import { ViewerHeader } from '@/components/ViewerHeader'
 
@@ -56,6 +57,8 @@ export function CodeView({
   const onDirtyRef = useRef(onDirtyChange)
   const saveRef = useRef<() => Promise<void>>(async () => {})
   const fontSizeRef = useRef(fontSize)
+  const checkDiskRef = useRef<() => Promise<void>>(async () => {})
+  const checkAfterBusyRef = useRef(false)
 
   const [load, setLoad] = useState<Load>({ status: 'loading' })
   const [reloadKey, setReloadKey] = useState(0)
@@ -144,6 +147,14 @@ export function CodeView({
     editorRef.current?.updateOptions({ fontSize })
   }, [fontSize])
 
+  useEffect(
+    () =>
+      window.kora.onFilesChanged((changedProject, change) => {
+        if (changedProject === projectId && touchesFile(change, path)) void checkDiskRef.current()
+      }),
+    [projectId, path]
+  )
+
   useEffect(() => {
     if (visible && load.status === 'ready') editorRef.current?.focus()
   }, [visible, load.status])
@@ -168,6 +179,10 @@ export function CodeView({
     } finally {
       busyRef.current = false
       setBusy(false)
+      if (checkAfterBusyRef.current) {
+        checkAfterBusyRef.current = false
+        void checkDiskRef.current()
+      }
     }
   }
 
@@ -215,6 +230,48 @@ export function CodeView({
       setConflict(false)
       markSaved(model, fresh.mtimeMs, model.getAlternativeVersionId())
     })
+
+  // Chamado pelo watcher, que também avisa as gravações do próprio Kora: só o mtime diferente do último
+  // lido ou salvo conta como mudança de fora. Com um salvamento em andamento o mtime ainda é o antigo;
+  // confere de novo quando ele acabar.
+  const checkDisk = async (): Promise<void> => {
+    const editor = editorRef.current
+    const model = editor?.getModel()
+    if (!editor || !model) return
+    if (busyRef.current) {
+      checkAfterBusyRef.current = true
+      return
+    }
+    const known = mtimeRef.current
+    const fresh = await window.kora.readText(projectId, path).catch(() => null)
+    // Arquivo apagado ou movido: quem mostra é a árvore; a aba segue com o que tem.
+    if (!fresh || editorRef.current !== editor) return
+    if (busyRef.current) {
+      checkAfterBusyRef.current = true
+      return
+    }
+    if (mtimeRef.current !== known) return void checkDiskRef.current()
+    if (fresh.mtimeMs === known) return
+    if (fresh.content === contentOf(model)) {
+      markSaved(model, fresh.mtimeMs, model.getAlternativeVersionId())
+      setConflict(false)
+    } else if (dirtyRef.current) {
+      setConflict(true)
+    } else {
+      // Edição em vez de setValue: o Ctrl+Z volta para o que estava antes da mudança de fora.
+      const view = editor.saveViewState()
+      model.pushStackElement()
+      model.pushEditOperations([], [{ range: model.getFullModelRange(), text: fresh.content.replace(/^\uFEFF/, '') }], () => null)
+      model.pushStackElement()
+      if (view) editor.restoreViewState(view)
+      markSaved(model, fresh.mtimeMs, model.getAlternativeVersionId())
+      setConflict(false)
+    }
+  }
+
+  useEffect(() => {
+    checkDiskRef.current = checkDisk
+  })
 
   const onHeaderReload = async (): Promise<void> => {
     if (!editorRef.current) {
@@ -265,7 +322,10 @@ export function CodeView({
       {conflict && (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-amber-500/10 px-4 py-1.5 text-xs text-amber-300">
           <Icon name="alerta" className="size-3.5 shrink-0" />
-          <span className="min-w-0 flex-1">O arquivo mudou no disco (provavelmente o Claude/Codex editou).</span>
+          <span className="min-w-0 flex-1">
+            O arquivo mudou no disco enquanto você editava. Recarregar descarta as suas alterações; Sobrescrever grava a
+            sua versão por cima.
+          </span>
           <button type="button" disabled={busy} onClick={() => void reloadFromDisk()} className={bannerButton}>
             Recarregar do disco
           </button>

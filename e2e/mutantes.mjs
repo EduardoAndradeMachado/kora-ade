@@ -697,6 +697,56 @@ const MUTANTS = [
     bug: 'qualquer carregamento (o iframe do PDF) encerra todos os terminais, como antes',
     find: "  mainWindow.webContents.on('did-start-navigation', (details) => {\n    if (!details.isMainFrame || details.isSameDocument) return\n",
     replace: "  mainWindow.webContents.on('did-start-loading', () => {\n"
+  },
+  {
+    id: 'M74',
+    grep: 'R73 |R74 ',
+    file: 'src/renderer/src/components/CodeView.tsx',
+    bug: 'editor não ouve o watcher: mudança por fora só aparece no Ctrl+S, como antes',
+    find: 'if (changedProject === projectId && touchesFile(change, path)) void checkDiskRef.current()',
+    replace: 'if (changedProject === projectId && touchesFile(change, path) && false) void checkDiskRef.current()',
+    expect: { 'R73 ': 'failed', 'R74 ': 'failed' }
+  },
+  {
+    id: 'M74b',
+    grep: 'R18 ',
+    file: 'src/renderer/src/components/CodeView.tsx',
+    bug: 'o aviso da própria gravação do Kora conta como mudança de fora',
+    find: '    if (fresh.mtimeMs === known) return\n',
+    replace: ''
+  },
+  {
+    id: 'M74c',
+    grep: 'R74 ',
+    file: 'src/renderer/src/components/CodeView.tsx',
+    bug: 'com edição pendente, a mudança de fora substitui o texto sem avisar (perde a edição)',
+    find: '    } else if (dirtyRef.current) {',
+    replace: '    } else if (false) {'
+  },
+  {
+    id: 'M74d',
+    grep: 'R73 |R75 ',
+    file: 'src/main/project-watcher.ts',
+    bug: 'watcher não diz qual arquivo mudou',
+    find: '    files: [filename],',
+    replace: '    files: [],',
+    expect: { 'R73 ': 'failed', 'R75 ': 'failed' }
+  },
+  {
+    id: 'M74e',
+    grep: 'R73 ',
+    file: 'src/renderer/src/components/CodeView.tsx',
+    bug: 'recarregar sozinho apaga o histórico: Ctrl+Z não volta ao texto anterior',
+    find: "      model.pushEditOperations([], [{ range: model.getFullModelRange(), text: fresh.content.replace(/^\\uFEFF/, '') }], () => null)",
+    replace: '      model.setValue(fresh.content)'
+  },
+  {
+    id: 'M74f',
+    grep: 'R75 ',
+    file: 'src/renderer/src/components/MarkdownView.tsx',
+    bug: 'Visualizar do Markdown não acompanha o disco',
+    find: 'if (changedProject !== projectId || !touchesFile(change, path)) return',
+    replace: 'if (changedProject !== projectId || !touchesFile(change, path) || true) return'
   }
 ]
 
