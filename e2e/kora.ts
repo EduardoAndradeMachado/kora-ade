@@ -57,7 +57,14 @@ export interface SavedState {
     titleLocked: boolean
     agent: { kind: 'claude' | 'codex'; sessionId: string; name?: string } | null
   }[]
-  settings?: { theme?: string; zoom?: number; terminalFontSize?: number; fileFontSize?: number; alerts?: { sound: boolean; windowsNotification: boolean } }
+  settings?: {
+    theme?: string
+    zoom?: number
+    terminalFontSize?: number
+    fileFontSize?: number
+    fileWordWrap?: boolean
+    alerts?: { sound: boolean; windowsNotification: boolean }
+  }
   sessionNames?: Record<string, string>
 }
 

@@ -150,6 +150,13 @@ const BRAND = {
       <path d="M6.5 21v-4h4" />
     </>
   ),
+  quebraLinha: (a) => (
+    <>
+      <path d="M4 6h16M4 18h5" />
+      <path d="M4 12h12.5a3 3 0 0 1 0 6H13" />
+      <path d="M15 15.5L12.5 18l2.5 2.5" stroke={a} />
+    </>
+  ),
   expandir: () => <path d="M9.5 6l6 6-6 6" />,
   editar: (a) => (
     <>

@@ -372,6 +372,38 @@ test('R75 Visualizar do Markdown acompanha o arquivo alterado por fora', async (
   await expect(article.locator('h1')).toHaveText('Título novo do agente')
 })
 
+test('R76 quebra de linha no editor: botão e Alt+Z ligam e desligam, a escolha fica salva e vale para o próximo arquivo aberto', async ({ kora }) => {
+  const env = kora.env()
+  const long = 'palavra '.repeat(250).trim()
+  writeFileSync(join(env.project, 'longo.txt'), long)
+  writeFileSync(join(env.project, 'outro.txt'), long)
+  const run = await kora.launch(env)
+  const page = run.page
+  const visibleLines = () => page.locator('.monaco-editor').filter({ visible: true }).locator('.view-lines .view-line')
+  const wrapButton = page.locator('button[aria-pressed]').filter({ visible: true })
+
+  await row(run, 'longo.txt').click()
+  await expect(visibleLines()).toHaveCount(1)
+  await expect(wrapButton).toHaveAttribute('aria-pressed', 'false')
+
+  await wrapButton.click()
+  await expect.poll(() => visibleLines().count()).toBeGreaterThan(3)
+  await expect(wrapButton).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => readState(env).settings?.fileWordWrap).toBe(true)
+
+  await visibleLines().first().click()
+  await page.keyboard.press('Alt+Z')
+  await expect(visibleLines()).toHaveCount(1)
+  await expect.poll(() => readState(env).settings?.fileWordWrap).toBe(false)
+  await page.keyboard.press('Alt+Z')
+  await expect.poll(() => visibleLines().count()).toBeGreaterThan(3)
+
+  await row(run, 'outro.txt').click()
+  await expect(ui.barTab(page, 'outro.txt')).toBeVisible()
+  await expect.poll(() => visibleLines().count()).toBeGreaterThan(3)
+  expect(readFileSync(join(env.project, 'longo.txt'), 'utf8')).toBe(long)
+})
+
 test('R19 Markdown abre renderizado com Visualizar | Editar; Editar abre o Monaco', async ({ kora }) => {
   const env = kora.env()
   seedRepo(env)

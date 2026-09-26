@@ -747,6 +747,30 @@ const MUTANTS = [
     bug: 'Visualizar do Markdown não acompanha o disco',
     find: 'if (changedProject !== projectId || !touchesFile(change, path)) return',
     replace: 'if (changedProject !== projectId || !touchesFile(change, path) || true) return'
+  },
+  {
+    id: 'M76',
+    grep: 'R76 ',
+    file: 'src/renderer/src/components/CodeView.tsx',
+    bug: 'arquivo aberto depois ignora a quebra de linha escolhida',
+    find: "          wordWrap: wordWrapRef.current ? 'on' : 'off',",
+    replace: "          wordWrap: 'off',"
+  },
+  {
+    id: 'M76b',
+    grep: 'R76 ',
+    file: 'src/renderer/src/components/CodeView.tsx',
+    bug: 'botão muda a configuração, mas o editor aberto não quebra',
+    find: "    editorRef.current?.updateOptions({ wordWrap: wordWrap ? 'on' : 'off' })",
+    replace: ''
+  },
+  {
+    id: 'M76c',
+    grep: 'R76 ',
+    file: 'src/renderer/src/components/CodeView.tsx',
+    bug: 'Alt+Z não alterna a quebra de linha',
+    find: '          keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyZ],',
+    replace: '          keybindings: [],'
   }
 ]
 

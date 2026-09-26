@@ -862,6 +862,8 @@ export function App(): React.JSX.Element {
                       path={tab.path}
                       visible={visible}
                       fontSize={state.settings.fileFontSize}
+                      wordWrap={state.settings.fileWordWrap}
+                      onWordWrapChange={(on) => void window.kora.setFileWordWrap(on).then(setState)}
                       onDirtyChange={(dirty) => markDirty(tab.id, dirty)}
                       onSaveHandle={(save) => (save ? fileSavers.current.set(tab.id, save) : fileSavers.current.delete(tab.id))}
                       jump={tab.jump}

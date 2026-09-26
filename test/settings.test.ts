@@ -39,6 +39,7 @@ describe('zoom da interface, texto do terminal e texto dos arquivos', () => {
       zoom: 1,
       terminalFontSize: 14,
       fileFontSize: 13,
+      fileWordWrap: false,
       alerts: { sound: true, windowsNotification: true }
     })
   })
@@ -51,6 +52,7 @@ describe('zoom da interface, texto do terminal e texto dos arquivos', () => {
       zoom: 1.2,
       terminalFontSize: 16,
       fileFontSize: 13,
+      fileWordWrap: false,
       alerts: { sound: true, windowsNotification: true }
     })
   })
@@ -61,5 +63,13 @@ describe('zoom da interface, texto do terminal e texto dos arquivos', () => {
     expect(loadState(file).settings.alerts).toEqual({ sound: false, windowsNotification: true })
     writeFileSync(file, JSON.stringify({ version: 2, projects: [], tabs: [], settings: { alerts: { sound: 'sim' } } }))
     expect(loadState(file).settings.alerts).toEqual({ sound: true, windowsNotification: true })
+  })
+
+  it('quebra de linha dos arquivos fica salva; estado sem ela ou valor estragado abre desligada', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'kora-settings-')), 'kora-state.json')
+    saveState(file, { ...emptyState(), settings: { ...emptyState().settings, fileWordWrap: true } })
+    expect(loadState(file).settings.fileWordWrap).toBe(true)
+    writeFileSync(file, JSON.stringify({ version: 2, projects: [], tabs: [], settings: { fileWordWrap: 'sim' } }))
+    expect(loadState(file).settings.fileWordWrap).toBe(false)
   })
 })

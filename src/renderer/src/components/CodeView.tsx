@@ -5,13 +5,15 @@ import { ipcErrorMessage } from '@/lib/ipc-error'
 import { cn } from '@/lib/utils'
 import { touchesFile } from '@shared/file-change'
 import { useConfirm } from '@/components/ConfirmDialog'
-import { ViewerHeader } from '@/components/ViewerHeader'
+import { headerButton, ViewerHeader } from '@/components/ViewerHeader'
 
 interface Props {
   projectId: string
   path: string
   visible: boolean
   fontSize: number
+  wordWrap: boolean
+  onWordWrapChange(on: boolean): void
   onDirtyChange(dirty: boolean): void
   headerExtra?: React.ReactNode
   // Deixa quem fecha a aba salvar antes; o salvamento pode não acontecer (conflito, erro) e aí devolve false.
@@ -41,6 +43,8 @@ export function CodeView({
   path,
   visible,
   fontSize,
+  wordWrap,
+  onWordWrapChange,
   onDirtyChange,
   headerExtra,
   onSaveHandle,
@@ -57,6 +61,8 @@ export function CodeView({
   const onDirtyRef = useRef(onDirtyChange)
   const saveRef = useRef<() => Promise<void>>(async () => {})
   const fontSizeRef = useRef(fontSize)
+  const wordWrapRef = useRef(wordWrap)
+  const toggleWrapRef = useRef(() => {})
   const checkDiskRef = useRef<() => Promise<void>>(async () => {})
   const checkAfterBusyRef = useRef(false)
 
@@ -111,6 +117,7 @@ export function CodeView({
         editor = monaco.editor.create(hostRef.current, {
           ...EDITOR_OPTIONS,
           fontSize: fontSizeRef.current,
+          wordWrap: wordWrapRef.current ? 'on' : 'off',
           theme: themeForDocument(),
           model
         })
@@ -125,6 +132,12 @@ export function CodeView({
           label: 'Salvar',
           keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
           run: () => void saveRef.current()
+        })
+        editor.addAction({
+          id: 'kora.wordWrap',
+          label: 'Quebra de linha',
+          keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyZ],
+          run: () => toggleWrapRef.current()
         })
         setLoad({ status: 'ready' })
       },
@@ -146,6 +159,15 @@ export function CodeView({
     fontSizeRef.current = fontSize
     editorRef.current?.updateOptions({ fontSize })
   }, [fontSize])
+
+  useEffect(() => {
+    wordWrapRef.current = wordWrap
+    editorRef.current?.updateOptions({ wordWrap: wordWrap ? 'on' : 'off' })
+  }, [wordWrap])
+
+  useEffect(() => {
+    toggleWrapRef.current = () => onWordWrapChange(!wordWrap)
+  })
 
   useEffect(
     () =>
@@ -307,6 +329,15 @@ export function CodeView({
             </span>
           )
         )}
+        <button
+          type="button"
+          title={wordWrap ? 'Quebra de linha ligada (Alt+Z)' : 'Quebra de linha desligada (Alt+Z)'}
+          aria-pressed={wordWrap}
+          onClick={() => onWordWrapChange(!wordWrap)}
+          className={cn(headerButton, 'shrink-0', wordWrap && 'bg-secondary text-foreground')}
+        >
+          <Icon name="quebraLinha" active={wordWrap} className="size-3.5" />
+        </button>
         <button
           type="button"
           title="Salvar (Ctrl+S)"

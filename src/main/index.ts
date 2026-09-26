@@ -428,6 +428,9 @@ function registerIpc(): void {
   ipcMain.handle('settings:alerts', (_e, alerts: unknown) =>
     commit({ ...state, settings: { ...state.settings, alerts: AlertsSchema.parse(alerts) } })
   )
+  ipcMain.handle('settings:word-wrap', (_e, on: unknown) =>
+    commit({ ...state, settings: { ...state.settings, fileWordWrap: z.boolean().parse(on) } })
+  )
   ipcMain.on('window:focus', () => showWindow())
   ipcMain.on('errors:report', (_e, text: unknown) => errorLog.record('interface', String(text)))
   ipcMain.handle('errors:summary', () => errorLog.summary())

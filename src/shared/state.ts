@@ -66,6 +66,7 @@ const SettingsSchema = z.object({
     .catch(TERMINAL_FONT.default)
     .default(TERMINAL_FONT.default),
   fileFontSize: z.number().int().min(FILE_FONT.min).max(FILE_FONT.max).catch(FILE_FONT.default).default(FILE_FONT.default),
+  fileWordWrap: z.boolean().catch(false).default(false),
   alerts: AlertsSchema.catch(defaultAlerts).default(defaultAlerts)
 })
 export type Settings = z.infer<typeof SettingsSchema>
@@ -74,6 +75,7 @@ const defaultSettings = (): Settings => ({
   zoom: ZOOM.default,
   terminalFontSize: TERMINAL_FONT.default,
   fileFontSize: FILE_FONT.default,
+  fileWordWrap: false,
   alerts: defaultAlerts()
 })
 

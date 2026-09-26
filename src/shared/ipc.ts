@@ -70,6 +70,7 @@ export interface KoraApi {
   setTheme(theme: ThemePreference): Promise<KoraState>
   setSizes(sizes: { zoom?: number; terminalFontSize?: number; fileFontSize?: number }): Promise<KoraState>
   setAlerts(alerts: Alerts): Promise<KoraState>
+  setFileWordWrap(on: boolean): Promise<KoraState>
   // Traz a janela para a frente (clique na notificação do Windows).
   focusWindow(): void
 
