@@ -665,6 +665,22 @@ const MUTANTS = [
     bug: 'qualquer carregamento (o iframe do PDF) encerra todos os terminais, como antes',
     find: "  mainWindow.webContents.on('did-start-navigation', (details) => {\n    if (!details.isMainFrame || details.isSameDocument) return\n",
     replace: "  mainWindow.webContents.on('did-start-loading', () => {\n"
+  },
+  {
+    id: 'M71',
+    grep: 'R71 ',
+    file: 'src/renderer/src/components/Sidebar.tsx',
+    bug: 'clique no + (e no menu dele) sobe até a linha do projeto e recolhe a pasta',
+    find: '            onClick={(e) => e.stopPropagation()}\n            onContextMenu={(e) => e.stopPropagation()}',
+    replace: '            onContextMenu={(e) => e.stopPropagation()}'
+  },
+  {
+    id: 'M71b',
+    grep: 'R71 ',
+    file: 'src/renderer/src/components/Sidebar.tsx',
+    bug: 'aba criada pelo + num projeto recolhido fica escondida',
+    find: '                expand(project.id)\n',
+    replace: ''
   }
 ]
 

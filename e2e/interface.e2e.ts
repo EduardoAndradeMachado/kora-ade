@@ -855,3 +855,26 @@ test('R69 âmbar só no que está aberto ou selecionado: pasta do projeto aberta
   expect(await lit(fileIcon()), 'arquivo fora de foco').toBe(false)
   expect(await lit(terminalIcon())).toBe(true)
 })
+
+test('R71 + de um projeto na lateral: a nova aba não recolhe a pasta; pasta recolhida abre para mostrar a aba nova', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  const row = () => page.locator('aside nav [data-project-row]').first()
+  const choose = async (label: string): Promise<void> => {
+    await row().hover()
+    await row().getByTitle('Nova aba').click()
+    await page.locator('body > div.fixed button').filter({ hasText: label }).click()
+  }
+
+  await newTab(page, 'Terminal')
+  await expect(ui.sideTab(page, /.+/)).toHaveCount(1)
+  await choose('Terminal')
+  await expect(ui.sideTab(page, /.+/), 'pasta aberta continua aberta com as duas abas').toHaveCount(2)
+  await expect(row().getByTitle('Recolher')).toHaveCount(1)
+
+  await row().getByTitle('Recolher').click()
+  await expect(ui.sideTab(page, /.+/)).toHaveCount(0)
+  await choose('Terminal')
+  await expect(ui.sideTab(page, /.+/), 'pasta recolhida abre e mostra a aba nova').toHaveCount(3)
+})

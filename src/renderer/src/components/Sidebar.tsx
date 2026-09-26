@@ -219,6 +219,14 @@ export function Sidebar(props: Props): React.JSX.Element {
       return next
     })
 
+  const expand = (id: string): void =>
+    setCollapsed((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+
   const renderProject = (project: Project, depth = 0): React.JSX.Element => {
     const selected = project.id === props.selectedId
     const tabs = props.tabs[project.id] ?? []
@@ -263,9 +271,17 @@ export function Sidebar(props: Props): React.JSX.Element {
               {tabs.length}
             </span>
           )}
-          <div className="hidden items-center gap-0.5 group-hover:flex">
+          {/* O menu do + é um portal, mas no React os cliques dele sobem até a linha, que recolhe a pasta. */}
+          <div
+            className="hidden items-center gap-0.5 group-hover:flex"
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.stopPropagation()}
+          >
             <NewTabMenu
-              onChoose={(choice) => props.onNewTab(project, choice)}
+              onChoose={(choice) => {
+                expand(project.id)
+                props.onNewTab(project, choice)
+              }}
               className={iconButton}
               iconClassName="size-3.5"
             />
