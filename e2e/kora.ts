@@ -357,7 +357,7 @@ export async function launch(env: KoraEnv): Promise<KoraRun> {
   })
   const page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
-  await expect(page.getByTitle('Adicionar projeto')).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator(tip('Adicionar projeto'))).toBeVisible({ timeout: 30_000 })
   const mainPid = await app.evaluate(() => process.pid)
   const run = new KoraRun(env, app, page, mainPid)
   const proc = app.process()
@@ -396,6 +396,9 @@ export function removeEnv(env: KoraEnv): void {
 
 // ---------- UI ----------
 
+// A dica da identidade (data-tip) no lugar do title nativo: como o getByTitle, casa por trecho e sem diferenciar maiúsculas.
+export const tip = (text: string): string => `[data-tip*="${text.replace(/["\\]/g, '\\$&')}" i]`
+
 export const ui = {
   tabBar: (page: Page): Locator => page.locator('main > div').first(),
   barTab: (page: Page, title: string | RegExp): Locator =>
@@ -409,7 +412,7 @@ export const ui = {
 }
 
 export async function newTab(page: Page, choice: 'Claude' | 'Codex' | 'Terminal' | 'Sessão existente'): Promise<void> {
-  await ui.tabBar(page).getByTitle('Nova aba').click()
+  await ui.tabBar(page).locator(tip('Nova aba')).click()
   await page.locator('body > div.fixed button').filter({ hasText: choice }).first().click()
 }
 

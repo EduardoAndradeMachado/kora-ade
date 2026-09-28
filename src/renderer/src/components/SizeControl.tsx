@@ -23,18 +23,18 @@ function Row(props: { label: string; value: string; shortcut: string; onStep(ste
         <span className="text-xs font-medium text-foreground">{props.label}</span>
         <span className="text-[11px] text-muted-foreground">{props.shortcut}</span>
       </div>
-      <button type="button" title={`Diminuir ${props.label.toLowerCase()}`} onClick={() => props.onStep(-1)} className={stepButton}>
+      <button type="button" data-tip={`Diminuir ${props.label.toLowerCase()}`} aria-label={`Diminuir ${props.label.toLowerCase()}`} onClick={() => props.onStep(-1)} className={stepButton}>
         −
       </button>
       <button
         type="button"
-        title="Voltar ao padrão"
+        data-tip="Voltar ao padrão"
         onClick={() => props.onStep(0)}
         className="w-12 rounded-md py-0.5 text-center text-xs tabular-nums text-foreground hover:bg-secondary"
       >
         {props.value}
       </button>
-      <button type="button" title={`Aumentar ${props.label.toLowerCase()}`} onClick={() => props.onStep(1)} className={stepButton}>
+      <button type="button" data-tip={`Aumentar ${props.label.toLowerCase()}`} aria-label={`Aumentar ${props.label.toLowerCase()}`} onClick={() => props.onStep(1)} className={stepButton}>
         +
       </button>
     </div>
@@ -66,7 +66,7 @@ export function SizeControl(props: Props): React.JSX.Element {
     <>
       <button
         type="button"
-        title="Tamanho da interface, do terminal e dos arquivos"
+        data-tip="Tamanho da interface, do terminal e dos arquivos"
         onClick={(e) => setAnchor(anchor ? null : e.currentTarget.getBoundingClientRect())}
         className={cn(
           'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs tabular-nums text-muted-foreground hover:bg-secondary hover:text-foreground',

@@ -72,7 +72,7 @@ function Dialog({ survivors, onKillAll, onKeep, onKill }: OrphanDialogProps): Re
                 <span aria-hidden className="size-4 shrink-0 rounded-sm border" />
               )}
               <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-medium" title={s.title}>
+                <div className="truncate text-xs font-medium" data-tip={s.title}>
                   {s.title}
                 </div>
                 <div className="truncate text-[11px] text-muted-foreground">

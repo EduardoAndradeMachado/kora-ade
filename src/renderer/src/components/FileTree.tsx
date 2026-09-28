@@ -144,7 +144,7 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
     setSelected(reveal.path)
     void Promise.all(ancestors.map((dir) => load(dir))).then(() =>
       requestAnimationFrame(() =>
-        rootRef.current?.querySelector(`[title="${CSS.escape(reveal.path)}"]`)?.scrollIntoView({ block: 'nearest' })
+        rootRef.current?.querySelector(`[data-tip="${CSS.escape(reveal.path)}"]`)?.scrollIntoView({ block: 'nearest' })
       )
     )
     // Só um pedido novo (n) dispara; load muda junto com o projeto, quando a árvore é outra.
@@ -360,7 +360,7 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
         return (
           <div key={entry.path} {...(entry.isDir ? dropProps(entry.path) : {})}>
             <div
-              title={entry.path}
+              data-tip={entry.path}
               style={{ paddingLeft: 4 + depth * 12 }}
               draggable={renaming !== entry.path}
               onDragStart={(e) => {

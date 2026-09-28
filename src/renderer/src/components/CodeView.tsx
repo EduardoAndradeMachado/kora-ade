@@ -323,7 +323,7 @@ export function CodeView({
           <span className="shrink-0">Salvando…</span>
         ) : (
           dirty && (
-            <span className="flex shrink-0 items-center gap-1.5 text-amber-300" title="Alterações não salvas (Ctrl+S)">
+            <span className="flex shrink-0 items-center gap-1.5 text-amber-300" data-tip="Alterações não salvas" data-tip-shortcut="Ctrl+S">
               <span className="size-1.5 rounded-full bg-current" />
               Não salvo
             </span>
@@ -331,7 +331,9 @@ export function CodeView({
         )}
         <button
           type="button"
-          title={wordWrap ? 'Quebra de linha ligada (Alt+Z)' : 'Quebra de linha desligada (Alt+Z)'}
+          data-tip={wordWrap ? 'Quebra de linha ligada' : 'Quebra de linha desligada'}
+          data-tip-shortcut="Alt+Z"
+          aria-label={wordWrap ? 'Quebra de linha ligada (Alt+Z)' : 'Quebra de linha desligada (Alt+Z)'}
           aria-pressed={wordWrap}
           onClick={() => onWordWrapChange(!wordWrap)}
           className={cn(headerButton, 'shrink-0', wordWrap && 'bg-secondary text-foreground')}
@@ -340,7 +342,7 @@ export function CodeView({
         </button>
         <button
           type="button"
-          title="Salvar (Ctrl+S)"
+          data-tip="Salvar" data-tip-shortcut="Ctrl+S"
           disabled={!dirty || busy || load.status !== 'ready'}
           onClick={() => void save()}
           className="shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-default disabled:text-muted-foreground disabled:opacity-60 disabled:hover:bg-transparent"
@@ -369,7 +371,7 @@ export function CodeView({
       {notice && (
         <div className="flex shrink-0 items-center gap-2 border-b bg-destructive/10 px-4 py-1.5 text-xs text-destructive">
           <span className="min-w-0 flex-1">{notice}</span>
-          <button type="button" title="Fechar aviso" onClick={() => setNotice(null)} className="rounded p-0.5 hover:bg-white/10">
+          <button type="button" data-tip="Fechar aviso" aria-label="Fechar aviso" onClick={() => setNotice(null)} className="rounded p-0.5 hover:bg-white/10">
             <Icon name="fechar" className="size-3.5" />
           </button>
         </div>

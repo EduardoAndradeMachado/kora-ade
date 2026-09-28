@@ -78,7 +78,7 @@ function AgentDetail({ usage, now }: { usage: AgentUsage; now: number }): React.
       <header className="flex items-center gap-2">
         <AgentIcon kind={usage.agent} className="size-3.5" />
         <span className="text-xs font-medium">{agentLabel(usage.agent)}</span>
-        <span className="ml-auto truncate text-[11px] text-muted-foreground" title={usage.source}>
+        <span className="ml-auto truncate text-[11px] text-muted-foreground" data-tip={usage.source}>
           {usage.source}
         </span>
       </header>
@@ -147,7 +147,7 @@ export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
       <button
         ref={triggerRef}
         type="button"
-        title="Limites de uso — clique para detalhes"
+        data-tip="Limites de uso — clique para detalhes"
         aria-expanded={anchor !== null}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={toggle}
@@ -172,7 +172,7 @@ export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
               <span className="text-xs font-medium">Limites de uso</span>
               <button
                 type="button"
-                title="Atualizar"
+                data-tip="Atualizar"
                 aria-label="Atualizar"
                 onClick={onRefresh}
                 className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"

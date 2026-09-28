@@ -13,6 +13,7 @@ import {
   restoreClipboard,
   saveClipboard,
   starts,
+  tip,
   typeLine,
   ui,
   waitFor,
@@ -32,15 +33,15 @@ async function openClaude(run: { page: import('@playwright/test').Page }, env: K
 
 test('R3 botão + oferece Claude, Codex, Terminal e Sessão existente', async ({ kora }) => {
   const run = await kora.launch(kora.env())
-  await ui.tabBar(run.page).getByTitle('Nova aba').click()
+  await ui.tabBar(run.page).locator(tip('Nova aba')).click()
   const labels = await run.page.locator('body > div.fixed button span.font-medium').allTextContents()
   expect(labels).toEqual(['Claude', 'Codex', 'Terminal', 'Sessão existente'])
   await run.page.keyboard.press('Escape')
 
   // O + da linha do projeto na lateral (aparece no hover) abre o mesmo menu.
-  const row = run.page.locator('aside nav div[title]').first()
+  const row = run.page.locator('aside nav div[data-tip]').first()
   await row.hover()
-  await row.getByTitle('Nova aba').click()
+  await row.locator(tip('Nova aba')).click()
   const sideLabels = await run.page.locator('body > div.fixed button span.font-medium').allTextContents()
   expect(sideLabels).toEqual(['Claude', 'Codex', 'Terminal', 'Sessão existente'])
 })
@@ -94,7 +95,7 @@ test('R7 aba fechada pelo usuário não volta ao reabrir (fechamento normal e ki
   const first = await kora.launch(env)
   const keep = await openClaude(first, env, 0)
   const gone = await openClaude(first, env, 1)
-  await ui.barTab(first.page, `FakeClaude ${gone.sessionId.slice(0, 8)}`).getByTitle('Fechar aba').click()
+  await ui.barTab(first.page, `FakeClaude ${gone.sessionId.slice(0, 8)}`).locator(tip('Fechar aba')).click()
   await waitFor(() => readState(env).tabs.length === 1, 'estado salvo sem a aba fechada')
   await first.closeWindow()
 
@@ -106,7 +107,7 @@ test('R7 aba fechada pelo usuário não volta ao reabrir (fechamento normal e ki
   await newTab(second.page, 'Terminal')
   await waitFor(() => readState(env).tabs.length === 2, 'aba de terminal salva')
   await second.page.waitForTimeout(1000)
-  await ui.barTab(second.page, 'Terminal').getByTitle('Fechar aba').click()
+  await ui.barTab(second.page, 'Terminal').locator(tip('Fechar aba')).click()
   await waitFor(() => readState(env).tabs.length === 1, 'aba de terminal removida do estado')
   await second.killHard()
 
@@ -120,14 +121,14 @@ test('R7b corrida: aba fechada logo após abrir, ou app fechado logo após fecha
   const first = await kora.launch(env)
   await newTab(first.page, 'Terminal')
   await waitFor(() => readState(env).tabs.length === 1, 'aba registrada pelo main no spawn')
-  await ui.barTab(first.page, 'Terminal').getByTitle('Fechar aba').click()
+  await ui.barTab(first.page, 'Terminal').locator(tip('Fechar aba')).click()
   await expect(ui.sideTab(first.page, /.+/)).toHaveCount(0)
   await first.page.waitForTimeout(2000)
   expect.soft(readState(env).tabs, 'fechar em < 300 ms depois de abrir deixa a aba no estado do main').toEqual([])
 
   await newTab(first.page, 'Terminal')
   await first.page.waitForTimeout(1500)
-  await ui.barTab(first.page, /Terminal/).last().getByTitle('Fechar aba').click()
+  await ui.barTab(first.page, /Terminal/).last().locator(tip('Fechar aba')).click()
   await first.closeWindow()
   const second = await kora.launch(env)
   expect.soft(readState(env).tabs, 'fechar o app < 300 ms depois de fechar a aba perde o save').toEqual([])
@@ -291,12 +292,12 @@ test('R37 abrir um Claude num projeto e logo fechar uma aba Continuar de outro n
   await newTab(page, 'Claude')
   const closeOld = ui.sideTab(page, 'Conversa antiga')
   await closeOld.hover()
-  await closeOld.getByTitle('Fechar aba').click()
+  await closeOld.locator(tip('Fechar aba')).click()
   await waitFor(() => starts(env, 'claude')[0], 'claude novo subiu')
   await waitFor(() => readState(env).tabs.every((t) => t.id !== 'dormente'), 'aba antiga fechada e salva')
 
   const t0 = Date.now()
-  await ui.tabBar(page).getByTitle('Nova aba').click()
+  await ui.tabBar(page).locator(tip('Nova aba')).click()
   await expect(page.locator('body > div.fixed button').first()).toBeVisible({ timeout: 2000 })
   expect(Date.now() - t0, 'o menu + tem que abrir rápido depois das duas ações').toBeLessThan(2000)
   await page.keyboard.press('Escape')
@@ -441,7 +442,7 @@ test('R56 sessão que para sem você olhar: símbolo e sino na aba, som da corda
   await expect(claudeAlert, 'a aba que você está olhando não avisa').toHaveCount(0)
   expect((await spy()).chimes).toBe(2)
 
-  await page.getByTitle('Configurações').click()
+  await page.locator(tip('Configurações')).click()
   const sound = page.getByRole('switch', { name: 'Som quando uma sessão para' })
   await expect(sound).toHaveAttribute('aria-checked', 'true')
   await sound.click()
@@ -499,7 +500,7 @@ test('R58 easter egg: sino tocando em outra sessão faz o símbolo da tela vazia
   await waitFor(() => starts(env, 'codex')[0], 'codex falso subiu')
   await typeLine(page, 'trabalhe 7')
   await expect(ui.barTab(page, /Codex/).locator('[data-activity]')).toHaveAttribute('data-activity', 'working', { timeout: 5000 })
-  await page.locator('aside nav div[title]').filter({ hasText: 'vazio' }).click()
+  await page.locator('aside nav div[data-tip]').filter({ hasText: 'vazio' }).click()
   await expect(emptySymbol).toBeVisible()
   await expect(emptySymbol).not.toHaveClass(/kora-balanca/)
 
@@ -534,7 +535,7 @@ test('R62 aba adormecida com sessão mostra só Continuar chat e o ID; aba sem s
 
   await ui.sideTab(page, 'Com sessão').click()
   await expect(view.getByRole('button', { name: 'Continuar chat' })).toBeVisible()
-  const copy = view.getByTitle('Copiar ID da sessão')
+  const copy = view.locator(tip('Copiar ID da sessão'))
   await expect(copy).toContainText(sessionId)
   await expect(view.getByText('Abrir terminal vazio')).toHaveCount(0)
   await expect(view.getByText('Trocar a sessão vinculada')).toHaveCount(0)

@@ -230,7 +230,8 @@ export function SettingsPanel(props: SettingsPanelProps): React.JSX.Element {
         <button
           autoFocus
           type="button"
-          title="Fechar"
+          data-tip="Fechar"
+          aria-label="Fechar"
           onClick={props.onClose}
           className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
         >

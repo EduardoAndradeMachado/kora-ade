@@ -29,7 +29,7 @@ export function EditableTitle({ value, editable, className, tooltip, editRequest
     return (
       <span
         className={cn('truncate', className)}
-        title={tooltip ?? (editable ? `${value} — duplo clique para renomear` : value)}
+        data-tip={tooltip ?? (editable ? `${value} — duplo clique para renomear` : value)}
         onDoubleClick={(e) => {
           if (!editable) return
           e.stopPropagation()

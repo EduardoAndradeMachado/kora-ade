@@ -49,7 +49,7 @@ export function NewTabMenu({ onChoose, className, iconClassName }: Props): React
 
   return (
     <>
-      <button ref={buttonRef} type="button" title="Nova aba" onClick={toggle} className={className}>
+      <button ref={buttonRef} type="button" data-tip="Nova aba" aria-label="Nova aba" onClick={toggle} className={className}>
         <Icon name="novaAba" className={iconClassName ?? 'size-4'} />
       </button>
       {pos &&

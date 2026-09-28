@@ -58,7 +58,7 @@ export function TabIcon({ tab, selected, className }: { tab: Tab; selected: bool
         <span
           data-activity="waiting"
           data-alert
-          title={`${agentLabel(tab.agent.kind)} parou e está esperando você`}
+          data-tip={`${agentLabel(tab.agent.kind)} parou e está esperando você`}
           className="relative inline-flex size-3.5 shrink-0 items-center justify-center overflow-visible"
         >
           <SymbolCropped height={18} className="kora-balanca" />
@@ -69,7 +69,7 @@ export function TabIcon({ tab, selected, className }: { tab: Tab; selected: bool
     return (
       <span
         data-activity={activity}
-        title={`${agentLabel(tab.agent.kind)} ${activity === 'working' ? 'trabalhando' : 'esperando você'}`}
+        data-tip={`${agentLabel(tab.agent.kind)} ${activity === 'working' ? 'trabalhando' : 'esperando você'}`}
         className="relative inline-flex shrink-0"
       >
         {icon}
@@ -164,7 +164,8 @@ export function TabBar(props: Props): React.JSX.Element {
             <AlertBell tab={tab} />
             <button
               type="button"
-              title="Fechar aba"
+              data-tip="Fechar aba"
+              aria-label="Fechar aba"
               onClick={(e) => {
                 e.stopPropagation()
                 props.onClose(tab.id)
@@ -188,7 +189,8 @@ export function TabBar(props: Props): React.JSX.Element {
       </div>
       <button
         type="button"
-        title={props.rightPanelOpen ? 'Esconder painel lateral' : 'Mostrar painel lateral'}
+        data-tip={props.rightPanelOpen ? 'Esconder painel lateral' : 'Mostrar painel lateral'}
+        aria-label={props.rightPanelOpen ? 'Esconder painel lateral' : 'Mostrar painel lateral'}
         onClick={props.onToggleRightPanel}
         className={cn(
           'shrink-0 rounded-md p-1.5 hover:bg-secondary hover:text-foreground',

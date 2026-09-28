@@ -44,7 +44,7 @@ export function DormantView(props: Props): React.JSX.Element {
               </div>
               <button
                 type="button"
-                title="Copiar ID da sessão"
+                data-tip="Copiar ID da sessão"
                 onClick={() => copyId(agent.sessionId)}
                 className="mx-auto flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground"
               >

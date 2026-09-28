@@ -19,7 +19,7 @@ export function ModeToggle({ editing, previewDisabledReason, onChange }: Props):
       <button
         type="button"
         disabled={!!previewDisabledReason && editing}
-        title={editing ? previewDisabledReason : undefined}
+        data-tip={editing ? previewDisabledReason : undefined}
         onClick={() => onChange(false)}
         className={option(!editing, !!previewDisabledReason && editing)}
       >

@@ -16,6 +16,7 @@ import {
   seedRepo,
   shellCalls,
   starts,
+  tip,
   typeLine,
   ui,
   waitFor,
@@ -23,8 +24,8 @@ import {
 } from './kora'
 
 const panelOf = (run: KoraRun) => run.page.locator('aside').last()
-// O title é o caminho relativo com "\", que no seletor CSS precisa ser escapado.
-const row = (run: KoraRun, rel: string) => panelOf(run).locator(`div[title="${rel.replaceAll('\\', '\\\\')}"]`)
+// A dica (data-tip) é o caminho relativo com "\", que no seletor CSS precisa ser escapado.
+const row = (run: KoraRun, rel: string) => panelOf(run).locator(`div[data-tip="${rel.replaceAll('\\', '\\\\')}"]`)
 const menuLabels = (run: KoraRun) => run.page.locator('body > div.fixed button').allTextContents()
 
 test('R16 explorador: clique abre; menus de arquivo, pasta e área vazia; criar, copiar caminho e excluir com diálogo próprio', async ({ kora }) => {
@@ -671,10 +672,10 @@ test('R43 texto dos arquivos: tamanho próprio no painel Aa e no Ctrl + roda sob
   await row(run, 'dados.json').click()
   await expect.poll(editorFont).toBe('13px')
 
-  await page.getByTitle('Tamanho da interface, do terminal e dos arquivos').click()
+  await page.locator(tip('Tamanho da interface, do terminal e dos arquivos')).click()
   const panel = page.getByRole('dialog', { name: 'Tamanhos' })
-  await panel.getByTitle('Aumentar texto dos arquivos').click()
-  await panel.getByTitle('Aumentar texto dos arquivos').click()
+  await panel.locator(tip('Aumentar texto dos arquivos')).click()
+  await panel.locator(tip('Aumentar texto dos arquivos')).click()
   await expect.poll(editorFont).toBe('15px')
   await page.keyboard.press('Escape')
   expect(await zoomFactor()).toBeCloseTo(1)
@@ -872,8 +873,8 @@ test('R66 caminho no topo do arquivo: clique copia; o lápis edita o caminho e a
   writeFileSync(join(env.project, 'foto.png'), pngBytes())
   const run = await kora.launch(env)
   const page = run.page
-  const header = () => page.locator('div.border-b').filter({ visible: true, has: page.getByTitle('Recarregar arquivo') })
-  const pencil = () => header().getByTitle('Editar caminho para abrir outro arquivo')
+  const header = () => page.locator('div.border-b').filter({ visible: true, has: page.locator(tip('Recarregar arquivo')) })
+  const pencil = () => header().locator(tip('Editar caminho para abrir outro arquivo'))
   const input = () => header().getByLabel('Caminho do arquivo')
 
   await row(run, 'src').click()
@@ -882,7 +883,7 @@ test('R66 caminho no topo do arquivo: clique copia; o lápis edita o caminho e a
 
   const saved = await saveClipboard(run)
   try {
-    await header().getByTitle(/Clique para copiar o caminho/).click()
+    await header().locator(tip('Clique para copiar o caminho')).click()
     await expect(header().getByRole('status')).toHaveText('Copiado')
     expect(await readClipboardText(run)).toBe('src\\app.ts')
   } finally {

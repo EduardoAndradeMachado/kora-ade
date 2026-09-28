@@ -26,7 +26,8 @@ export function ViewerHeader({ projectId, path, onReload, onOpenPath, onOpenExte
           <CopyablePath path={path} />
           <button
             type="button"
-            title="Editar caminho para abrir outro arquivo"
+            data-tip="Editar caminho para abrir outro arquivo"
+            aria-label="Editar caminho para abrir outro arquivo"
             onClick={() => setEditing(true)}
             className={cn(headerButton, 'shrink-0')}
           >
@@ -36,11 +37,11 @@ export function ViewerHeader({ projectId, path, onReload, onOpenPath, onOpenExte
         </>
       )}
       {children}
-      <button type="button" title="Recarregar arquivo" onClick={onReload} className={headerButton}>
+      <button type="button" data-tip="Recarregar arquivo" aria-label="Recarregar arquivo" onClick={onReload} className={headerButton}>
         <Icon name="atualizar" className="size-3.5" />
       </button>
       {onOpenExternal && (
-        <button type="button" title="Abrir no programa padrão" onClick={onOpenExternal} className={headerButton}>
+        <button type="button" data-tip="Abrir no programa padrão" aria-label="Abrir no programa padrão" onClick={onOpenExternal} className={headerButton}>
           <Icon name="externo" className="size-3.5" />
         </button>
       )}
@@ -64,7 +65,7 @@ function CopyablePath({ path }: { path: string }): React.JSX.Element {
   return (
     <button
       type="button"
-      title={`${path}\nClique para copiar o caminho`}
+      data-tip={`${path}\nClique para copiar o caminho`}
       onClick={copy}
       className="group/path -mx-1.5 flex min-w-0 items-center gap-1.5 rounded px-1.5 py-0.5 hover:bg-secondary hover:text-foreground"
     >

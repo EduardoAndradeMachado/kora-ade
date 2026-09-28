@@ -242,7 +242,7 @@ export function Sidebar(props: Props): React.JSX.Element {
     return (
       <div key={project.id} className="mb-0.5" style={depth ? { marginLeft: depth * 12 } : undefined}>
         <div
-          title={project.path}
+          data-tip={project.path}
           data-project-row
           {...projectDrag.itemProps(project.id)}
           // Com abas, o nome faz o mesmo que a setinha; sem abas, selecionar já mostra a tela para abrir Claude, Codex ou Terminal.
@@ -263,7 +263,8 @@ export function Sidebar(props: Props): React.JSX.Element {
         >
           <button
             type="button"
-            title={open ? 'Recolher' : 'Expandir'}
+            data-tip={open ? 'Recolher' : 'Expandir'}
+            aria-label={open ? 'Recolher' : 'Expandir'}
             onClick={(e) => {
               e.stopPropagation()
               toggle(project)
@@ -282,7 +283,7 @@ export function Sidebar(props: Props): React.JSX.Element {
             onCommit={(name) => props.onRenameProject(project.id, name)}
           />
           {lost && (
-            <span data-missing-folder title="Pasta não encontrada" className="text-[var(--brand-amber)]">
+            <span data-missing-folder data-tip="Pasta não encontrada" className="text-[var(--brand-amber)]">
               <Icon name="alerta" className="size-3.5" />
             </span>
           )}
@@ -386,13 +387,14 @@ export function Sidebar(props: Props): React.JSX.Element {
         <div className="flex items-center gap-0.5">
           <button
             type="button"
-            title="Nova categoria"
+            data-tip="Nova categoria"
+            aria-label="Nova categoria"
             onClick={() => setCreatingIn({ parentId: null })}
             className={cn(iconButton, accentOnHover)}
           >
             <Icon name="novaCategoria" />
           </button>
-          <button type="button" title="Adicionar projeto" onClick={props.onAdd} className={cn(iconButton, accentOnHover)}>
+          <button type="button" data-tip="Adicionar projeto" aria-label="Adicionar projeto" onClick={props.onAdd} className={cn(iconButton, accentOnHover)}>
             <Icon name="novoProjeto" />
           </button>
         </div>
@@ -416,7 +418,7 @@ export function Sidebar(props: Props): React.JSX.Element {
               hiddenGroupZone.zoneProps((id) => props.onGroupAction({ kind: 'hide', id, hidden: true }))
             )}
             role="button"
-            title={hiddenOpen ? 'Recolher ocultos' : 'Expandir ocultos'}
+            data-tip={hiddenOpen ? 'Recolher ocultos' : 'Expandir ocultos'}
             onClick={toggleHidden}
             className={cn(
               'mt-2 flex h-7 cursor-default items-center gap-1 rounded-md pl-0.5 pr-1.5 text-xs text-muted-foreground hover:text-foreground',
@@ -450,7 +452,8 @@ export function Sidebar(props: Props): React.JSX.Element {
         <div className="flex min-w-0 items-center gap-0.5">
           <button
             type="button"
-            title="Configurações"
+            data-tip="Configurações"
+            aria-label="Configurações"
             onClick={props.onOpenSettings}
             className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
           >
@@ -458,7 +461,7 @@ export function Sidebar(props: Props): React.JSX.Element {
           </button>
           <button
             type="button"
-            title="Tema"
+            data-tip="Tema"
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect()
               setThemeMenu({ x: r.left, y: r.top - 8 - THEMES.length * 28 })
@@ -552,7 +555,8 @@ function SideTabs(props: SideTabsProps): React.JSX.Element {
             <AlertBell tab={tab} />
             <button
               type="button"
-              title="Fechar aba"
+              data-tip="Fechar aba"
+              aria-label="Fechar aba"
               onClick={(e) => {
                 e.stopPropagation()
                 props.onClose(tab.id)
@@ -630,7 +634,7 @@ function GroupSection(props: GroupSectionProps): React.JSX.Element {
       <div
         role="button"
         data-group-row
-        title={open ? `Recolher ${group.name}` : `Expandir ${group.name}`}
+        data-tip={open ? `Recolher ${group.name}` : `Expandir ${group.name}`}
         draggable
         onDragStart={(e) => {
           e.dataTransfer.setData(mimeFor('groups'), group.id)
@@ -673,7 +677,7 @@ function GroupSection(props: GroupSectionProps): React.JSX.Element {
         )}
         <div className="ml-1 h-px flex-1 bg-border" />
         <span
-          title="Arraste para reordenar ou pôr dentro de outra categoria"
+          data-tip="Arraste para reordenar ou pôr dentro de outra categoria"
           className="cursor-grab text-muted-foreground opacity-0 transition-opacity group-hover/cat:opacity-100"
         >
           <Icon name="arrastar" className="size-3.5" />

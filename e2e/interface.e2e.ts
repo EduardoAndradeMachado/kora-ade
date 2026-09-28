@@ -12,6 +12,7 @@ import {
   saveClipboard,
   shellCalls,
   starts,
+  tip,
   ui,
   waitFor,
   writeState,
@@ -28,10 +29,10 @@ test('R1 projetos adicionados na lateral persistem entre aberturas do app', asyn
   await expect(first.page.getByText('Nenhum projeto ainda.')).toBeVisible()
 
   await answerOpenDialog(first, env.project)
-  await first.page.getByTitle('Adicionar projeto').click()
+  await first.page.locator(tip('Adicionar projeto')).click()
   await expect(first.page.locator('aside nav').getByText('proj-teste')).toBeVisible()
   await answerOpenDialog(first, second)
-  await first.page.getByTitle('Adicionar projeto').click()
+  await first.page.locator(tip('Adicionar projeto')).click()
   await expect(first.page.locator('aside nav').getByText('outro-projeto')).toBeVisible()
   await first.closeWindow()
 
@@ -60,7 +61,7 @@ test('R2 várias abas por projeto aparecem embaixo do projeto na lateral; projet
   await newTab(page, 'Claude')
   await waitFor(() => starts(env, 'claude')[0], 'claude falso subiu')
 
-  await page.locator('aside nav div[title]').filter({ hasText: 'outro' }).click()
+  await page.locator('aside nav div[data-tip]').filter({ hasText: 'outro' }).click()
   await newTab(page, 'Terminal')
   await waitFor(() => readState(env).tabs.length === 4, 'quatro abas salvas')
 
@@ -69,10 +70,10 @@ test('R2 várias abas por projeto aparecem embaixo do projeto na lateral; projet
   await expect(groups.nth(1).locator('div.ml-5')).toHaveCount(1)
   expect(readState(env).tabs.filter((t) => t.projectId === 'p1')).toHaveLength(3)
 
-  await groups.nth(0).getByTitle('Recolher').click()
+  await groups.nth(0).locator(tip('Recolher')).click()
   await expect(groups.nth(0).locator('div.ml-5')).toHaveCount(0)
   await expect(groups.nth(0).locator('span.tabular-nums')).toHaveText('3')
-  await groups.nth(0).getByTitle('Expandir').click()
+  await groups.nth(0).locator(tip('Expandir')).click()
   await expect(groups.nth(0).locator('div.ml-5')).toHaveCount(3)
 })
 
@@ -84,7 +85,7 @@ test('R82 pasta recolhida na lateral continua recolhida ao reabrir o app (mesmo 
   await waitFor(() => readState(env).tabs.length === 2, 'duas abas salvas')
   const folder = (page: import('@playwright/test').Page) => page.locator('aside nav > div').first()
 
-  await folder(first.page).getByTitle('Recolher').click()
+  await folder(first.page).locator(tip('Recolher')).click()
   await expect(folder(first.page).locator('div.ml-5')).toHaveCount(0)
   await waitFor(() => readState(env).projects[0]?.collapsed === true, 'recolhido gravado na hora')
   await first.killHard()
@@ -92,13 +93,13 @@ test('R82 pasta recolhida na lateral continua recolhida ao reabrir o app (mesmo 
   const second = await kora.launch(env)
   await expect(folder(second.page).locator('span.tabular-nums')).toHaveText('2')
   await expect(folder(second.page).locator('div.ml-5')).toHaveCount(0)
-  await folder(second.page).getByTitle('Expandir').click()
+  await folder(second.page).locator(tip('Expandir')).click()
   await expect(folder(second.page).locator('div.ml-5')).toHaveCount(2)
   await second.closeWindow()
 
   const third = await kora.launch(env)
   await expect(folder(third.page).locator('div.ml-5')).toHaveCount(2)
-  await expect(folder(third.page).getByTitle('Recolher')).toBeVisible()
+  await expect(folder(third.page).locator(tip('Recolher'))).toBeVisible()
 })
 
 test('R11 painel direito: nome do projeto no topo e abas Arquivos | Git | Sessões abaixo', async ({ kora }) => {
@@ -127,11 +128,11 @@ test('R28 sem barra de título nativa: botões de janela sobre o topo, sem cobri
   expect(first.visible, 'a janela usa Window Controls Overlay (sem barra nativa)').toBe(true)
   expect(first.right).toBeLessThan(await page.evaluate(() => window.innerWidth))
 
-  const refresh = (await rightPanel(page).getByTitle('Recarregar').boundingBox())!
+  const refresh = (await rightPanel(page).locator(tip('Recarregar')).boundingBox())!
   expect(refresh.x + refresh.width, 'Recarregar não pode ficar embaixo dos botões de janela').toBeLessThanOrEqual(first.right)
 
-  await page.getByTitle('Esconder painel lateral').click()
-  const toggle = (await page.getByTitle('Mostrar painel lateral').boundingBox())!
+  await page.locator(tip('Esconder painel lateral')).click()
+  const toggle = (await page.locator(tip('Mostrar painel lateral')).boundingBox())!
   expect(toggle.x + toggle.width, 'sem o painel, a barra de abas reserva o espaço').toBeLessThanOrEqual((await overlay()).right)
 })
 
@@ -162,7 +163,7 @@ test('R29 Ctrl+W fecha só a aba atual: terminal rodando pede confirmação (Ent
   expect(readState(env).tabs.map((t) => t.id)).not.toContain(claudeTab.id)
   expect(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(true)
 
-  await rightPanel(page).locator('div[title="notas.txt"]').click()
+  await rightPanel(page).locator('div[data-tip="notas.txt"]').click()
   await expect(ui.barTab(page, 'notas.txt')).toBeVisible()
   const editor = page.locator('.monaco-editor').filter({ visible: true })
   await expect(editor).toContainText('antes')
@@ -211,7 +212,7 @@ test('R30 arrastar: abas reordenam na barra e na lateral juntas; projeto arrasta
   await ui.sideTab(page, 'Um').dragTo(sideTres, { targetPosition: { x: 10, y: 2 } })
   await expect.poll(barTitles).toEqual(['Dois', 'Um', 'Tres'])
 
-  const projectRow = page.locator('aside nav div[title]').filter({ hasText: 'outro' })
+  const projectRow = page.locator('aside nav div[data-tip]').filter({ hasText: 'outro' })
   await projectRow.dragTo(page.locator('aside nav').getByText('Ocultos', { exact: true }))
   await waitFor(() => readState(env).projects.find((p) => p.id === 'p2')?.hidden === true, 'projeto oculto salvo')
   await expect(projectRow).toHaveCount(0)
@@ -223,7 +224,7 @@ test('R30 arrastar: abas reordenam na barra e na lateral juntas; projeto arrasta
   await ui.menuItem(page, 'Mover para Ativos').click()
   await waitFor(() => readState(env).projects.find((p) => p.id === 'p2')?.hidden === false, 'projeto de volta aos ativos')
   await hiddenLabel.click()
-  await expect(page.getByTitle('Expandir ocultos')).toBeVisible()
+  await expect(page.locator(tip('Expandir ocultos'))).toBeVisible()
   await expect(projectRow).toBeVisible()
 })
 
@@ -239,21 +240,21 @@ test('R34 controle visível de tamanho: interface e texto do terminal mudam sepa
   await expect.poll(cellHeight).toBeGreaterThan(0)
   const initialCell = await cellHeight()
 
-  const open = page.getByTitle('Tamanho da interface, do terminal e dos arquivos')
+  const open = page.locator(tip('Tamanho da interface, do terminal e dos arquivos'))
   await expect(open).toContainText('100% · 14 px')
   await open.click()
   const panel = page.getByRole('dialog', { name: 'Tamanhos' })
-  await panel.getByTitle('Aumentar texto do terminal').click()
-  await panel.getByTitle('Aumentar texto do terminal').click()
+  await panel.locator(tip('Aumentar texto do terminal')).click()
+  await panel.locator(tip('Aumentar texto do terminal')).click()
   await expect.poll(cellHeight).toBeGreaterThan(initialCell)
 
   expect(await zoomFactor()).toBeCloseTo(1)
 
-  await panel.getByTitle('Aumentar interface').click()
+  await panel.locator(tip('Aumentar interface')).click()
   await expect.poll(zoomFactor).toBeCloseTo(1.1)
   await waitFor(() => readState(env).settings?.zoom === 1.1 && readState(env).settings?.terminalFontSize === 16, 'tamanhos salvos')
 
-  await panel.getByTitle('Voltar ao padrão').first().click()
+  await panel.locator(tip('Voltar ao padrão')).first().click()
   await expect.poll(zoomFactor).toBeCloseTo(1)
   await page.keyboard.press('Escape')
   await expect(panel).toHaveCount(0)
@@ -336,7 +337,7 @@ test('R40 categorias: criar, subcategoria, arrastar projetos, recolher pelo nome
   const saved = () => readState(env) as ReturnType<typeof readState> & { groups?: { id: string; name: string; parentId?: string; hidden?: boolean; collapsed?: boolean }[] }
   const menu = (label: string) => ui.menuItem(page, label).click()
 
-  await page.getByTitle('Nova categoria').click()
+  await page.locator(tip('Nova categoria')).click()
   await nav().getByPlaceholder('nome da categoria').fill('Empresa A')
   await nav().getByPlaceholder('nome da categoria').press('Enter')
   await expect(groupRow('Empresa A')).toBeVisible()
@@ -498,22 +499,22 @@ test('R31 apagar conversa: lixeira na aba Sessões com confirmação; conversa l
   const codexRow = panel.locator('div.group').filter({ hasText: 'Conversa Codex semeada' })
 
   await claudeRow.hover()
-  await claudeRow.getByTitle('Apagar conversa').click()
+  await claudeRow.locator(tip('Apagar conversa')).click()
   const dialog = page.locator('[role=dialog]')
   await expect(dialog).toContainText('Lixeira')
   await dialog.getByRole('button', { name: 'Cancelar' }).click()
   expect(existsSync(claudeFile)).toBe(true)
 
   await claudeRow.hover()
-  await claudeRow.getByTitle('Apagar conversa').click()
+  await claudeRow.locator(tip('Apagar conversa')).click()
   await dialog.getByRole('button', { name: 'Apagar conversa' }).click()
   await expect.poll(() => existsSync(claudeFile)).toBe(false)
   await expect(claudeRow).toHaveCount(0)
 
   await codexRow.hover()
-  await codexRow.getByTitle('Fixar como aba sem abrir agora').click()
+  await codexRow.locator(tip('Fixar como aba sem abrir agora')).click()
   await waitFor(() => readState(env).tabs.find((t) => t.agent?.sessionId === codexId), 'aba fixada salva')
-  await expect(codexRow.getByTitle('Apagar conversa')).toHaveCount(0)
+  await expect(codexRow.locator(tip('Apagar conversa'))).toHaveCount(0)
   const refused = await page.evaluate(
     (id) => window.kora.deleteSession('p1', { kind: 'codex', sessionId: id }).then(() => 'apagou', (e: Error) => e.message),
     codexId
@@ -541,7 +542,7 @@ test('R12 Sessões: lista conversas do Claude e do Codex; clicar abre e retoma; 
   await expect(ui.sideTab(page, /.+/)).toHaveCount(1)
 
   await codexRow.hover()
-  await codexRow.getByTitle('Fixar como aba sem abrir agora').click()
+  await codexRow.locator(tip('Fixar como aba sem abrir agora')).click()
   await expect(ui.sideTab(page, /.+/)).toHaveCount(2)
   await expect(ui.visibleButton(page, 'Continuar chat')).toBeVisible()
   await waitFor(() => readState(env).tabs.find((t) => t.agent?.sessionId === codexId), 'aba fixada salva')
@@ -562,11 +563,11 @@ test('R15 clique direito no projeto: itens, copiar caminho, Explorer, remover co
   const run = await kora.launch(env)
   const page = run.page
   await installShellSpy(run)
-  const row = page.locator('aside nav div[title]').first()
+  const row = page.locator('aside nav div[data-tip]').first()
 
   // Sem botão de remover na linha do projeto.
   await row.hover()
-  const titles = await row.locator('button').evaluateAll((els) => els.map((e) => e.getAttribute('title')))
+  const titles = await row.locator('button').evaluateAll((els) => els.map((e) => e.getAttribute('data-tip')))
   expect(titles.every((t) => t === 'Nova aba' || t === 'Recolher' || t === 'Expandir')).toBe(true)
 
   await row.click({ button: 'right' })
@@ -609,7 +610,7 @@ test('R15 clique direito no projeto: itens, copiar caminho, Explorer, remover co
   await expect(dialog).toContainText('A pasta e os arquivos continuam no computador')
   await expect(dialog).toContainText('1 terminal aberto será fechado.')
   await dialog.getByRole('button', { name: 'Remover da lista' }).click()
-  await expect(page.locator('aside nav div[title]')).toHaveCount(0)
+  await expect(page.locator('aside nav div[data-tip]')).toHaveCount(0)
   await waitFor(() => readState(env).projects.length === 0, 'projeto removido do estado')
   expect(readState(env).tabs).toHaveLength(0)
   expect(existsSync(join(env.project, 'arquivo.txt'))).toBe(true)
@@ -645,23 +646,23 @@ test('R24 sem barra de rolagem nativa e sem diálogos nativos nos fluxos de conf
 
   const panel = rightPanel(page)
   // Excluir no explorador: diálogo do app.
-  await panel.locator('div[title="apagar.txt"]').click({ button: 'right' })
+  await panel.locator('div[data-tip="apagar.txt"]').click({ button: 'right' })
   await ui.menuItem(page, 'Excluir').click()
   await expect(page.locator('[role=dialog]')).toContainText('Lixeira')
   await page.locator('[role=dialog]').getByRole('button', { name: 'Cancelar' }).click()
 
   // Fechar editor com alteração não salva: diálogo do app.
-  await panel.locator('div[title="codigo.ts"]').click()
+  await panel.locator('div[data-tip="codigo.ts"]').click()
   await expect(page.locator('.monaco-editor').filter({ visible: true })).toBeVisible()
   await page.locator('.monaco-editor .view-lines').filter({ visible: true }).click()
   await page.keyboard.press('Control+End')
   await page.keyboard.type(' // sujo')
-  await ui.barTab(page, 'codigo.ts').getByTitle('Fechar aba').click()
+  await ui.barTab(page, 'codigo.ts').locator(tip('Fechar aba')).click()
   await expect(page.locator('[role=dialog]')).toContainText('sem salvar')
   await page.locator('[role=dialog]').getByRole('button', { name: 'Cancelar' }).click()
 
   // Recarregar arquivo com alteração não salva.
-  await page.getByTitle('Recarregar arquivo').filter({ visible: true }).click()
+  await page.locator(tip('Recarregar arquivo')).filter({ visible: true }).click()
   await page.waitForTimeout(500)
 
   const native = await run.nativeDialogs()
@@ -694,7 +695,7 @@ test('R44 clique com o botão do meio fecha a aba, na barra de cima e na lateral
 test('R45 tema: o seletor chama o modo que segue o sistema de "Sistema"', async ({ kora }) => {
   const run = await kora.launch(kora.env())
   const page = run.page
-  await page.getByTitle('Tema').click()
+  await page.locator(tip('Tema')).click()
   await expect(ui.menuItem(page, '● Sistema')).toBeVisible()
   await expect(page.getByText('Seguir o Windows')).toHaveCount(0)
 })
@@ -748,7 +749,7 @@ test('R60 digitar e fechar na hora (Ctrl+W ou X da janela) pergunta antes de per
   const page = run.page
   const dialog = page.locator('[role=dialog]')
   const openAndType = async (): Promise<void> => {
-    await rightPanel(page).locator('div[title="notas.txt"]').click()
+    await rightPanel(page).locator('div[data-tip="notas.txt"]').click()
     const editor = page.locator('.monaco-editor').filter({ visible: true })
     await expect(editor).toContainText('antes')
     await editor.locator('.view-lines').click()
@@ -793,7 +794,7 @@ test('R64 diálogo aberto escurece também os botões de janela (desenhados pelo
   const dimmed = '#7b7c7d/#0b0c0e'
   await expect.poll(last).toBe(normal)
 
-  await page.getByTitle('Configurações').click()
+  await page.locator(tip('Configurações')).click()
   await expect.poll(last, 'Configurações abertas').toBe(dimmed)
   await page.keyboard.press('Escape')
   await expect.poll(last, 'Configurações fechadas').toBe(normal)
@@ -814,7 +815,7 @@ test('R68 nome dado à aba vira o nome da conversa na aba Sessões, também com 
   const panel = rightPanel(page)
   await panel.getByRole('button', { name: 'Sessões' }).click()
   const row = (text: string) => panel.locator('div.group').filter({ hasText: text })
-  const reload = () => panel.getByTitle('Recarregar').click()
+  const reload = () => panel.locator(tip('Recarregar')).click()
 
   await row('Conversa Claude semeada').click()
   await waitFor(() => readState(env).tabs.find((t) => t.agent?.sessionId === claudeId), 'aba ligada à conversa')
@@ -859,10 +860,10 @@ test('R69 âmbar só no que está aberto ou selecionado: pasta do projeto aberta
     await expect(icon).toHaveCount(1)
     return (await icon.locator('[stroke="var(--icon-accent)"], [fill="var(--icon-accent)"]').count()) > 0
   }
-  const projectFolder = () => page.locator('aside nav div[title]').first().locator('svg[data-icon="projeto"]')
+  const projectFolder = () => page.locator('aside nav div[data-tip]').first().locator('svg[data-icon="projeto"]')
 
   expect(await lit(projectFolder()), 'projeto fechado, sem abas').toBe(false)
-  expect(await lit(page.getByTitle('Configurações').locator('svg')), 'configurações').toBe(false)
+  expect(await lit(page.locator(tip('Configurações')).locator('svg')), 'configurações').toBe(false)
   // Criar projeto e categoria: neutros parados, detalhe âmbar só com o mouse em cima (a cor muda por CSS no hover).
   const amber = await page.evaluate(() => {
     const probe = document.createElement('span')
@@ -875,7 +876,7 @@ test('R69 âmbar só no que está aberto ou selecionado: pasta do projeto aberta
   const accentStroke = (button: import('@playwright/test').Locator) =>
     button.locator('[stroke="var(--icon-accent-idle)"]').first().evaluate((el) => getComputedStyle(el).stroke)
   for (const title of ['Adicionar projeto', 'Nova categoria']) {
-    const button = page.getByTitle(title)
+    const button = page.locator(tip(title))
     expect(await lit(button.locator('svg')), `${title}: sem âmbar parado`).toBe(false)
     await page.mouse.move(0, 0)
     expect(await accentStroke(button), `${title}: parado, detalhe cinza`).not.toBe(amber)
@@ -889,7 +890,7 @@ test('R69 âmbar só no que está aberto ou selecionado: pasta do projeto aberta
   const terminalIcon = () => ui.tabBar(page).locator('div.group').first().locator('svg[data-icon="terminal"]')
   expect(await lit(terminalIcon()), 'terminal selecionado').toBe(true)
 
-  await rightPanel(page).locator('div[title="app.ts"]').click()
+  await rightPanel(page).locator('div[data-tip="app.ts"]').click()
   await expect(ui.barTab(page, 'app.ts')).toBeVisible()
   const fileIcon = () => ui.barTab(page, 'app.ts').locator('svg[data-icon="codigo"]')
   expect(await lit(fileIcon()), 'arquivo selecionado').toBe(true)
@@ -907,7 +908,7 @@ test('R71 + de um projeto na lateral: a nova aba não recolhe a pasta; pasta rec
   const row = () => page.locator('aside nav [data-project-row]').first()
   const choose = async (label: string): Promise<void> => {
     await row().hover()
-    await row().getByTitle('Nova aba').click()
+    await row().locator(tip('Nova aba')).click()
     await page.locator('body > div.fixed button').filter({ hasText: label }).click()
   }
 
@@ -915,9 +916,9 @@ test('R71 + de um projeto na lateral: a nova aba não recolhe a pasta; pasta rec
   await expect(ui.sideTab(page, /.+/)).toHaveCount(1)
   await choose('Terminal')
   await expect(ui.sideTab(page, /.+/), 'pasta aberta continua aberta com as duas abas').toHaveCount(2)
-  await expect(row().getByTitle('Recolher')).toHaveCount(1)
+  await expect(row().locator(tip('Recolher'))).toHaveCount(1)
 
-  await row().getByTitle('Recolher').click()
+  await row().locator(tip('Recolher')).click()
   await expect(ui.sideTab(page, /.+/)).toHaveCount(0)
   await choose('Terminal')
   await expect(ui.sideTab(page, /.+/), 'pasta recolhida abre e mostra a aba nova').toHaveCount(3)

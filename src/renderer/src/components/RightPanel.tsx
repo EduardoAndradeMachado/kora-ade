@@ -44,12 +44,13 @@ export function RightPanel(props: Props): React.JSX.Element {
   return (
     <aside className="flex w-72 shrink-0 flex-col border-l bg-background">
       <div className="window-drag flex h-10 shrink-0 items-center gap-2 border-b pl-3 pr-[calc(var(--window-controls-width)+0.5rem)]">
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold" title={props.project.path}>
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold" data-tip={props.project.path}>
           {props.project.name}
         </span>
         <button
           type="button"
-          title="Recarregar"
+          data-tip="Recarregar"
+          aria-label="Recarregar"
           onClick={() => setReloadKey((k) => k + 1)}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
         >

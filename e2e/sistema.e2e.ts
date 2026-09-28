@@ -19,6 +19,7 @@ import {
   shellCalls,
   spawnSecondInstance,
   starts,
+  tip,
   typeLine,
   ui,
   waitFor,
@@ -165,10 +166,10 @@ test('Memória em uso contínuo: terminais com saída sem parar, troca de abas, 
     const tabs = ui.tabBar(page).locator('div.group')
     const count = await tabs.count()
     for (let i = 0; i < count; i++) await tabs.nth(i).click()
-    await panel.locator('div[title="codigo.ts"]').click()
+    await panel.locator('div[data-tip="codigo.ts"]').click()
     await expect(page.locator('.monaco-editor').filter({ visible: true })).toBeVisible()
     await page.keyboard.press('Control+W')
-    await panel.locator('div[title="leia.md"]').click()
+    await panel.locator('div[data-tip="leia.md"]').click()
     await page.keyboard.press('Control+W')
     for (const view of ['Git', 'Sessões', 'Arquivos']) await panel.getByRole('button', { name: view }).click()
     await tabs.last().click()
@@ -200,7 +201,7 @@ test('Memória: 5 ciclos abrindo e fechando 10 abas de terminal', async ({ kora 
     await expect.poll(() => shells(run).length, { timeout: 60_000, message: '10 PowerShells vivos' }).toBe(10)
     const open = await appMemory(run)
     while ((await ui.tabBar(page).locator('div.group').count()) > 0) {
-      await ui.tabBar(page).locator('div.group').first().getByTitle('Fechar aba').click()
+      await ui.tabBar(page).locator('div.group').first().locator(tip('Fechar aba')).click()
     }
     await expect.poll(() => shells(run).length, { timeout: 60_000, message: 'PowerShells encerrados' }).toBe(0)
     await page.waitForTimeout(2000)
@@ -244,7 +245,7 @@ test('Órfãos: depois de matar o app à força não sobram PowerShell nem agent
   expect(alive.map((k) => k.name), 'processos órfãos 10 s depois do kill do main').toEqual([])
 })
 
-const fileRow = (run: KoraRun, rel: string) => run.page.locator('aside').last().locator(`div[title="${rel}"]`)
+const fileRow = (run: KoraRun, rel: string) => run.page.locator('aside').last().locator(`div[data-tip="${rel}"]`)
 const windowVisible = (run: KoraRun) => run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())
 const closeX = (run: KoraRun) => run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
 
@@ -338,10 +339,10 @@ test('R50 engrenagem abre Configurações com logo, versão e estado da atualiza
   await spyUpdateIpc(run)
   const version = await run.app.evaluate(({ app }) => app.getVersion())
 
-  const gear = page.getByTitle('Configurações')
+  const gear = page.locator(tip('Configurações'))
   await expect(gear.locator('[data-icon="engrenagem"]')).toHaveCount(1)
   const gearBox = (await gear.boundingBox())!
-  const themeBox = (await page.getByTitle('Tema').boundingBox())!
+  const themeBox = (await page.locator(tip('Tema')).boundingBox())!
   expect(gearBox.x + gearBox.width, 'engrenagem na ponta esquerda, antes do tema').toBeLessThanOrEqual(themeBox.x)
   await gear.click()
   const dialog = page.getByRole('dialog', { name: 'Configurações' })
@@ -423,7 +424,7 @@ test('R59 log de erros para suporte: erros da interface e do main ficam registra
   const page = run.page
   const errorsFile = join(env.userData, 'logs', 'errors.log')
   const openSupport = async () => {
-    await page.getByTitle('Configurações').click()
+    await page.locator(tip('Configurações')).click()
     const settings = page.getByRole('dialog', { name: 'Configurações' })
     await settings.getByRole('button', { name: 'Suporte' }).click()
     return settings
@@ -504,7 +505,7 @@ test('R61 Abrir pasta dos logs funciona mesmo sem nenhum erro registrado; falha 
   })
   const opened = () => run.app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened)
 
-  await page.getByTitle('Configurações').click()
+  await page.locator(tip('Configurações')).click()
   const dialog = page.getByRole('dialog', { name: 'Configurações' })
   await dialog.getByRole('button', { name: 'Suporte' }).click()
   await expect(dialog.locator('[data-errors-summary]')).toHaveText('Nenhum erro registrado.')
@@ -531,7 +532,7 @@ test('R72 abrir um PDF não encerra os terminais abertos; recarregar a interface
   await expect.poll(() => shells(run).length, { timeout: 30_000 }).toBe(1)
   const shellPid = shells(run)[0]!.pid
 
-  await page.locator('aside').last().locator('div[title="doc.pdf"]').click()
+  await page.locator('aside').last().locator('div[data-tip="doc.pdf"]').click()
   await expect(ui.barTab(page, 'doc.pdf')).toBeVisible()
   await expect.poll(() => page.frames().some((f) => f.url().startsWith('kora-file://project/p1/doc.pdf'))).toBe(true)
   await page.waitForTimeout(1500)
@@ -554,7 +555,7 @@ test('R80 Suporte recolhido por padrão; Limpar log pede confirmação na própr
   })
   await waitFor(() => existsSync(join(logs, 'errors.log')) && readFileSync(join(logs, 'errors.log'), 'utf8').includes('segunda falha'), 'erros gravados')
 
-  await page.getByTitle('Configurações').click()
+  await page.locator(tip('Configurações')).click()
   const dialog = page.getByRole('dialog', { name: 'Configurações' })
   await expect(dialog.locator('[data-errors-summary]')).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: 'Limpar log' })).toHaveCount(0)
@@ -582,7 +583,7 @@ test('R80 Suporte recolhido por padrão; Limpar log pede confirmação na própr
 
   await run.app.evaluate(() => console.error('[kora] falha depois de limpar'))
   await page.keyboard.press('Escape')
-  await page.getByTitle('Configurações').click()
+  await page.locator(tip('Configurações')).click()
   await dialog.getByRole('button', { name: 'Suporte' }).click()
   await expect(dialog.locator('[data-errors-summary]')).toContainText('1 erro registrado')
 })

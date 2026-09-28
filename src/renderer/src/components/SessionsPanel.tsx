@@ -112,7 +112,7 @@ export function SessionsPanel({ projectId, reloadKey, openSessions, onOpen, onPi
           return (
             <div
               key={`${s.kind}:${s.sessionId}`}
-              title={`${agentLabel(s.kind)} · ${s.sessionId}\n${open ? 'Já está numa aba — clique para ir até ela' : 'Clique para abrir e continuar'}`}
+              data-tip={`${agentLabel(s.kind)} · ${s.sessionId}\n${open ? 'Já está numa aba — clique para ir até ela' : 'Clique para abrir e continuar'}`}
               onClick={() => onOpen(s)}
               className="group flex cursor-default items-start gap-2 rounded-md px-2 py-1.5 hover:bg-secondary/60"
             >
@@ -128,7 +128,8 @@ export function SessionsPanel({ projectId, reloadKey, openSessions, onOpen, onPi
                 <div className="hidden items-center gap-0.5 group-hover:flex">
                   <button
                     type="button"
-                    title="Fixar como aba sem abrir agora"
+                    data-tip="Fixar como aba sem abrir agora"
+                    aria-label="Fixar como aba sem abrir agora"
                     onClick={(e) => {
                       e.stopPropagation()
                       onPin(s)
@@ -139,7 +140,8 @@ export function SessionsPanel({ projectId, reloadKey, openSessions, onOpen, onPi
                   </button>
                   <button
                     type="button"
-                    title="Apagar conversa"
+                    data-tip="Apagar conversa"
+                    aria-label="Apagar conversa"
                     onClick={(e) => {
                       e.stopPropagation()
                       void remove(s)
