@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ErrorSummary } from '../shared/ipc'
 
@@ -15,6 +15,8 @@ export interface ErrorLog {
   recent(maxChars: number): string
   // Arquivo único para mandar ao suporte: ambiente, erros e os outros logs do app.
   diagnostic(env: Record<string, string>, extraLogs: { name: string; file: string }[]): string
+  // Apaga o atual e o antigo. Diferente de record, falha lança: o usuário pediu e precisa saber se não deu.
+  clear(): void
   readonly file: string
 }
 
@@ -96,6 +98,10 @@ export function createErrorLog(options: { dir: string; maxBytes?: number; now?: 
         size += entry.length + 1
       }
       return picked.join('\n')
+    },
+    clear() {
+      rmSync(file, { force: true })
+      rmSync(old, { force: true })
     },
     diagnostic(env, extraLogs) {
       const section = (title: string, text: string): string => `===== ${title} =====\n${text.trim() || '(vazio)'}\n`

@@ -33,12 +33,15 @@ export interface SupportActions {
   copyRecent(): Promise<void>
   saveFile(): Promise<string | null>
   openFolder(): Promise<void>
+  clear(): Promise<void>
 }
 
 const dateTime = (iso: string): string =>
   new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 
 function Support({ support }: { support: SupportActions }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [confirmingClear, setConfirmingClear] = useState(false)
   const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null)
   const run = (task: () => Promise<string | null>): void => {
     setFeedback(null)
@@ -51,39 +54,87 @@ function Support({ support }: { support: SupportActions }): React.JSX.Element {
   const none = errors?.count === 0
   return (
     <section className="flex flex-col gap-2.5 border-t px-4 py-3.5">
-      <h3 className="text-xs font-semibold">Suporte</h3>
-      <p data-errors-summary className="text-xs text-muted-foreground">
-        {errors === null
-          ? 'Lendo o log de erros…'
-          : none
-            ? 'Nenhum erro registrado.'
-            : `${errors.count} ${errors.count === 1 ? 'erro registrado' : 'erros registrados'}${errors.lastAt ? `, o último em ${dateTime(errors.lastAt)}` : ''}.`}
-      </p>
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        O log fica só neste computador. Para pedir ajuda, copie os últimos erros ou salve o arquivo completo e envie junto.
-      </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="secondary" disabled={errors === null || none} onClick={() => run(async () => (await support.copyRecent(), 'Copiado para a área de transferência.'))}>
-          Copiar últimos erros
-        </Button>
-        <Button variant="secondary" onClick={() => run(async () => {
-          const path = await support.saveFile()
-          return path ? `Salvo em ${path}` : null
-        })}>
-          Salvar arquivo…
-        </Button>
-        <button
-          type="button"
-          onClick={() => run(async () => (await support.openFolder(), null))}
-          className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-        >
-          Abrir pasta
-        </button>
-      </div>
-      {feedback && (
-        <p role="status" className={cn('break-all text-[11px]', feedback.error ? 'text-destructive' : 'text-muted-foreground')}>
-          {feedback.text}
-        </p>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="-mx-1 flex items-center gap-1 self-start rounded-md px-1 text-xs font-semibold hover:bg-secondary"
+      >
+        <Icon name="expandir" className={cn('size-3 transition-transform', open && 'rotate-90')} />
+        Suporte
+      </button>
+      {open && (
+        <>
+          <p data-errors-summary className="text-xs text-muted-foreground">
+            {errors === null
+              ? 'Lendo o log de erros…'
+              : none
+                ? 'Nenhum erro registrado.'
+                : `${errors.count} ${errors.count === 1 ? 'erro registrado' : 'erros registrados'}${errors.lastAt ? `, o último em ${dateTime(errors.lastAt)}` : ''}.`}
+          </p>
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            O log fica só neste computador. Para pedir ajuda, copie os últimos erros ou salve o arquivo completo e envie junto.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" disabled={errors === null || none} onClick={() => run(async () => (await support.copyRecent(), 'Copiado para a área de transferência.'))}>
+              Copiar últimos erros
+            </Button>
+            <Button variant="secondary" onClick={() => run(async () => {
+              const path = await support.saveFile()
+              return path ? `Salvo em ${path}` : null
+            })}>
+              Salvar arquivo…
+            </Button>
+            <button
+              type="button"
+              onClick={() => run(async () => (await support.openFolder(), null))}
+              className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Abrir pasta
+            </button>
+            <button
+              type="button"
+              disabled={errors === null || none || confirmingClear}
+              onClick={() => setConfirmingClear(true)}
+              className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-50"
+            >
+              Limpar log
+            </button>
+          </div>
+          {/* Confirmação aqui mesmo: um diálogo por cima de Configurações fecharia as duas janelas no Esc. */}
+          {confirmingClear && errors && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-2 text-xs">
+              <span className="flex-1">
+                {errors.count === 1 ? 'Apagar o erro registrado?' : `Apagar os ${errors.count} erros registrados?`}
+              </span>
+              <Button variant="secondary" onClick={() => setConfirmingClear(false)}>
+                Cancelar
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setConfirmingClear(false)
+                  run(async () => (await support.clear(), null))
+                }}
+              >
+                Apagar
+              </Button>
+            </div>
+          )}
+          {feedback && (
+            <p role="status" className={cn('break-all text-[11px]', feedback.error ? 'text-destructive' : 'text-muted-foreground')}>
+              {feedback.text}
+            </p>
+          )}
+          <div className="flex flex-col gap-0.5 text-xs">
+            <a href={`${REPO_URL}/issues/new`} target="_blank" rel="noreferrer" className={cn(linkClass, 'self-start')}>
+              Relatar um problema no GitHub
+            </a>
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Descreva o que aconteceu e anexe o arquivo salvo em "Salvar arquivo…".
+            </p>
+          </div>
+        </>
       )}
     </section>
   )

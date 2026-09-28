@@ -20,6 +20,7 @@ const api: KoraApi = {
   focusWindow: () => ipcRenderer.send('window:focus'),
   reportError: (text) => ipcRenderer.send('errors:report', text),
   errorSummary: () => ipcRenderer.invoke('errors:summary'),
+  clearErrors: () => ipcRenderer.invoke('errors:clear'),
   recentErrors: () => ipcRenderer.invoke('errors:recent'),
   saveDiagnostic: () => ipcRenderer.invoke('errors:save'),
   openLogsFolder: () => ipcRenderer.invoke('errors:open-folder'),

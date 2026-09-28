@@ -1043,7 +1043,8 @@ export function App(): React.JSX.Element {
             errors: errorSummary,
             copyRecent: async () => navigator.clipboard.writeText(await window.kora.recentErrors()),
             saveFile: () => window.kora.saveDiagnostic(),
-            openFolder: () => window.kora.openLogsFolder()
+            openFolder: () => window.kora.openLogsFolder(),
+            clear: async () => setErrorSummary(await window.kora.clearErrors())
           }}
         />
       )}

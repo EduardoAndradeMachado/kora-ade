@@ -470,6 +470,10 @@ function registerIpc(): void {
   ipcMain.on('window:focus', () => showWindow())
   ipcMain.on('errors:report', (_e, text: unknown) => errorLog.record('interface', String(text)))
   ipcMain.handle('errors:summary', () => errorLog.summary())
+  ipcMain.handle('errors:clear', () => {
+    errorLog.clear()
+    return errorLog.summary()
+  })
   // Cabe numa mensagem de chat ou num e-mail; o arquivo completo sai pelo "Salvar arquivo".
   ipcMain.handle('errors:recent', () => errorLog.recent(8000))
   // A pasta só nasce no primeiro erro gravado; sem nenhum erro ainda, o Explorer recebia um caminho inexistente.

@@ -23,6 +23,24 @@ describe('log de erros local', () => {
     expect(log.summary()).toEqual({ count: 2, lastAt: '2026-09-24T21:00:02.000Z' })
   })
 
+  it('limpar apaga o atual e o antigo; o resumo zera e o log volta a gravar', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kora-erros-'))
+    const log = createErrorLog({ dir, maxBytes: 200, now: clock() })
+    for (let i = 0; i < 4; i++) log.record('main', `erro número ${i} ${'x'.repeat(60)}`)
+    expect(existsSync(join(dir, 'errors.old.log'))).toBe(true)
+
+    log.clear()
+    expect(log.summary()).toEqual({ count: 0, lastAt: null })
+    expect(log.recent(10_000)).toBe('')
+    expect(log.diagnostic({}, [])).not.toContain('erro número')
+
+    log.record('main', 'depois de limpar')
+    expect(log.summary().count).toBe(1)
+    log.clear()
+    log.clear()
+    expect(log.summary().count).toBe(0)
+  })
+
   it('qualquer coisa jogada vira texto legível', () => {
     expect(errorText({ codigo: 42 })).toBe('{"codigo":42}')
     expect(errorText(undefined)).toBe('undefined')

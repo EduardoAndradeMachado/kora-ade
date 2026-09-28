@@ -843,6 +843,38 @@ const MUTANTS = [
     bug: 'interface ignora o pedido de reler tudo e não confere as pastas',
     find: 'change.rescan && checkMissing()',
     replace: 'change.rescan && false'
+  },
+  {
+    id: 'M80',
+    grep: 'R80 ',
+    file: 'src/main/index.ts',
+    bug: 'Limpar log responde, mas não apaga nada',
+    find: '    errorLog.clear()\n    return errorLog.summary()',
+    replace: '    return errorLog.summary()'
+  },
+  {
+    id: 'M80b',
+    grep: 'R80 ',
+    file: 'src/renderer/src/components/SettingsDialog.tsx',
+    bug: 'Apagar da confirmação não chama a limpeza',
+    find: 'run(async () => (await support.clear(), null))',
+    replace: 'run(async () => null)'
+  },
+  {
+    id: 'M80c',
+    grep: 'R80 ',
+    file: 'src/renderer/src/components/SettingsDialog.tsx',
+    bug: 'Relatar um problema abre a página do repositório em vez da issue nova',
+    find: 'href={`${REPO_URL}/issues/new`}',
+    replace: 'href={REPO_URL}'
+  },
+  {
+    id: 'M80d',
+    grep: 'R80 ',
+    file: 'src/renderer/src/components/SettingsDialog.tsx',
+    bug: 'Limpar log apaga direto, sem confirmação',
+    find: 'onClick={() => setConfirmingClear(true)}',
+    replace: 'onClick={() => run(async () => (await support.clear(), null))}'
   }
 ]
 

@@ -77,6 +77,8 @@ export interface KoraApi {
   // Log de erros local para suporte: nada sai do computador sem o usuário copiar ou salvar.
   reportError(text: string): void
   errorSummary(): Promise<ErrorSummary>
+  // Apaga o log de erros e devolve o resumo depois de limpar.
+  clearErrors(): Promise<ErrorSummary>
   recentErrors(): Promise<string>
   // Caminho do arquivo salvo, ou null se o usuário cancelou.
   saveDiagnostic(): Promise<string | null>

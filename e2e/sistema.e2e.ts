@@ -424,7 +424,9 @@ test('R59 log de erros para suporte: erros da interface e do main ficam registra
   const errorsFile = join(env.userData, 'logs', 'errors.log')
   const openSupport = async () => {
     await page.getByTitle('Configurações').click()
-    return page.getByRole('dialog', { name: 'Configurações' })
+    const settings = page.getByRole('dialog', { name: 'Configurações' })
+    await settings.getByRole('button', { name: 'Suporte' }).click()
+    return settings
   }
 
   let dialog = await openSupport()
@@ -504,6 +506,7 @@ test('R61 Abrir pasta dos logs funciona mesmo sem nenhum erro registrado; falha 
 
   await page.getByTitle('Configurações').click()
   const dialog = page.getByRole('dialog', { name: 'Configurações' })
+  await dialog.getByRole('button', { name: 'Suporte' }).click()
   await expect(dialog.locator('[data-errors-summary]')).toHaveText('Nenhum erro registrado.')
   await dialog.getByRole('button', { name: 'Abrir pasta' }).click()
   await expect.poll(opened).toEqual([join(env.userData, 'logs')])
@@ -537,4 +540,49 @@ test('R72 abrir um PDF não encerra os terminais abertos; recarregar a interface
 
   await page.reload()
   await expect.poll(() => isAlive(shellPid), { timeout: 15_000, message: 'recarregar a interface encerra o terminal' }).toBe(false)
+})
+
+test('R80 Suporte recolhido por padrão; Limpar log pede confirmação na própria seção e zera o log; Relatar um problema abre a issue nova no GitHub', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  await installShellSpy(run)
+  const logs = join(env.userData, 'logs')
+  await run.app.evaluate(() => {
+    console.error('[kora] primeira falha simulada')
+    console.error('[kora] segunda falha simulada')
+  })
+  await waitFor(() => existsSync(join(logs, 'errors.log')) && readFileSync(join(logs, 'errors.log'), 'utf8').includes('segunda falha'), 'erros gravados')
+
+  await page.getByTitle('Configurações').click()
+  const dialog = page.getByRole('dialog', { name: 'Configurações' })
+  await expect(dialog.locator('[data-errors-summary]')).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Limpar log' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Suporte' }).click()
+  await expect(dialog.locator('[data-errors-summary]')).toContainText('2 erros registrados')
+
+  await dialog.getByRole('button', { name: 'Limpar log' }).click()
+  await expect(dialog.getByText('Apagar os 2 erros registrados?')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Cancelar' }).click()
+  await expect(dialog.locator('[data-errors-summary]')).toContainText('2 erros registrados')
+  expect(readFileSync(join(logs, 'errors.log'), 'utf8')).toContain('primeira falha')
+
+  await dialog.getByRole('button', { name: 'Limpar log' }).click()
+  await dialog.getByRole('button', { name: 'Apagar', exact: true }).click()
+  await expect(dialog.locator('[data-errors-summary]')).toHaveText('Nenhum erro registrado.')
+  await expect(dialog.getByRole('button', { name: 'Limpar log' })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Copiar últimos erros' })).toBeDisabled()
+  expect(existsSync(join(logs, 'errors.log')) ? readFileSync(join(logs, 'errors.log'), 'utf8') : '').not.toContain('falha simulada')
+  await expect(dialog, 'confirmar a limpeza não fecha Configurações').toBeVisible()
+
+  await dialog.getByRole('link', { name: 'Relatar um problema no GitHub' }).click()
+  await expect
+    .poll(() => shellCalls(run))
+    .toContainEqual(['openExternal', 'https://github.com/EduardoAndradeMachado/kora-ade/issues/new'])
+
+  await run.app.evaluate(() => console.error('[kora] falha depois de limpar'))
+  await page.keyboard.press('Escape')
+  await page.getByTitle('Configurações').click()
+  await dialog.getByRole('button', { name: 'Suporte' }).click()
+  await expect(dialog.locator('[data-errors-summary]')).toContainText('1 erro registrado')
 })
