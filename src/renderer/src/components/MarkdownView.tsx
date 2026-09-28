@@ -57,7 +57,9 @@ export function MarkdownView({ projectId, path, visible, fontSize, onEdit, onOpe
       <ViewerHeader projectId={projectId} path={path} onOpenPath={onOpenPath} onReload={() => setReloadKey((k) => k + 1)}>
         <ModeToggle editing={false} onChange={(editing) => editing && onEdit()} />
       </ViewerHeader>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* Selecionável até a borda, não só a coluna do texto: botão direito e arrastar a seleção funcionam também
+          nas margens e abaixo do fim do documento. */}
+      <div className="min-h-0 flex-1 overflow-y-auto select-text">
         {error ? (
           <p className="p-4 text-xs text-destructive">{error}</p>
         ) : source === null ? (

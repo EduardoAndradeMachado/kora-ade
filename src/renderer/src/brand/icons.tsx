@@ -160,6 +160,12 @@ const BRAND = {
       <rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2" />
     </>
   ),
+  selecionarTudo: (a) => (
+    <>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="2.5" strokeDasharray="3 3" />
+      <path d="M8 9.5h8M8 14.5h5" stroke={a} />
+    </>
+  ),
   excluir: () => (
     <>
       <path d="M6 6.5l.9 12.6A2 2 0 0 0 8.9 21h6.2a2 2 0 0 0 2-1.9L18 6.5Z" fill="currentColor" fillOpacity={0.2} />

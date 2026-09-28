@@ -373,6 +373,42 @@ test('R75 Visualizar do Markdown acompanha o arquivo alterado por fora', async (
   await expect(article.locator('h1')).toHaveText('Título novo do agente')
 })
 
+test('R84 botão direito no Markdown em visualização copia o trecho selecionado e seleciona só o documento', async ({ kora }) => {
+  const env = kora.env()
+  seedRepo(env)
+  const run = await kora.launch(env)
+  const page = run.page
+  await row(run, 'README.md').click()
+  const article = page.locator('article.markdown').filter({ visible: true })
+  const title = article.locator('h1')
+  await expect(title).toHaveText('Título do README')
+
+  const saved = await saveClipboard(run)
+  try {
+    await title.selectText()
+    await title.click({ button: 'right' })
+    await ui.menuItem(page, 'Copiar').click()
+    await expect.poll(() => readClipboardText(run)).toBe('Título do README')
+  } finally {
+    await restoreClipboard(run, saved)
+  }
+
+  // Sem seleção e no espaço vazio abaixo do texto, fora da coluna do artigo: o menu aparece do mesmo jeito.
+  await page.evaluate(() => window.getSelection()?.removeAllRanges())
+  const viewer = article.locator('..')
+  const box = (await viewer.boundingBox())!
+  await viewer.click({ button: 'right', position: { x: 8, y: box.height - 8 } })
+  await expect(ui.menuItem(page, 'Copiar')).toHaveCount(0)
+  await ui.menuItem(page, 'Selecionar tudo').click()
+  const selection = await viewer.evaluate((el) => {
+    const sel = window.getSelection()!
+    return { text: sel.toString(), inside: el.contains(sel.anchorNode) && el.contains(sel.focusNode) }
+  })
+  expect(selection.inside).toBe(true)
+  expect(selection.text).toContain('Título do README')
+  expect(selection.text).toContain('Parágrafo forte.')
+})
+
 test('R76 quebra de linha no editor: botão e Alt+Z ligam e desligam, a escolha fica salva e vale para o próximo arquivo aberto', async ({ kora }) => {
   const env = kora.env()
   const long = 'palavra '.repeat(250).trim()

@@ -4,6 +4,7 @@ import './brand/tokens.css'
 import { App } from './App'
 import { ConfirmProvider } from './components/ConfirmDialog'
 import { TipLayer } from './components/Tip'
+import { TextContextMenu } from './components/TextContextMenu'
 
 // Vitrine de desenvolvimento: fora do build de produção (import.meta.env.DEV some no empacotamento).
 const vitrine = import.meta.env.DEV && location.hash === '#vitrine'
@@ -48,6 +49,7 @@ if (!vitrine) {
     <ConfirmProvider>
       <App />
       <TipLayer />
+      <TextContextMenu />
     </ConfirmProvider>
   )
 }
