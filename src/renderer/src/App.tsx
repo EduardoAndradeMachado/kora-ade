@@ -37,6 +37,7 @@ const MONACO_PRELOAD_DELAY_MS = 3000
 import { DormantView } from '@/components/DormantView'
 import { useChoose, useConfirm } from '@/components/ConfirmDialog'
 import { ContextMenu, type MenuItem } from '@/components/ContextMenu'
+import { Icon } from '@/brand/icons'
 import type { RenameRequest, TabPlace } from '@/components/TabBar'
 import type { NewTabChoice } from '@/components/NewTabMenu'
 import { terminalBus } from '@/lib/terminal-bus'
@@ -778,32 +779,34 @@ export function App(): React.JSX.Element {
   }
 
   const tabMenuItems = (projectId: string, tab: Tab, where: TabPlace): MenuItem[] => {
-    const close: MenuItem = { label: 'Fechar aba', danger: true, onSelect: () => void closeTab(projectId, tab.id) }
+    const close: MenuItem = { label: 'Fechar aba', icon: <Icon name="fechar" />, danger: true, onSelect: () => void closeTab(projectId, tab.id) }
     if (tab.kind === 'file') {
       return [
-        { label: 'Mostrar no Explorer', onSelect: () => void window.kora.revealInExplorer(projectId, tab.path) },
-        { label: 'Copiar caminho relativo', onSelect: () => void copyPath(tab.path) },
+        { label: 'Mostrar no Explorer', icon: <Icon name="pastaAberta" />, onSelect: () => void window.kora.revealInExplorer(projectId, tab.path) },
+        { label: 'Copiar caminho relativo', icon: <Icon name="copiar" />, onSelect: () => void copyPath(tab.path) },
         'separator',
         close
       ]
     }
     const items: MenuItem[] = [
-      { label: 'Renomear', onSelect: () => setRenameRequest((r) => ({ tabId: tab.id, where, n: (r?.n ?? 0) + 1 })) }
+      { label: 'Renomear', icon: <Icon name="editar" />, onSelect: () => setRenameRequest((r) => ({ tabId: tab.id, where, n: (r?.n ?? 0) + 1 })) }
     ]
     if (tab.live) {
       items.push({
         label: tab.agent ? 'Suspender sessão' : 'Encerrar terminal',
+        icon: <Icon name={tab.agent ? 'pausar' : 'parar'} />,
         onSelect: () => suspendTab(tab.id)
       })
     } else if (tab.agent) {
-      items.push({ label: 'Continuar chat', onSelect: () => resumeTab(projectId, tab, false) })
+      items.push({ label: 'Continuar chat', icon: <Icon name="retomar" />, onSelect: () => resumeTab(projectId, tab, false) })
     } else {
-      items.push({ label: 'Abrir terminal', onSelect: () => resumeTab(projectId, tab, true) })
+      items.push({ label: 'Abrir terminal', icon: <Icon name="terminal" />, onSelect: () => resumeTab(projectId, tab, true) })
     }
     if (tab.agent) {
       const sessionId = tab.agent.sessionId
       items.push({
         label: 'Copiar ID da sessão',
+        icon: <Icon name="copiar" />,
         onSelect: () => void navigator.clipboard.writeText(sessionId).then(() => flash('ID da sessão copiado'))
       })
     }

@@ -5,6 +5,7 @@ import { AlertBell, isDormant, TabIcon, type RenameRequest, type Tab } from '@/c
 import { NewTabMenu, type NewTabChoice } from '@/components/NewTabMenu'
 import { EditableTitle } from '@/components/EditableTitle'
 import { ContextMenu, type MenuItem } from '@/components/ContextMenu'
+import { AgentIcon } from '@/components/AgentIcon'
 import { ProjectAvatar } from '@/components/ProjectAvatar'
 import { UsageFooter } from '@/components/UsageFooter'
 import { SizeControl } from '@/components/SizeControl'
@@ -135,11 +136,13 @@ export function Sidebar(props: Props): React.JSX.Element {
       .filter((g) => g.id !== project.groupId || project.hidden)
       .map((g) => ({
         label: `Mover para ${'· '.repeat(depthOf(props.groups, g.id))}${g.name}`,
+        icon: <Icon name="mover" />,
         onSelect: () => props.onArrangeProject(project.id, { kind: 'section', section: { hidden: false, groupId: g.id } })
       }))
     if (project.groupId && !project.hidden) {
       items.push({
         label: 'Tirar da categoria',
+        icon: <Icon name="mover" />,
         onSelect: () => props.onArrangeProject(project.id, { kind: 'section', section: { hidden: false, groupId: null } })
       })
     }
@@ -149,18 +152,19 @@ export function Sidebar(props: Props): React.JSX.Element {
   const groupMenuItems = (group: ProjectGroup): MenuItem[] => {
     const nested = Boolean(group.parentId && props.groups.some((g) => g.id === group.parentId))
     return [
-      { label: 'Nova subcategoria', onSelect: () => setCreatingIn({ parentId: group.id }) },
-      { label: 'Renomear', onSelect: () => setRenameGroup((r) => ({ id: group.id, n: (r?.n ?? 0) + 1 })) },
+      { label: 'Nova subcategoria', icon: <Icon name="novaCategoria" />, onSelect: () => setCreatingIn({ parentId: group.id }) },
+      { label: 'Renomear', icon: <Icon name="editar" />, onSelect: () => setRenameGroup((r) => ({ id: group.id, n: (r?.n ?? 0) + 1 })) },
       'separator',
-      { label: 'Mover para cima', onSelect: () => props.onGroupAction({ kind: 'move', id: group.id, delta: -1 }) },
-      { label: 'Mover para baixo', onSelect: () => props.onGroupAction({ kind: 'move', id: group.id, delta: 1 }) },
-      ...(nested ? [{ label: 'Tirar da categoria de cima', onSelect: () => props.onGroupAction({ kind: 'nest', id: group.id, parentId: null }) }] : []),
+      { label: 'Mover para cima', icon: <Icon name="setaCima" />, onSelect: () => props.onGroupAction({ kind: 'move', id: group.id, delta: -1 }) },
+      { label: 'Mover para baixo', icon: <Icon name="setaBaixo" />, onSelect: () => props.onGroupAction({ kind: 'move', id: group.id, delta: 1 }) },
+      ...(nested ? [{ label: 'Tirar da categoria de cima', icon: <Icon name="mover" />, onSelect: () => props.onGroupAction({ kind: 'nest', id: group.id, parentId: null }) }] : []),
       {
         label: group.hidden && !nested ? 'Mostrar categoria' : 'Ocultar categoria',
+        icon: <Icon name={group.hidden && !nested ? 'visualizar' : 'ocultar'} />,
         onSelect: () => props.onGroupAction({ kind: 'hide', id: group.id, hidden: !(group.hidden && !nested) })
       },
       'separator',
-      { label: 'Excluir categoria', danger: true, onSelect: () => props.onGroupAction({ kind: 'remove', id: group.id }) }
+      { label: 'Excluir categoria', icon: <Icon name="excluir" />, danger: true, onSelect: () => props.onGroupAction({ kind: 'remove', id: group.id }) }
     ]
   }
 
@@ -191,24 +195,29 @@ export function Sidebar(props: Props): React.JSX.Element {
     )
 
   const projectMenu = (project: Project): MenuItem[] => {
-    const rename: MenuItem = { label: 'Renomear', onSelect: () => setRenameProject((r) => ({ id: project.id, n: (r?.n ?? 0) + 1 })) }
-    const copy: MenuItem = { label: 'Copiar caminho', onSelect: () => void copyPath(project.path) }
+    const rename: MenuItem = {
+      label: 'Renomear',
+      icon: <Icon name="editar" />,
+      onSelect: () => setRenameProject((r) => ({ id: project.id, n: (r?.n ?? 0) + 1 }))
+    }
+    const copy: MenuItem = { label: 'Copiar caminho', icon: <Icon name="copiar" />, onSelect: () => void copyPath(project.path) }
     const top: MenuItem[] = props.missing.has(project.id)
-      ? [{ label: 'Localizar pasta…', onSelect: () => props.onRelocate(project) }, 'separator', rename, copy]
+      ? [{ label: 'Localizar pasta…', icon: <Icon name="buscar" />, onSelect: () => props.onRelocate(project) }, 'separator', rename, copy]
       : [
-          { label: 'Nova aba Claude', onSelect: () => props.onNewTab(project, 'claude') },
-          { label: 'Nova aba Codex', onSelect: () => props.onNewTab(project, 'codex') },
-          { label: 'Novo terminal', onSelect: () => props.onNewTab(project, 'shell') },
+          { label: 'Nova aba Claude', icon: <AgentIcon kind="claude" />, onSelect: () => props.onNewTab(project, 'claude') },
+          { label: 'Nova aba Codex', icon: <AgentIcon kind="codex" />, onSelect: () => props.onNewTab(project, 'codex') },
+          { label: 'Novo terminal', icon: <Icon name="terminal" />, onSelect: () => props.onNewTab(project, 'shell') },
           'separator',
           rename,
           {
             label: 'Atualizar ícone',
+            icon: <Icon name="atualizar" />,
             onSelect: () =>
               void window.kora
                 .refreshProjectIcon(project.id)
                 .then(() => setIconVersion((v) => ({ ...v, [project.id]: (v[project.id] ?? 0) + 1 })))
           },
-          { label: 'Abrir no Explorer', onSelect: () => void window.kora.revealInExplorer(project.id, '') },
+          { label: 'Abrir no Explorer', icon: <Icon name="pastaAberta" />, onSelect: () => void window.kora.revealInExplorer(project.id, '') },
           copy
         ]
     return [
@@ -216,6 +225,7 @@ export function Sidebar(props: Props): React.JSX.Element {
       'separator',
       {
         label: project.hidden ? 'Mover para Ativos' : 'Ocultar',
+        icon: <Icon name={project.hidden ? 'visualizar' : 'ocultar'} />,
         onSelect: () =>
           props.onArrangeProject(project.id, {
             kind: 'section',
@@ -224,7 +234,7 @@ export function Sidebar(props: Props): React.JSX.Element {
       },
       ...moveTargets(project),
       'separator',
-      { label: 'Remover da lista', danger: true, onSelect: () => props.onRemove(project) }
+      { label: 'Remover da lista', icon: <Icon name="excluir" />, danger: true, onSelect: () => props.onRemove(project) }
     ]
   }
 

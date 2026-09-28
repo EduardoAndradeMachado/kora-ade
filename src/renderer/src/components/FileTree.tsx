@@ -289,39 +289,39 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
   const menuItems = (target: Target): MenuItem[] => {
     const folder = target === null ? '' : target.isDir ? target.path : parentOf(target.path)
     const creation: MenuItem[] = [
-      { label: 'Novo arquivo', onSelect: () => startCreating(folder, 'file') },
-      { label: 'Nova pasta', onSelect: () => startCreating(folder, 'dir') }
+      { label: 'Novo arquivo', icon: <Icon name="novoArquivo" />, onSelect: () => startCreating(folder, 'file') },
+      { label: 'Nova pasta', icon: <Icon name="novoProjeto" />, onSelect: () => startCreating(folder, 'dir') }
     ]
     if (target === null) {
-      return [...creation, 'separator', { label: 'Abrir pasta do projeto no Explorer', onSelect: () => act(() => window.kora.revealInExplorer(projectId, '')) }]
+      return [...creation, 'separator', { label: 'Abrir pasta do projeto no Explorer', icon: <Icon name="pastaAberta" />, onSelect: () => act(() => window.kora.revealInExplorer(projectId, '')) }]
     }
     const copy: MenuItem[] = [
-      { label: 'Copiar caminho', onSelect: () => act(() => copyPath(absolute(target.path))) },
-      { label: 'Copiar caminho relativo', onSelect: () => act(() => copyPath(target.path)) }
+      { label: 'Copiar caminho', icon: <Icon name="copiar" />, onSelect: () => act(() => copyPath(absolute(target.path))) },
+      { label: 'Copiar caminho relativo', icon: <Icon name="copiar" />, onSelect: () => act(() => copyPath(target.path)) }
     ]
     if (target.isDir) {
       return [
         ...creation,
         'separator',
-        { label: 'Abrir no Explorer', onSelect: () => act(() => window.kora.revealInExplorer(projectId, target.path), target.path) },
-        { label: 'Renomear', onSelect: () => setRenaming(target.path) },
+        { label: 'Abrir no Explorer', icon: <Icon name="pastaAberta" />, onSelect: () => act(() => window.kora.revealInExplorer(projectId, target.path), target.path) },
+        { label: 'Renomear', icon: <Icon name="editar" />, onSelect: () => setRenaming(target.path) },
         ...copy,
         'separator',
-        { label: 'Excluir', danger: true, onSelect: () => act(() => trash(target), target.path) }
+        { label: 'Excluir', icon: <Icon name="excluir" />, danger: true, onSelect: () => act(() => trash(target), target.path) }
       ]
     }
     return [
-      { label: 'Abrir', onSelect: () => onOpenFile(target.path) },
-      { label: 'Abrir no navegador padrão', onSelect: () => act(() => window.kora.openInBrowser(projectId, target.path), target.path) },
-      { label: 'Abrir no programa padrão', onSelect: () => act(() => window.kora.openFile(projectId, target.path), target.path) },
-      { label: 'Mostrar no Explorer', onSelect: () => act(() => window.kora.revealInExplorer(projectId, target.path), target.path) },
-      { label: 'Renomear', onSelect: () => setRenaming(target.path) },
+      { label: 'Abrir', icon: <Icon name="arquivo" />, onSelect: () => onOpenFile(target.path) },
+      { label: 'Abrir no navegador padrão', icon: <Icon name="navegador" />, onSelect: () => act(() => window.kora.openInBrowser(projectId, target.path), target.path) },
+      { label: 'Abrir no programa padrão', icon: <Icon name="externo" />, onSelect: () => act(() => window.kora.openFile(projectId, target.path), target.path) },
+      { label: 'Mostrar no Explorer', icon: <Icon name="pastaAberta" />, onSelect: () => act(() => window.kora.revealInExplorer(projectId, target.path), target.path) },
+      { label: 'Renomear', icon: <Icon name="editar" />, onSelect: () => setRenaming(target.path) },
       'separator',
       ...creation,
       'separator',
       ...copy,
       'separator',
-      { label: 'Excluir', danger: true, onSelect: () => act(() => trash(target), target.path) }
+      { label: 'Excluir', icon: <Icon name="excluir" />, danger: true, onSelect: () => act(() => trash(target), target.path) }
     ]
   }
 

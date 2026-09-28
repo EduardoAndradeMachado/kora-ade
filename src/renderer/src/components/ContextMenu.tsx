@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { cn } from '@/lib/utils'
 
-export type MenuItem = { label: string; onSelect(): void; danger?: boolean } | 'separator'
+export type MenuItem = { label: string; onSelect(): void; danger?: boolean; icon?: React.ReactNode } | 'separator'
 
 interface Props {
   x: number
@@ -13,6 +14,7 @@ interface Props {
 export function ContextMenu({ x, y, items, onClose }: Props): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ x, y })
+  const withIcons = items.some((item) => item !== 'separator' && item.icon)
 
   // Mantém o menu inteiro dentro da janela quando o clique é perto da borda.
   useLayoutEffect(() => {
@@ -56,12 +58,17 @@ export function ContextMenu({ x, y, items, onClose }: Props): React.JSX.Element 
               onClose()
               item.onSelect()
             }}
-            className={
-              item.danger
-                ? 'block w-full rounded-md px-2 py-1 text-left text-xs text-destructive hover:bg-secondary'
-                : 'block w-full rounded-md px-2 py-1 text-left text-xs hover:bg-secondary'
-            }
+            className={cn(
+              'w-full rounded-md px-2 py-1 text-left text-xs hover:bg-secondary',
+              withIcons ? 'flex items-center gap-2 hover:[--icon-accent-idle:var(--icon-accent)]' : 'block',
+              item.danger && 'text-destructive'
+            )}
           >
+            {withIcons && (
+              <span aria-hidden="true" className={cn('flex size-4 shrink-0 items-center justify-center', !item.danger && 'text-muted-foreground')}>
+                {item.icon}
+              </span>
+            )}
             {item.label}
           </button>
         )

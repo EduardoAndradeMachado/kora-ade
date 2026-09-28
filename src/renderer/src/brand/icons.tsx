@@ -75,6 +75,13 @@ const BRAND = {
     </>
   ),
   retomar: (a) => <path d="M8 5.5v13l10.5-6.5z" fill={a} stroke={a} />,
+  pausar: (a) => (
+    <>
+      <rect x="7" y="5.5" width="3.5" height="13" rx="1" fill={a} stroke={a} />
+      <rect x="13.5" y="5.5" width="3.5" height="13" rx="1" fill={a} stroke={a} />
+    </>
+  ),
+  parar: (a) => <rect x="6.5" y="6.5" width="11" height="11" rx="2" fill={a} stroke={a} />,
   painel: (a) => (
     <>
       <path d="M15 4h3a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h-3z" fill={a} fillOpacity=".35" stroke="none" />
@@ -104,7 +111,20 @@ const BRAND = {
       <path d="M17.5 11v7M14 14.5h7" stroke={a} />
     </>
   ),
+  mover: (a) => (
+    <>
+      <path d={FOLDER} />
+      <path d="M8.5 13.5h7M12.5 10.5l3 3-3 3" stroke={a} />
+    </>
+  ),
   // Arquivos: a folha do "arquivo" com um detalhe âmbar que diz o tipo.
+  novoArquivo: (a) => (
+    <>
+      <path d={PAGE} />
+      <path d="M14 3v5h5" />
+      <path d="M12 11.5v6M9 14.5h6" stroke={a} />
+    </>
+  ),
   codigo: (a) => (
     <>
       <path d={PAGE} />
@@ -140,11 +160,14 @@ const BRAND = {
       <rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2" />
     </>
   ),
-  excluir: (a) => (
+  excluir: () => (
     <>
-      <path d="M4 6.5h16M9.5 6.5V4.5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2" />
-      <path d="M6 6.5l.9 12.6A2 2 0 0 0 8.9 21h6.2a2 2 0 0 0 2-1.9L18 6.5" />
-      <path d="M10 10.5v6.5M14 10.5v6.5" stroke={a} />
+      <path d="M6 6.5l.9 12.6A2 2 0 0 0 8.9 21h6.2a2 2 0 0 0 2-1.9L18 6.5Z" fill="currentColor" fillOpacity={0.2} />
+      <path d="M10 10.5v6.5M14 10.5v6.5" />
+      <g className="origin-[4px_6.5px] transition-transform duration-150 [button:hover_&]:-rotate-[18deg] motion-reduce:transition-none">
+        <path d="M9.5 6.5V4.5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2Z" fill="currentColor" fillOpacity={0.2} />
+        <path d="M4 6.5h16" />
+      </g>
     </>
   ),
   atualizar: (a) => (
@@ -174,10 +197,23 @@ const BRAND = {
       <circle cx="12" cy="12" r="2.6" fill={a} stroke={a} />
     </>
   ),
+  ocultar: (a) => (
+    <>
+      <path d="M9.9 5.8A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.4 3.2M6.5 7.3C3.9 9 2.5 12 2.5 12S6 18.5 12 18.5a9 9 0 0 0 4.3-1.1" />
+      <path d="M4 4l16 16" stroke={a} />
+    </>
+  ),
   externo: (a) => (
     <>
       <path d="M18 13.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4.5" />
       <path d="M14 4h6v6M20 4l-9 9" stroke={a} />
+    </>
+  ),
+  navegador: (a) => (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17" />
+      <path d="M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5S9.6 5.8 12 3.5Z" stroke={a} />
     </>
   ),
   temaClaro: (a) => (
@@ -282,7 +318,7 @@ export function Icon({ name, active = false, className }: Props): React.JSX.Elem
       strokeLinejoin="round"
       aria-hidden="true"
       data-icon={name}
-      className={cn('size-4 shrink-0', className)}
+      className={cn('size-4 shrink-0', name === 'excluir' && 'overflow-visible text-destructive', className)}
     >
       {BRAND[name](active ? 'var(--icon-accent)' : 'var(--icon-accent-idle)')}
     </svg>
