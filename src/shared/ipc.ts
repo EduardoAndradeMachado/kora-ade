@@ -93,6 +93,8 @@ export interface KoraApi {
   relocateProject(id: string): Promise<KoraState>
   // Nome mostrado no Kora; vazio volta ao nome da pasta, que nunca é renomeada.
   renameProject(id: string, name: string): Promise<KoraState>
+  // Pasta recolhida ou expandida na lateral, lembrada entre aberturas do app.
+  setProjectCollapsed(id: string, collapsed: boolean): Promise<KoraState>
   // Categorias e posição de cada projeto na lateral; o main confere e devolve o estado salvo.
   saveLayout(layout: {
     groups: ProjectGroup[]

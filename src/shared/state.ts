@@ -7,7 +7,9 @@ export const ProjectSchema = z.object({
   path: z.string().min(1),
   // Oculto e categoria só mudam onde o projeto aparece na lateral; abas e sessões dele seguem iguais.
   hidden: z.boolean().optional(),
-  groupId: z.string().min(1).optional()
+  groupId: z.string().min(1).optional(),
+  // Pasta recolhida na lateral (abas escondidas); volta assim ao reabrir o app.
+  collapsed: z.boolean().optional()
 })
 
 export const GROUP_NAME_MAX = 60

@@ -31,6 +31,7 @@ const api: KoraApi = {
   missingProjects: () => ipcRenderer.invoke('project:missing'),
   relocateProject: (id) => ipcRenderer.invoke('project:relocate', id),
   renameProject: (id, name) => ipcRenderer.invoke('project:rename', id, name),
+  setProjectCollapsed: (id, collapsed) => ipcRenderer.invoke('project:collapse', id, collapsed),
   saveLayout: (layout) => ipcRenderer.invoke('project:layout', layout),
 
   listDir: (projectId, rel) => ipcRenderer.invoke('fs:list', projectId, rel),

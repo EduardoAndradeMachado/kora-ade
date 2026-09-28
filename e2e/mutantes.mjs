@@ -875,6 +875,22 @@ const MUTANTS = [
     bug: 'Limpar log apaga direto, sem confirmação',
     find: 'onClick={() => setConfirmingClear(true)}',
     replace: 'onClick={() => run(async () => (await support.clear(), null))}'
+  },
+  {
+    id: 'M82',
+    grep: 'R82 ',
+    file: 'src/shared/state.ts',
+    bug: 'o estado salvo perde o "recolhido" ao abrir o app (volta tudo expandido)',
+    find: '  collapsed: z.boolean().optional()\n})\n\nexport const GROUP_NAME_MAX',
+    replace: '})\n\nexport const GROUP_NAME_MAX'
+  },
+  {
+    id: 'M82b',
+    grep: 'R71 ',
+    file: 'src/renderer/src/components/Sidebar.tsx',
+    bug: '+ numa pasta recolhida não abre a pasta para mostrar a aba nova',
+    find: '    if (project.collapsed) props.onSetProjectCollapsed(project.id, false)\n',
+    replace: ''
   }
 ]
 

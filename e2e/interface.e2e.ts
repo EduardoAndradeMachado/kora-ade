@@ -76,6 +76,31 @@ test('R2 várias abas por projeto aparecem embaixo do projeto na lateral; projet
   await expect(groups.nth(0).locator('div.ml-5')).toHaveCount(3)
 })
 
+test('R82 pasta recolhida na lateral continua recolhida ao reabrir o app (mesmo depois de uma queda); expandida continua expandida', async ({ kora }) => {
+  const env = kora.env()
+  const first = await kora.launch(env)
+  await newTab(first.page, 'Terminal')
+  await newTab(first.page, 'Terminal')
+  await waitFor(() => readState(env).tabs.length === 2, 'duas abas salvas')
+  const folder = (page: import('@playwright/test').Page) => page.locator('aside nav > div').first()
+
+  await folder(first.page).getByTitle('Recolher').click()
+  await expect(folder(first.page).locator('div.ml-5')).toHaveCount(0)
+  await waitFor(() => readState(env).projects[0]?.collapsed === true, 'recolhido gravado na hora')
+  await first.killHard()
+
+  const second = await kora.launch(env)
+  await expect(folder(second.page).locator('span.tabular-nums')).toHaveText('2')
+  await expect(folder(second.page).locator('div.ml-5')).toHaveCount(0)
+  await folder(second.page).getByTitle('Expandir').click()
+  await expect(folder(second.page).locator('div.ml-5')).toHaveCount(2)
+  await second.closeWindow()
+
+  const third = await kora.launch(env)
+  await expect(folder(third.page).locator('div.ml-5')).toHaveCount(2)
+  await expect(folder(third.page).getByTitle('Recolher')).toBeVisible()
+})
+
 test('R11 painel direito: nome do projeto no topo e abas Arquivos | Git | Sessões abaixo', async ({ kora }) => {
   const run = await kora.launch(kora.env())
   const panel = rightPanel(run.page)

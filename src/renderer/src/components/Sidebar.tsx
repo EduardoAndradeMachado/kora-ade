@@ -44,6 +44,7 @@ interface Props {
   onAdd(): void
   onRemove(project: Project): void
   onRenameProject(id: string, name: string): void
+  onSetProjectCollapsed(id: string, collapsed: boolean): void
   // Projetos cuja pasta não existe mais: só dá para localizar a pasta nova, renomear, organizar ou remover.
   missing: ReadonlySet<string>
   onRelocate(project: Project): void
@@ -83,7 +84,6 @@ function readHiddenOpen(): boolean {
 }
 
 export function Sidebar(props: Props): React.JSX.Element {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [menu, setMenu] = useState<{ x: number; y: number; project: Project } | null>(null)
   const [iconVersion, setIconVersion] = useState<Record<string, number>>({})
   const [themeMenu, setThemeMenu] = useState<{ x: number; y: number } | null>(null)
@@ -228,26 +228,16 @@ export function Sidebar(props: Props): React.JSX.Element {
     ]
   }
 
-  const toggle = (id: string): void =>
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  const toggle = (project: Project): void => props.onSetProjectCollapsed(project.id, !project.collapsed)
 
-  const expand = (id: string): void =>
-    setCollapsed((prev) => {
-      if (!prev.has(id)) return prev
-      const next = new Set(prev)
-      next.delete(id)
-      return next
-    })
+  const expand = (project: Project): void => {
+    if (project.collapsed) props.onSetProjectCollapsed(project.id, false)
+  }
 
   const renderProject = (project: Project, depth = 0): React.JSX.Element => {
     const selected = project.id === props.selectedId
     const tabs = props.tabs[project.id] ?? []
-    const open = !collapsed.has(project.id)
+    const open = !project.collapsed
     const lost = props.missing.has(project.id)
     return (
       <div key={project.id} className="mb-0.5" style={depth ? { marginLeft: depth * 12 } : undefined}>
@@ -258,7 +248,7 @@ export function Sidebar(props: Props): React.JSX.Element {
           // Com abas, o nome faz o mesmo que a setinha; sem abas, selecionar já mostra a tela para abrir Claude, Codex ou Terminal.
           onClick={() => {
             props.onSelectProject(project.id)
-            if (tabs.length > 0) toggle(project.id)
+            if (tabs.length > 0) toggle(project)
           }}
           onContextMenu={(e) => {
             e.preventDefault()
@@ -276,7 +266,7 @@ export function Sidebar(props: Props): React.JSX.Element {
             title={open ? 'Recolher' : 'Expandir'}
             onClick={(e) => {
               e.stopPropagation()
-              toggle(project.id)
+              toggle(project)
             }}
             className={cn(iconButton, tabs.length === 0 && 'invisible')}
           >
@@ -310,7 +300,7 @@ export function Sidebar(props: Props): React.JSX.Element {
             >
               <NewTabMenu
                 onChoose={(choice) => {
-                  expand(project.id)
+                  expand(project)
                   props.onNewTab(project, choice)
                 }}
                 className={iconButton}

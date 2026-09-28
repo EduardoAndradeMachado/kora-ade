@@ -8,6 +8,7 @@ import {
   namedSessions,
   relocateProject,
   renameProject,
+  setProjectCollapsed,
   setTabAgent
 } from '../src/main/projects'
 import { emptyState, type KoraState } from '../src/shared/state'
@@ -39,6 +40,31 @@ describe('nome do projeto mostrado no Kora', () => {
   it('corta nome longo demais e recusa projeto que não existe', () => {
     expect(renameProject(named, 'a', 'x'.repeat(200)).projects[0]!.name).toHaveLength(60)
     expect(() => renameProject(named, 'zzz', 'Nome')).toThrow()
+  })
+})
+
+describe('pasta recolhida na lateral', () => {
+  it('recolher grava no projeto e sobrevive a reorganizar a lateral; expandir limpa', () => {
+    const folded = setProjectCollapsed(state, 'b', true)
+    expect(folded.projects.find((p) => p.id === 'b')).toEqual({ id: 'b', name: 'b', path: 'C:/b', groupId: 'g1', collapsed: true })
+    expect(folded.projects.filter((p) => p.id !== 'b')).toEqual(state.projects.filter((p) => p.id !== 'b'))
+
+    const moved = applyLayout(folded, {
+      groups: state.groups,
+      placements: [
+        { id: 'b', hidden: false, groupId: null },
+        { id: 'a', hidden: false, groupId: null },
+        { id: 'c', hidden: true, groupId: null }
+      ]
+    })
+    expect(moved.projects[0]).toMatchObject({ id: 'b', collapsed: true })
+
+    expect(setProjectCollapsed(moved, 'b', false).projects[0]).not.toHaveProperty('collapsed')
+  })
+
+  it('sem mudança devolve o mesmo estado; projeto que não existe é recusado', () => {
+    expect(setProjectCollapsed(state, 'a', false)).toBe(state)
+    expect(() => setProjectCollapsed(state, 'zzz', true)).toThrow()
   })
 })
 

@@ -707,6 +707,10 @@ export function App(): React.JSX.Element {
     window.kora.renameProject(id, name).then(setState, (err: unknown) => setError(ipcErrorMessage(err)))
   }
 
+  const setProjectCollapsed = (id: string, collapsed: boolean): void => {
+    window.kora.setProjectCollapsed(id, collapsed).then(setState, (err: unknown) => setError(ipcErrorMessage(err)))
+  }
+
   const relocateProject = (project: Project): void => {
     window.kora.relocateProject(project.id).then(
       (next) => {
@@ -821,6 +825,7 @@ export function App(): React.JSX.Element {
         onAdd={() => void addProject()}
         onRemove={(p) => void removeProject(p)}
         onRenameProject={renameProject}
+        onSetProjectCollapsed={setProjectCollapsed}
         missing={missing}
         onRelocate={relocateProject}
         onArrangeProject={arrangeProject}
