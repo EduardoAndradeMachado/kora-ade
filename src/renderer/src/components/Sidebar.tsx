@@ -44,6 +44,9 @@ interface Props {
   onAdd(): void
   onRemove(project: Project): void
   onRenameProject(id: string, name: string): void
+  // Projetos cuja pasta não existe mais: só dá para localizar a pasta nova, renomear, organizar ou remover.
+  missing: ReadonlySet<string>
+  onRelocate(project: Project): void
   onArrangeProject(draggedId: string, drop: ProjectDrop): void
   onReorderTab(projectId: string, fromId: string, toId: string, place: Place): void
   theme: ThemePreference
@@ -187,34 +190,43 @@ export function Sidebar(props: Props): React.JSX.Element {
       </div>
     )
 
-  const projectMenu = (project: Project): MenuItem[] => [
-    { label: 'Nova aba Claude', onSelect: () => props.onNewTab(project, 'claude') },
-    { label: 'Nova aba Codex', onSelect: () => props.onNewTab(project, 'codex') },
-    { label: 'Novo terminal', onSelect: () => props.onNewTab(project, 'shell') },
-    'separator',
-    { label: 'Renomear', onSelect: () => setRenameProject((r) => ({ id: project.id, n: (r?.n ?? 0) + 1 })) },
-    {
-      label: 'Atualizar ícone',
-      onSelect: () =>
-        void window.kora
-          .refreshProjectIcon(project.id)
-          .then(() => setIconVersion((v) => ({ ...v, [project.id]: (v[project.id] ?? 0) + 1 })))
-    },
-    { label: 'Abrir no Explorer', onSelect: () => void window.kora.revealInExplorer(project.id, '') },
-    { label: 'Copiar caminho', onSelect: () => void copyPath(project.path) },
-    'separator',
-    {
-      label: project.hidden ? 'Mover para Ativos' : 'Ocultar',
-      onSelect: () =>
-        props.onArrangeProject(project.id, {
-          kind: 'section',
-          section: project.hidden ? { hidden: false, groupId: null } : { hidden: true }
-        })
-    },
-    ...moveTargets(project),
-    'separator',
-    { label: 'Remover da lista', danger: true, onSelect: () => props.onRemove(project) }
-  ]
+  const projectMenu = (project: Project): MenuItem[] => {
+    const rename: MenuItem = { label: 'Renomear', onSelect: () => setRenameProject((r) => ({ id: project.id, n: (r?.n ?? 0) + 1 })) }
+    const copy: MenuItem = { label: 'Copiar caminho', onSelect: () => void copyPath(project.path) }
+    const top: MenuItem[] = props.missing.has(project.id)
+      ? [{ label: 'Localizar pasta…', onSelect: () => props.onRelocate(project) }, 'separator', rename, copy]
+      : [
+          { label: 'Nova aba Claude', onSelect: () => props.onNewTab(project, 'claude') },
+          { label: 'Nova aba Codex', onSelect: () => props.onNewTab(project, 'codex') },
+          { label: 'Novo terminal', onSelect: () => props.onNewTab(project, 'shell') },
+          'separator',
+          rename,
+          {
+            label: 'Atualizar ícone',
+            onSelect: () =>
+              void window.kora
+                .refreshProjectIcon(project.id)
+                .then(() => setIconVersion((v) => ({ ...v, [project.id]: (v[project.id] ?? 0) + 1 })))
+          },
+          { label: 'Abrir no Explorer', onSelect: () => void window.kora.revealInExplorer(project.id, '') },
+          copy
+        ]
+    return [
+      ...top,
+      'separator',
+      {
+        label: project.hidden ? 'Mover para Ativos' : 'Ocultar',
+        onSelect: () =>
+          props.onArrangeProject(project.id, {
+            kind: 'section',
+            section: project.hidden ? { hidden: false, groupId: null } : { hidden: true }
+          })
+      },
+      ...moveTargets(project),
+      'separator',
+      { label: 'Remover da lista', danger: true, onSelect: () => props.onRemove(project) }
+    ]
+  }
 
   const toggle = (id: string): void =>
     setCollapsed((prev) => {
@@ -236,6 +248,7 @@ export function Sidebar(props: Props): React.JSX.Element {
     const selected = project.id === props.selectedId
     const tabs = props.tabs[project.id] ?? []
     const open = !collapsed.has(project.id)
+    const lost = props.missing.has(project.id)
     return (
       <div key={project.id} className="mb-0.5" style={depth ? { marginLeft: depth * 12 } : undefined}>
         <div
@@ -269,35 +282,42 @@ export function Sidebar(props: Props): React.JSX.Element {
           >
             <Icon name="expandir" className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
           </button>
-          <ProjectAvatar projectId={project.id} version={iconVersion[project.id] ?? 0} open={open && tabs.length > 0} />
+          <ProjectAvatar key={project.path} projectId={project.id} version={iconVersion[project.id] ?? 0} open={open && tabs.length > 0} />
           <EditableTitle
             value={project.name}
             editable
-            tooltip={`${project.path} — duplo clique para renomear só no Kora`}
-            className="flex-1 font-medium"
+            tooltip={lost ? `Pasta não encontrada: ${project.path}` : `${project.path} — duplo clique para renomear só no Kora`}
+            className={cn('flex-1 font-medium', lost && 'text-muted-foreground')}
             editRequest={renameProject?.id === project.id ? renameProject.n : undefined}
             onCommit={(name) => props.onRenameProject(project.id, name)}
           />
+          {lost && (
+            <span data-missing-folder title="Pasta não encontrada" className="text-[var(--brand-amber)]">
+              <Icon name="alerta" className="size-3.5" />
+            </span>
+          )}
           {!open && tabs.length > 0 && (
             <span className="text-[11px] tabular-nums text-muted-foreground group-hover:hidden">
               {tabs.length}
             </span>
           )}
           {/* O menu do + é um portal, mas no React os cliques dele sobem até a linha, que recolhe a pasta. */}
-          <div
-            className="hidden items-center gap-0.5 group-hover:flex"
-            onClick={(e) => e.stopPropagation()}
-            onContextMenu={(e) => e.stopPropagation()}
-          >
-            <NewTabMenu
-              onChoose={(choice) => {
-                expand(project.id)
-                props.onNewTab(project, choice)
-              }}
-              className={iconButton}
-              iconClassName="size-3.5"
-            />
-          </div>
+          {!lost && (
+            <div
+              className="hidden items-center gap-0.5 group-hover:flex"
+              onClick={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.stopPropagation()}
+            >
+              <NewTabMenu
+                onChoose={(choice) => {
+                  expand(project.id)
+                  props.onNewTab(project, choice)
+                }}
+                className={iconButton}
+                iconClassName="size-3.5"
+              />
+            </div>
+          )}
         </div>
 
         {open && (

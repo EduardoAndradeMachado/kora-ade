@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, shell, Tray } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { loadState, saveState } from './store'
-import { addProject, applyLayout, forgetSessionName, mergeTabs, namedSessions, removeProject, renameProject, setTabAgent } from './projects'
+import { addProject, applyLayout, forgetSessionName, mergeTabs, missingProjectIds, namedSessions, relocateProject, removeProject, renameProject, setTabAgent } from './projects'
 import { Terminals } from './terminals'
 import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from './files'
 import { AgentDetector, UNREADABLE } from './agent-detect'
@@ -92,7 +92,14 @@ const terminals = new Terminals({
   }
 })
 
-const watchers = new ProjectWatchers((projectId, change) => mainWindow?.webContents.send('fs:changed', projectId, change))
+// Apagar a pasta do projeto com o app aberto nem sempre derruba o watcher: às vezes só chegam os eventos
+// dos arquivos de dentro. Sem a raiz, o aviso vira "releia tudo", que faz a interface conferir as pastas.
+const watchers = new ProjectWatchers((projectId, change) => {
+  const project = state.projects.find((p) => p.id === projectId)
+  const gone = project !== undefined && !isDirectory(project.path)
+  if (gone) watchers.unwatch(projectId)
+  mainWindow?.webContents.send('fs:changed', projectId, gone ? { ...change, rescan: true } : change)
+})
 
 const agentDirs = {
   claudeSessions: join(homedir(), '.claude', 'sessions'),
@@ -332,6 +339,14 @@ function askRenderer(kind: CloseKind): void {
   mainWindow?.webContents.send('app:close-requested', kind)
 }
 
+const isDirectory = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 function projectRoot(id: string): string {
   const project = state.projects.find((p) => p.id === id)
   if (!project) throw new Error(`Projeto desconhecido: ${id}`)
@@ -389,6 +404,25 @@ function registerIpc(): void {
     for (const tab of state.tabs.filter((t) => t.projectId === id)) terminals.kill(tab.id)
     watchers.unwatch(id)
     return commit(removeProject(state, id))
+  })
+
+  ipcMain.handle('project:missing', () => missingProjectIds(state, isDirectory))
+
+  ipcMain.handle('project:relocate', async (_e, id: string) => {
+    const old = projectRoot(String(id))
+    let near = dirname(old)
+    while (!isDirectory(near) && dirname(near) !== near) near = dirname(near)
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Localizar a pasta do projeto',
+      defaultPath: isDirectory(near) ? near : undefined,
+      properties: ['openDirectory']
+    })
+    const path = result.filePaths[0]
+    if (result.canceled || !path) return state
+    const next = commit(relocateProject(state, String(id), path))
+    watchers.unwatch(String(id))
+    await projectIcons.refresh(String(id), path).catch(() => null)
+    return next
   })
 
   ipcMain.handle('project:rename', (_e, id: string, name: string) => commit(renameProject(state, String(id), String(name))))

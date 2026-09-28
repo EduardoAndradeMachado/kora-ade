@@ -85,6 +85,10 @@ export interface KoraApi {
   addProject(): Promise<KoraState>
   addProjectPath(path: string): Promise<KoraState>
   removeProject(id: string): Promise<KoraState>
+  // Projetos cuja pasta não existe mais (apagada, movida ou renomeada fora do Kora).
+  missingProjects(): Promise<string[]>
+  // Abre o seletor de pasta e aponta o projeto para ela; cancelar devolve o estado sem mudança.
+  relocateProject(id: string): Promise<KoraState>
   // Nome mostrado no Kora; vazio volta ao nome da pasta, que nunca é renomeada.
   renameProject(id: string, name: string): Promise<KoraState>
   // Categorias e posição de cada projeto na lateral; o main confere e devolve o estado salvo.

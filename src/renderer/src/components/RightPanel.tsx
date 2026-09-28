@@ -18,6 +18,7 @@ const VIEWS: { view: View; title: string; icon: IconName }[] = [
 
 interface Props {
   project: Project
+  missing: boolean
   // Conversas com aba aberta e o nome dado a essa aba (null: aba sem nome do usuário).
   openSessions: Map<string, string | null>
   onOpenFile(path: string): void
@@ -50,65 +51,73 @@ export function RightPanel(props: Props): React.JSX.Element {
         </button>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
-        {VIEWS.map(({ view: v, title, icon }) => (
-          <button
-            key={v}
-            type="button"
-            onClick={() => setView(v)}
-            className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-secondary',
-              view === v ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            <Icon name={icon} active={view === v} className="size-3.5" />
-            {title}
-          </button>
-        ))}
-      </div>
-      <div className="h-1.5 shrink-0" />
+      {props.missing ? (
+        <p data-missing-folder className="px-3 py-3 text-xs text-muted-foreground">
+          Sem a pasta do projeto não há arquivos, git nem sessões para mostrar.
+        </p>
+      ) : (
+        <>
+          <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
+            {VIEWS.map(({ view: v, title, icon }) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                className={cn(
+                  'flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-secondary',
+                  view === v ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <Icon name={icon} active={view === v} className="size-3.5" />
+                {title}
+              </button>
+            ))}
+          </div>
+          <div className="h-1.5 shrink-0" />
 
-      {view === 'files' && (
-        <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <FileTree
-            projectId={props.project.id}
-            projectPath={props.project.path}
-            reloadKey={reloadKey}
-            gitFiles={git.status?.isRepo ? git.status.files : []}
-            onOpenFile={props.onOpenFile}
-            onPathMoved={props.onPathMoved}
-            hasUnsavedUnder={props.hasUnsavedUnder}
-            reveal={props.reveal}
-          />
-        </div>
-      )}
-      {view === 'git' && (
-        <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <GitPanel
-            status={git.status}
-            branches={git.branches}
-            worktrees={git.worktrees}
-            loading={git.loading}
-            error={git.error}
-            onRefresh={git.refresh}
-            onCreateBranch={(name, checkout) => git.run(() => window.kora.gitCreateBranch(props.project.id, name, checkout))}
-            onCheckout={(name, remote) => git.run(() => window.kora.gitCheckout(props.project.id, name, remote))}
-            remote={git.remote}
-            onInit={() => git.run(() => window.kora.gitInit(props.project.id))}
-            onSetRemote={(url) => git.run(async () => void (await window.kora.gitSetRemote(props.project.id, url)))}
-            onOpenFile={props.onOpenFile}
-            onOpenWorktree={props.onOpenWorktree}
-          />
-        </div>
-      )}
-      {view === 'sessions' && (
-        <SessionsPanel
-          projectId={props.project.id}
-          reloadKey={reloadKey}
-          openSessions={props.openSessions}
-          onOpen={props.onOpenSession}
-          onPin={props.onPinSession}
-        />
+          {view === 'files' && (
+            <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+              <FileTree
+                projectId={props.project.id}
+                projectPath={props.project.path}
+                reloadKey={reloadKey}
+                gitFiles={git.status?.isRepo ? git.status.files : []}
+                onOpenFile={props.onOpenFile}
+                onPathMoved={props.onPathMoved}
+                hasUnsavedUnder={props.hasUnsavedUnder}
+                reveal={props.reveal}
+              />
+            </div>
+          )}
+          {view === 'git' && (
+            <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+              <GitPanel
+                status={git.status}
+                branches={git.branches}
+                worktrees={git.worktrees}
+                loading={git.loading}
+                error={git.error}
+                onRefresh={git.refresh}
+                onCreateBranch={(name, checkout) => git.run(() => window.kora.gitCreateBranch(props.project.id, name, checkout))}
+                onCheckout={(name, remote) => git.run(() => window.kora.gitCheckout(props.project.id, name, remote))}
+                remote={git.remote}
+                onInit={() => git.run(() => window.kora.gitInit(props.project.id))}
+                onSetRemote={(url) => git.run(async () => void (await window.kora.gitSetRemote(props.project.id, url)))}
+                onOpenFile={props.onOpenFile}
+                onOpenWorktree={props.onOpenWorktree}
+              />
+            </div>
+          )}
+          {view === 'sessions' && (
+            <SessionsPanel
+              projectId={props.project.id}
+              reloadKey={reloadKey}
+              openSessions={props.openSessions}
+              onOpen={props.onOpenSession}
+              onPin={props.onPinSession}
+            />
+          )}
+        </>
       )}
     </aside>
   )

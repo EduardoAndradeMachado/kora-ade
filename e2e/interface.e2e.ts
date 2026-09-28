@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync, readFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect } from './harness'
 import {
@@ -927,4 +927,76 @@ test('R77 renomear projeto (menu e duplo clique) muda só o nome na lateral, per
   await rename().press('Enter')
   await expect(row().locator('span.font-medium')).toHaveText('proj-teste')
   await waitFor(() => saved().name === 'proj-teste', 'nome da pasta de volta')
+})
+
+test('R78 pasta do projeto movida com o Kora fechado: lateral marca, tela pergunta, terminal não abre; Localizar pasta reaponta e mantém abas e categoria', async ({ kora }) => {
+  const env = kora.env()
+  writeFileSync(join(env.project, 'leia.txt'), 'oi')
+  const moved = join(env.root, 'proj-movido')
+  writeState(env, {
+    version: 2,
+    groups: [{ id: 'g1', name: 'Empresa A' }],
+    projects: [{ id: 'p1', name: 'proj-teste', path: env.project, groupId: 'g1' }],
+    tabs: [{ id: 't1', projectId: 'p1', title: 'Conversa antiga', titleLocked: true, agent: null }]
+  })
+  renameSync(env.project, moved)
+  const run = await kora.launch(env)
+  const page = run.page
+  const row = page.locator('aside nav [data-project-row]')
+  const main = page.locator('main')
+
+  await expect(row.locator('[data-missing-folder]')).toBeVisible()
+  await row.locator('span.font-medium').click()
+  await expect(main.getByText('A pasta de "proj-teste" não foi encontrada')).toBeVisible()
+  await expect(rightPanel(page).locator('[data-missing-folder]')).toBeVisible()
+  await expect(rightPanel(page).getByRole('button', { name: 'Arquivos', exact: true })).toHaveCount(0)
+
+  await newTab(page, 'Claude')
+  await page.waitForTimeout(1500)
+  expect(starts(env, 'claude')).toHaveLength(0)
+  await expect(main.getByText(/Pasta do projeto não existe|Error invoking/)).toHaveCount(0)
+
+  await row.click({ button: 'right' })
+  expect(await page.locator('body > div.fixed button').allTextContents()).toEqual([
+    'Localizar pasta…',
+    'Renomear',
+    'Copiar caminho',
+    'Ocultar',
+    'Tirar da categoria',
+    'Remover da lista'
+  ])
+  await page.keyboard.press('Escape')
+
+  await answerOpenDialog(run, moved)
+  await main.getByRole('button', { name: 'Localizar pasta…' }).click()
+  await waitFor(() => readState(env).projects[0]?.path === moved, 'projeto aponta para a pasta nova')
+  const saved = readState(env) as ReturnType<typeof readState> & { projects: { name: string; groupId?: string }[] }
+  expect(saved.projects[0]).toMatchObject({ id: 'p1', name: 'proj-movido', groupId: 'g1' })
+  expect(saved.tabs.map((t) => t.title)).toEqual(['Conversa antiga'])
+  await expect(row.locator('[data-missing-folder]')).toHaveCount(0)
+  await expect(row.locator('span.font-medium')).toHaveText('proj-movido')
+  await expect(main.getByText('não foi encontrada')).toHaveCount(0)
+  await expect(rightPanel(page).getByText('leia.txt')).toBeVisible()
+})
+
+test('R79 pasta do projeto apagada com o Kora aberto: a tela de pasta não encontrada aparece sozinha e Remover da lista tira o projeto', async ({ kora }) => {
+  const env = kora.env()
+  writeFileSync(join(env.project, 'leia.txt'), 'oi')
+  const run = await kora.launch(env)
+  const page = run.page
+  const row = page.locator('aside nav [data-project-row]')
+  await expect(rightPanel(page).getByText('leia.txt')).toBeVisible()
+
+  // Como o Explorer, tenta de novo: o Windows pode dar EBUSY por um instante enquanto o watcher solta a pasta.
+  rmSync(env.project, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
+  await expect(row.locator('[data-missing-folder]')).toBeVisible()
+  const main = page.locator('main')
+  await expect(main.getByText('A pasta de "proj-teste" não foi encontrada')).toBeVisible()
+
+  await main.getByRole('button', { name: 'Remover da lista' }).click()
+  const dialog = page.locator('[role=dialog]')
+  await expect(dialog).toContainText('A pasta não foi encontrada no computador')
+  await dialog.getByRole('button', { name: 'Remover da lista' }).click()
+  await waitFor(() => readState(env).projects.length === 0, 'projeto removido do estado')
+  await expect(row).toHaveCount(0)
 })

@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { applyLayout, forgetSessionName, mergeTabs, namedSessions, renameProject, setTabAgent } from '../src/main/projects'
+import { resolve } from 'node:path'
+import {
+  applyLayout,
+  forgetSessionName,
+  mergeTabs,
+  missingProjectIds,
+  namedSessions,
+  relocateProject,
+  renameProject,
+  setTabAgent
+} from '../src/main/projects'
 import { emptyState, type KoraState } from '../src/shared/state'
 
 const state: KoraState = {
@@ -29,6 +39,41 @@ describe('nome do projeto mostrado no Kora', () => {
   it('corta nome longo demais e recusa projeto que não existe', () => {
     expect(renameProject(named, 'a', 'x'.repeat(200)).projects[0]!.name).toHaveLength(60)
     expect(() => renameProject(named, 'zzz', 'Nome')).toThrow()
+  })
+})
+
+describe('pasta do projeto que sumiu', () => {
+  const base: KoraState = {
+    ...emptyState(),
+    groups: [{ id: 'g1', name: 'Empresa A' }],
+    projects: [
+      { id: 'a', name: 'site', path: 'C:/dev/site', groupId: 'g1' },
+      { id: 'b', name: 'Meu Apelido', path: 'C:/dev/api' },
+      { id: 'c', name: 'c', path: 'C:/dev/c' }
+    ],
+    tabs: [{ id: 't1', projectId: 'a', title: 'Claude', titleLocked: false, agent: null }]
+  }
+
+  it('lista só os projetos cuja pasta não é uma pasta existente', () => {
+    const existing = new Set(['C:/dev/site', 'C:/dev/c'])
+    expect(missingProjectIds(base, (path) => existing.has(path))).toEqual(['b'])
+  })
+
+  it('localizar aponta para a pasta nova e mantém id, categoria e abas; nome automático acompanha a pasta', () => {
+    const next = renameProject(base, 'a', '')
+    const moved = relocateProject(next, 'a', 'D:/novo/site-2026')
+    expect(moved.projects[0]).toEqual({ id: 'a', name: 'site-2026', path: resolve('D:/novo/site-2026'), groupId: 'g1' })
+    expect(moved.tabs).toEqual(base.tabs)
+    expect(moved.projects.slice(1)).toEqual(base.projects.slice(1))
+  })
+
+  it('nome dado pelo usuário continua depois de localizar', () => {
+    expect(relocateProject(base, 'b', 'D:/api-nova').projects[1]).toEqual({ id: 'b', name: 'Meu Apelido', path: resolve('D:/api-nova') })
+  })
+
+  it('recusa pasta que já é outro projeto da lista e projeto que não existe', () => {
+    expect(() => relocateProject(base, 'a', 'c:/DEV/c')).toThrow('"c"')
+    expect(() => relocateProject(base, 'zzz', 'D:/x')).toThrow()
   })
 })
 

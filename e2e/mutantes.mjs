@@ -795,6 +795,54 @@ const MUTANTS = [
     bug: 'lateral não mostra o nome devolvido pelo main',
     find: 'window.kora.renameProject(id, name).then(setState,',
     replace: 'window.kora.renameProject(id, name).then(() => {},'
+  },
+  {
+    id: 'M78',
+    grep: 'R78 ',
+    file: 'src/renderer/src/components/Sidebar.tsx',
+    bug: 'lateral não marca o projeto sem pasta',
+    find: '{lost && (',
+    replace: '{false && ('
+  },
+  {
+    id: 'M78b',
+    grep: 'R78 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'nova aba em projeto sem pasta tenta subir o terminal',
+    find: '    if (missing.has(project.id)) return setSelectedId(project.id)\n',
+    replace: ''
+  },
+  {
+    id: 'M78c',
+    grep: 'R78 ',
+    file: 'src/main/index.ts',
+    bug: 'Localizar pasta não salva o caminho novo',
+    find: 'const next = commit(relocateProject(state, String(id), path))',
+    replace: 'const next = relocateProject(state, String(id), path)'
+  },
+  {
+    id: 'M78d',
+    grep: 'R78 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'tela de pasta não encontrada nunca aparece',
+    find: '          {selected && missing.has(selected.id) && (',
+    replace: '          {false && selected && ('
+  },
+  {
+    id: 'M79',
+    grep: 'R79 ',
+    file: 'src/main/index.ts',
+    bug: 'main não percebe a pasta apagada com o app aberto',
+    find: 'const gone = project !== undefined && !isDirectory(project.path)',
+    replace: 'const gone = false'
+  },
+  {
+    id: 'M79b',
+    grep: 'R79 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'interface ignora o pedido de reler tudo e não confere as pastas',
+    find: 'change.rescan && checkMissing()',
+    replace: 'change.rescan && false'
   }
 ]
 

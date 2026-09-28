@@ -30,6 +30,23 @@ export function renameProject(state: KoraState, id: string, name: string): KoraS
   return { ...state, projects: state.projects.map((p) => (p.id === id ? { ...p, name: next } : p)) }
 }
 
+// A pasta foi movida ou renomeada fora do Kora: o projeto passa a apontar para o novo lugar e mantém abas,
+// categoria e nome dado pelo usuário. Nome que era só o da pasta antiga acompanha a pasta nova.
+export function relocateProject(state: KoraState, id: string, path: string): KoraState {
+  const project = state.projects.find((p) => p.id === id)
+  if (!project) throw new Error('Projeto não encontrado')
+  const other = state.projects.find((p) => p.id !== id && samePath(p.path, path))
+  if (other) throw new Error(`Essa pasta já está na lista como "${other.name}".`)
+  const autoName = project.name === (basename(project.path) || project.path)
+  const next = resolve(path)
+  const name = autoName ? basename(next) || next : project.name
+  return { ...state, projects: state.projects.map((p) => (p.id === id ? { ...p, path: next, name } : p)) }
+}
+
+export function missingProjectIds(state: KoraState, isDirectory: (path: string) => boolean): string[] {
+  return state.projects.filter((p) => !isDirectory(p.path)).map((p) => p.id)
+}
+
 export interface ProjectPlacement {
   id: string
   hidden: boolean

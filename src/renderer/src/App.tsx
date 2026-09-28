@@ -116,6 +116,25 @@ export function App(): React.JSX.Element {
   const [installing, setInstalling] = useState(false)
   const closeSettings = useCallback(() => setSettingsOpen(false), [])
   const [errorSummary, setErrorSummary] = useState<ErrorSummary | null>(null)
+  const [missing, setMissing] = useState<ReadonlySet<string>>(new Set())
+  const checkMissing = useCallback(() => {
+    window.kora.missingProjects().then(
+      (ids) => setMissing((prev) => (ids.length === prev.size && ids.every((id) => prev.has(id)) ? prev : new Set(ids))),
+      () => {}
+    )
+  }, [])
+  // A pasta some por fora do Kora: confere ao voltar para a janela, ao trocar de projeto e quando o main pede
+  // para reler tudo (é o que ele faz quando a pasta de um projeto observado deixa de existir).
+  useEffect(() => {
+    checkMissing()
+    window.addEventListener('focus', checkMissing)
+    const offFiles = window.kora.onFilesChanged((_projectId, change) => change.rescan && checkMissing())
+    return () => {
+      window.removeEventListener('focus', checkMissing)
+      offFiles()
+    }
+  }, [checkMissing])
+  useEffect(checkMissing, [selectedId, state?.projects, checkMissing])
   useEffect(() => {
     if (!settingsOpen) return
     setErrorSummary(null)
@@ -404,6 +423,7 @@ export function App(): React.JSX.Element {
   const pendingLaunch = useRef(new Map<string, { tab: TabRef; how: Launch }>())
 
   const launch = (projectId: string, tab: TabRef, how: Launch): void => {
+    if (missing.has(projectId)) return setSelectedId(projectId)
     pendingLaunch.current.set(tab.id, { tab, how })
     terminalBus.expect(tab.id)
     patchTerminal(tab.id, { live: true })
@@ -424,6 +444,7 @@ export function App(): React.JSX.Element {
   }
 
   const newTab = (project: Project, choice: NewTabChoice): void => {
+    if (missing.has(project.id)) return setSelectedId(project.id)
     const list = tabs[project.id] ?? []
     const sameKind = list.filter((t) => t.title.startsWith(DEFAULT_TITLE[choice])).length
     const title = sameKind ? `${DEFAULT_TITLE[choice]} ${sameKind + 1}` : DEFAULT_TITLE[choice]
@@ -686,6 +707,17 @@ export function App(): React.JSX.Element {
     window.kora.renameProject(id, name).then(setState, (err: unknown) => setError(ipcErrorMessage(err)))
   }
 
+  const relocateProject = (project: Project): void => {
+    window.kora.relocateProject(project.id).then(
+      (next) => {
+        setState(next)
+        setError(null)
+        checkMissing()
+      },
+      (err: unknown) => setError(ipcErrorMessage(err))
+    )
+  }
+
   const removeProject = async (project: Project): Promise<void> => {
     const open = tabs[project.id] ?? []
     const running = open.filter((t) => t.kind === 'terminal' && t.live).length
@@ -693,7 +725,11 @@ export function App(): React.JSX.Element {
       title: `Remover "${project.name}" da lista?`,
       message: (
         <>
-          <p>A pasta e os arquivos continuam no computador; só o vínculo com o Kora é desfeito.</p>
+          <p>
+            {missing.has(project.id)
+              ? 'A pasta não foi encontrada no computador; só o vínculo com o Kora é desfeito.'
+              : 'A pasta e os arquivos continuam no computador; só o vínculo com o Kora é desfeito.'}
+          </p>
           {running > 0 && (
             <p className="mt-2 text-foreground">
               {running === 1 ? '1 terminal aberto será fechado.' : `${running} terminais abertos serão fechados.`}
@@ -785,6 +821,8 @@ export function App(): React.JSX.Element {
         onAdd={() => void addProject()}
         onRemove={(p) => void removeProject(p)}
         onRenameProject={renameProject}
+        missing={missing}
+        onRelocate={relocateProject}
         onArrangeProject={arrangeProject}
         zoom={state.settings.zoom}
         terminalFontSize={state.settings.terminalFontSize}
@@ -823,7 +861,7 @@ export function App(): React.JSX.Element {
         <div className="relative flex-1 bg-canvas">
           {Object.entries(tabs).flatMap(([projectId, list]) =>
             list.map((tab) => {
-              const visible = projectId === selectedId && activeTab[projectId] === tab.id
+              const visible = projectId === selectedId && activeTab[projectId] === tab.id && !missing.has(projectId)
               if (tab.kind === 'file') {
                 if (tab.viewer === 'pdf') {
                   return (
@@ -917,7 +955,19 @@ export function App(): React.JSX.Element {
             })
           )}
 
-          {selected && projectTabs.length === 0 && (
+          {selected && missing.has(selected.id) && (
+            <EmptyState
+              ring={rings}
+              title={`A pasta de "${selected.name}" não foi encontrada`}
+              detail={selected.path}
+              note="Ela foi movida, renomeada ou apagada fora do Kora. Se ela mudou de lugar, localize a pasta nova: abas, categoria e nome continuam."
+              actions={[
+                { label: 'Localizar pasta…', onClick: () => relocateProject(selected) },
+                { label: 'Remover da lista', onClick: () => void removeProject(selected) }
+              ]}
+            />
+          )}
+          {selected && !missing.has(selected.id) && projectTabs.length === 0 && (
             <EmptyState
               ring={rings}
               title={selected.name}
@@ -942,8 +992,9 @@ export function App(): React.JSX.Element {
 
       {rightPanelOpen && selected && (
         <RightPanel
-          key={selected.id}
+          key={`${selected.id}:${selected.path}`}
           project={selected}
+          missing={missing.has(selected.id)}
           openSessions={
             new Map(
               projectTabs.flatMap((t) =>
@@ -1018,6 +1069,7 @@ export function App(): React.JSX.Element {
 function EmptyState(props: {
   title: string
   detail: string
+  note?: string
   actions: { label: string; onClick(): void }[]
   // Muda a cada sino tocado em outra sessão: a chave nova recria o símbolo e ele balança uma vez.
   ring: number
@@ -1029,6 +1081,7 @@ function EmptyState(props: {
       </span>
       <div className="text-sm font-medium">{props.title}</div>
       <div className="max-w-full truncate text-xs text-muted-foreground">{props.detail}</div>
+      {props.note && <p className="max-w-md text-xs text-muted-foreground">{props.note}</p>}
       <div className="mt-1 flex gap-2">
         {props.actions.map((a, i) => (
           <Button key={a.label} variant={i === 0 ? 'primary' : 'secondary'} onClick={a.onClick}>

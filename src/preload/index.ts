@@ -27,6 +27,8 @@ const api: KoraApi = {
   addProject: () => ipcRenderer.invoke('project:add'),
   addProjectPath: (path) => ipcRenderer.invoke('project:add-path', path),
   removeProject: (id) => ipcRenderer.invoke('project:remove', id),
+  missingProjects: () => ipcRenderer.invoke('project:missing'),
+  relocateProject: (id) => ipcRenderer.invoke('project:relocate', id),
   renameProject: (id, name) => ipcRenderer.invoke('project:rename', id, name),
   saveLayout: (layout) => ipcRenderer.invoke('project:layout', layout),
 
