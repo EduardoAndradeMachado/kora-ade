@@ -1,6 +1,6 @@
 import { basename, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { KoraState, ProjectGroup, SavedTab } from '../shared/state'
+import { PROJECT_NAME_MAX, type KoraState, type ProjectGroup, type SavedTab } from '../shared/state'
 import { descendantIds } from '../shared/groups'
 import type { SessionSummary } from '../shared/ipc'
 
@@ -19,6 +19,15 @@ export function removeProject(state: KoraState, id: string): KoraState {
     projects: state.projects.filter((p) => p.id !== id),
     tabs: state.tabs.filter((t) => t.projectId !== id)
   }
+}
+
+// Só o nome mostrado no Kora; a pasta no disco não muda. Nome vazio volta ao nome da pasta.
+export function renameProject(state: KoraState, id: string, name: string): KoraState {
+  const project = state.projects.find((p) => p.id === id)
+  if (!project) throw new Error('Projeto não encontrado')
+  const next = name.trim().slice(0, PROJECT_NAME_MAX).trim() || basename(project.path) || project.path
+  if (next === project.name) return state
+  return { ...state, projects: state.projects.map((p) => (p.id === id ? { ...p, name: next } : p)) }
 }
 
 export interface ProjectPlacement {

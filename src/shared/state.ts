@@ -11,6 +11,7 @@ export const ProjectSchema = z.object({
 })
 
 export const GROUP_NAME_MAX = 60
+export const PROJECT_NAME_MAX = 60
 
 // Categoria criada pelo usuário (ex.: uma empresa): divisória na lateral, como "Ocultos", com nome próprio.
 export const ProjectGroupSchema = z.object({

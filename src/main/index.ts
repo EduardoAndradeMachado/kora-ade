@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, shell, Tray } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { loadState, saveState } from './store'
-import { addProject, applyLayout, forgetSessionName, mergeTabs, namedSessions, removeProject, setTabAgent } from './projects'
+import { addProject, applyLayout, forgetSessionName, mergeTabs, namedSessions, removeProject, renameProject, setTabAgent } from './projects'
 import { Terminals } from './terminals'
 import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from './files'
 import { AgentDetector, UNREADABLE } from './agent-detect'
@@ -390,6 +390,8 @@ function registerIpc(): void {
     watchers.unwatch(id)
     return commit(removeProject(state, id))
   })
+
+  ipcMain.handle('project:rename', (_e, id: string, name: string) => commit(renameProject(state, String(id), String(name))))
 
   ipcMain.handle('project:layout', (_e, layout: unknown) => commit(applyLayout(state, LayoutSchema.parse(layout))))
 

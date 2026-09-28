@@ -26,6 +26,7 @@ qual sessão do Claude ou do Codex está rodando nela, e fechar o computador nã
 
 - **Projetos na lateral**, em categorias e subcategorias que você cria (por empresa, cliente, fase…), com uma
   seção **Ocultos** para o que não está em uso — dá para ocultar um projeto ou uma categoria inteira.
+  Cada projeto pode ganhar um nome só dele no Kora, sem renomear a pasta.
 - **Abas de terminal por projeto.** Abas do Claude e do Codex ficam ligadas à sessão, sem configurar nada:
   o Kora lê o que os próprios agentes já gravam no disco.
 - **Sessões da pasta:** a lista de conversas do Claude e do Codex daquele projeto, para abrir, fixar como aba ou apagar.

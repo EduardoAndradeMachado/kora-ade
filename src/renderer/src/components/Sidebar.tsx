@@ -43,6 +43,7 @@ interface Props {
   onNewTab(project: Project, choice: NewTabChoice): void
   onAdd(): void
   onRemove(project: Project): void
+  onRenameProject(id: string, name: string): void
   onArrangeProject(draggedId: string, drop: ProjectDrop): void
   onReorderTab(projectId: string, fromId: string, toId: string, place: Place): void
   theme: ThemePreference
@@ -93,6 +94,7 @@ export function Sidebar(props: Props): React.JSX.Element {
   const [creatingIn, setCreatingIn] = useState<{ parentId: string | null } | null>(null)
   const [groupMenu, setGroupMenu] = useState<{ x: number; y: number; group: ProjectGroup } | null>(null)
   const [renameGroup, setRenameGroup] = useState<{ id: string; n: number } | null>(null)
+  const [renameProject, setRenameProject] = useState<{ id: string; n: number } | null>(null)
   const [dragging, setDragging] = useState<'projects' | 'groups' | null>(null)
 
   // Durante o arrasto o cabeçalho "Projetos" vira a faixa "solte aqui": tirar da categoria não depende de adivinhar o alvo.
@@ -190,6 +192,7 @@ export function Sidebar(props: Props): React.JSX.Element {
     { label: 'Nova aba Codex', onSelect: () => props.onNewTab(project, 'codex') },
     { label: 'Novo terminal', onSelect: () => props.onNewTab(project, 'shell') },
     'separator',
+    { label: 'Renomear', onSelect: () => setRenameProject((r) => ({ id: project.id, n: (r?.n ?? 0) + 1 })) },
     {
       label: 'Atualizar ícone',
       onSelect: () =>
@@ -267,7 +270,14 @@ export function Sidebar(props: Props): React.JSX.Element {
             <Icon name="expandir" className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
           </button>
           <ProjectAvatar projectId={project.id} version={iconVersion[project.id] ?? 0} open={open && tabs.length > 0} />
-          <span className="flex-1 truncate font-medium">{project.name}</span>
+          <EditableTitle
+            value={project.name}
+            editable
+            tooltip={`${project.path} — duplo clique para renomear só no Kora`}
+            className="flex-1 font-medium"
+            editRequest={renameProject?.id === project.id ? renameProject.n : undefined}
+            onCommit={(name) => props.onRenameProject(project.id, name)}
+          />
           {!open && tabs.length > 0 && (
             <span className="text-[11px] tabular-nums text-muted-foreground group-hover:hidden">
               {tabs.length}

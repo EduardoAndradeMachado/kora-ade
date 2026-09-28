@@ -5,12 +5,13 @@ interface Props {
   value: string
   editable: boolean
   className?: string
+  tooltip?: string
   // Muda de valor quando algo de fora (ex.: "Renomear" no menu) pede para abrir a edição.
   editRequest?: number
   onCommit(value: string): void
 }
 
-export function EditableTitle({ value, editable, className, editRequest, onCommit }: Props): React.JSX.Element {
+export function EditableTitle({ value, editable, className, tooltip, editRequest, onCommit }: Props): React.JSX.Element {
   const [draft, setDraft] = useState<string | null>(null)
   // O pedido fica guardado no App depois de atendido; a aba que volta a ser desenhada (ex.: ao trocar de
   // projeto) nasce com esse pedido antigo e não pode tratá-lo como novo.
@@ -28,7 +29,7 @@ export function EditableTitle({ value, editable, className, editRequest, onCommi
     return (
       <span
         className={cn('truncate', className)}
-        title={editable ? `${value} — duplo clique para renomear` : value}
+        title={tooltip ?? (editable ? `${value} — duplo clique para renomear` : value)}
         onDoubleClick={(e) => {
           if (!editable) return
           e.stopPropagation()

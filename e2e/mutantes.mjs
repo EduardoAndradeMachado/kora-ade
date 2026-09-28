@@ -771,6 +771,30 @@ const MUTANTS = [
     bug: 'Alt+Z não alterna a quebra de linha',
     find: '          keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyZ],',
     replace: '          keybindings: [],'
+  },
+  {
+    id: 'M77',
+    grep: 'R77 ',
+    file: 'src/renderer/src/components/Sidebar.tsx',
+    bug: 'Renomear no menu do projeto não abre a edição',
+    find: 'editRequest={renameProject?.id === project.id ? renameProject.n : undefined}',
+    replace: 'editRequest={undefined}'
+  },
+  {
+    id: 'M77b',
+    grep: 'R77 ',
+    file: 'src/main/index.ts',
+    bug: 'nome novo do projeto aparece mas não é salvo',
+    find: "commit(renameProject(state, String(id), String(name)))",
+    replace: "renameProject(state, String(id), String(name))"
+  },
+  {
+    id: 'M77c',
+    grep: 'R77 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'lateral não mostra o nome devolvido pelo main',
+    find: 'window.kora.renameProject(id, name).then(setState,',
+    replace: 'window.kora.renameProject(id, name).then(() => {},'
   }
 ]
 

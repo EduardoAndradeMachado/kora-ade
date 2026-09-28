@@ -896,3 +896,34 @@ test('R71 + de um projeto na lateral: a nova aba não recolhe a pasta; pasta rec
   await choose('Terminal')
   await expect(ui.sideTab(page, /.+/), 'pasta recolhida abre e mostra a aba nova').toHaveCount(3)
 })
+
+test('R77 renomear projeto (menu e duplo clique) muda só o nome na lateral, persiste, não mexe na pasta; vazio volta ao nome da pasta', async ({ kora }) => {
+  const env = kora.env()
+  writeState(env, { version: 2, projects: [{ id: 'p1', name: 'proj-teste', path: env.project }], tabs: [] })
+  let run = await kora.launch(env)
+  let page = run.page
+  const row = () => page.locator('aside nav [data-project-row]')
+  const rename = () => row().locator('input')
+  const saved = () => readState(env).projects[0]!
+
+  await row().click({ button: 'right' })
+  await ui.menuItem(page, 'Renomear').click()
+  await rename().fill('Site da Empresa')
+  await rename().press('Enter')
+  await expect(row().locator('span.font-medium')).toHaveText('Site da Empresa')
+  await waitFor(() => saved().name === 'Site da Empresa', 'nome salvo')
+  expect(saved().path).toBe(env.project)
+  expect(existsSync(env.project)).toBe(true)
+  expect(readdirSync(env.root)).toContain('proj-teste')
+
+  await run.closeWindow()
+  run = await kora.launch(env)
+  page = run.page
+  await expect(row().locator('span.font-medium')).toHaveText('Site da Empresa')
+
+  await row().locator('span.font-medium').dblclick()
+  await rename().fill('')
+  await rename().press('Enter')
+  await expect(row().locator('span.font-medium')).toHaveText('proj-teste')
+  await waitFor(() => saved().name === 'proj-teste', 'nome da pasta de volta')
+})

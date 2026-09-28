@@ -682,6 +682,10 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const renameProject = (id: string, name: string): void => {
+    window.kora.renameProject(id, name).then(setState, (err: unknown) => setError(ipcErrorMessage(err)))
+  }
+
   const removeProject = async (project: Project): Promise<void> => {
     const open = tabs[project.id] ?? []
     const running = open.filter((t) => t.kind === 'terminal' && t.live).length
@@ -780,6 +784,7 @@ export function App(): React.JSX.Element {
         onNewTab={newTab}
         onAdd={() => void addProject()}
         onRemove={(p) => void removeProject(p)}
+        onRenameProject={renameProject}
         onArrangeProject={arrangeProject}
         zoom={state.settings.zoom}
         terminalFontSize={state.settings.terminalFontSize}

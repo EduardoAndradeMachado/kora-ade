@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyLayout, forgetSessionName, mergeTabs, namedSessions, setTabAgent } from '../src/main/projects'
+import { applyLayout, forgetSessionName, mergeTabs, namedSessions, renameProject, setTabAgent } from '../src/main/projects'
 import { emptyState, type KoraState } from '../src/shared/state'
 
 const state: KoraState = {
@@ -12,6 +12,25 @@ const state: KoraState = {
   ]
 }
 const groups = [{ id: 'g1', name: 'Empresa A' }, { id: 'g2', name: 'Empresa B', collapsed: true }]
+
+describe('nome do projeto mostrado no Kora', () => {
+  const named = { ...emptyState(), projects: [{ id: 'a', name: 'a', path: 'C:/dev/pasta-real', groupId: 'g1' }, { id: 'b', name: 'b', path: 'C:/b' }] }
+
+  it('troca só o nome: caminho, categoria e os outros projetos ficam iguais', () => {
+    const next = renameProject(named, 'a', '  Site da Empresa  ')
+    expect(next.projects).toEqual([{ id: 'a', name: 'Site da Empresa', path: 'C:/dev/pasta-real', groupId: 'g1' }, named.projects[1]])
+  })
+
+  it('nome vazio volta ao nome da pasta', () => {
+    const renamed = renameProject(named, 'a', 'Apelido')
+    expect(renameProject(renamed, 'a', '   ').projects[0]!.name).toBe('pasta-real')
+  })
+
+  it('corta nome longo demais e recusa projeto que não existe', () => {
+    expect(renameProject(named, 'a', 'x'.repeat(200)).projects[0]!.name).toHaveLength(60)
+    expect(() => renameProject(named, 'zzz', 'Nome')).toThrow()
+  })
+})
 
 describe('organização da lateral vinda da interface', () => {
   it('aplica ordem, categoria e oculto, mantendo nome e caminho do estado salvo', () => {
