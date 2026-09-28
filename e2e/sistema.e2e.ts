@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect } from './harness'
 import {
@@ -586,4 +586,34 @@ test('R80 Suporte recolhido por padrão; Limpar log pede confirmação na própr
   await page.locator(tip('Configurações')).click()
   await dialog.getByRole('button', { name: 'Suporte' }).click()
   await expect(dialog.locator('[data-errors-summary]')).toContainText('1 erro registrado')
+})
+
+test('R83 limites de uso: o Codex aparece pelo último uso gravado e o painel diz quando sai a próxima consulta de verdade', async ({ kora }) => {
+  const env = kora.env()
+  // Sem auth.json do ChatGPT no ambiente de teste: o Codex cai para o rollout local (a API real nunca é chamada).
+  const now = Date.now()
+  const day = join(env.home, '.codex', 'sessions', '2026', '09', '28')
+  mkdirSync(day, { recursive: true })
+  const event = {
+    timestamp: new Date(now - 60_000).toISOString(),
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      rate_limits: {
+        limit_id: 'codex',
+        limit_name: null,
+        primary: { used_percent: 42, window_minutes: 10080, resets_at: Math.floor((now + 3 * 86_400_000) / 1000) },
+        secondary: null
+      }
+    }
+  }
+  writeFileSync(join(day, 'rollout-2026-09-28T10-00-00-teste.jsonl'), JSON.stringify(event) + '\n')
+
+  const run = await kora.launch(env)
+  const page = run.page
+  await page.locator(tip('Limites de uso')).click()
+  const panel = page.getByRole('dialog', { name: 'Limites de uso' })
+  await expect(panel).toContainText('Codex')
+  await expect(panel).toContainText('42% usado')
+  await expect(panel.locator('[data-next-check]')).toContainText(/próxima consulta (hoje|amanhã) às \d{2}:\d{2}/)
 })

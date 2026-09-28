@@ -104,7 +104,12 @@ function AgentDetail({ usage, now }: { usage: AgentUsage; now: number }): React.
           </span>
         </div>
       ))}
-      <span className="text-[11px] text-muted-foreground">Dado de {formatResetAt(usage.updatedAt, now)}</span>
+      <span className="text-[11px] text-muted-foreground">
+        Dado de {formatResetAt(usage.updatedAt, now)}
+        {usage.nextCheckAt !== undefined && usage.nextCheckAt > now && (
+          <span data-next-check> · próxima consulta {formatResetAt(usage.nextCheckAt, now)}</span>
+        )}
+      </span>
     </section>
   )
 }

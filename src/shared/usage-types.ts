@@ -15,4 +15,6 @@ export interface AgentUsage {
   updatedAt: number
   source: string
   error?: string
+  /** epoch ms da próxima consulta de verdade; antes disso, atualizar devolve o mesmo dado. */
+  nextCheckAt?: number
 }

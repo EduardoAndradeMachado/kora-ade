@@ -885,6 +885,14 @@ const MUTANTS = [
     replace: '      () => !cancelled && (setLoadError(null), setActionError(null)),'
   },
   {
+    id: 'M83',
+    grep: 'R83 ',
+    file: 'src/main/usage.ts',
+    bug: 'leitor não diz quando sai a próxima consulta (atualizar parece não fazer nada)',
+    find: '    value && { ...value, nextCheckAt: nextAt }',
+    replace: '    value'
+  },
+  {
     id: 'M81',
     grep: 'R81 ',
     file: 'src/preload/index.ts',

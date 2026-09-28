@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   CLAUDE_USAGE_URL,
+  CODEX_USAGE_URL,
   backoffMs,
+  parseCodexApiUsage,
   createUsageReader,
   parseRetryAfter,
   type CachedSlot,
@@ -501,5 +503,186 @@ describe('formatação', () => {
     expect(mostConstrained([w(5, 1), w(74, 2), w(7, 3)])?.usedPercent).toBe(74)
     expect(mostConstrained([w(10, 1), w(10, 9)])?.resetsAt).toBe(9)
     expect(mostConstrained([])).toBeNull()
+  })
+})
+
+// ───────────── API de uso do Codex (resposta real de /wham/usage, 28/09/2026, ids e e-mail removidos) ─────────────
+
+type WhamWindow = { used_percent: number; limit_window_seconds: number; reset_after_seconds: number; reset_at: number }
+
+const whamResponse = (
+  primary: WhamWindow | null = { used_percent: 0, limit_window_seconds: 604800, reset_after_seconds: 472423, reset_at: 1791075015 },
+  extra: Partial<{ secondary: WhamWindow | null; additional: unknown[] | null }> = {}
+): Record<string, unknown> => ({
+  user_id: '<removido>',
+  account_id: '<removido>',
+  email: '<removido>',
+  plan_type: 'pro',
+  rate_limit: { allowed: true, limit_reached: false, primary_window: primary, secondary_window: extra.secondary ?? null },
+  code_review_rate_limit: null,
+  additional_rate_limits: extra.additional ?? null,
+  model_usage: { 'gpt-6-astra': { available: true, available_at: null, credits_would_enable: false } },
+  credits: {
+    has_credits: false,
+    unlimited: false,
+    overage_limit_reached: false,
+    balance: '0',
+    approx_local_messages: [0, 0],
+    approx_cloud_messages: [0, 0]
+  },
+  spend_control: { reached: false, individual_limit: null },
+  rate_limit_reached_type: null,
+  promo: null,
+  rate_limit_reset_credits: { available_count: 0, applicable_available_count: 0 }
+})
+
+const FAKE_CODEX_TOKEN = 'FAKE-codex-access-token-0123456789'
+
+function writeCodexAuth(mode: 'chatgpt' | 'apikey' = 'chatgpt'): void {
+  writeFileSync(
+    join(codexRoot, 'auth.json'),
+    JSON.stringify({
+      auth_mode: mode,
+      OPENAI_API_KEY: mode === 'apikey' ? 'FAKE-api-key' : null,
+      // No modo chave de API os tokens de um login antigo do ChatGPT podem continuar no arquivo.
+      tokens: { id_token: 'FAKE-id', access_token: FAKE_CODEX_TOKEN, refresh_token: 'FAKE-refresh', account_id: 'conta-123' },
+      last_refresh: new Date(NOW - HOUR).toISOString()
+    }),
+    'utf8'
+  )
+}
+
+const wham = (body: unknown = whamResponse()): Response =>
+  new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+
+describe('parse da resposta de uso do Codex (/wham/usage)', () => {
+  it('lê a janela semanal da resposta real, com o reset em segundos', () => {
+    expect(parseCodexApiUsage(whamResponse(), NOW)).toEqual([
+      { label: 'Semanal', usedPercent: 0, resetsAt: 1791075015 * 1000, windowMinutes: 10080 }
+    ])
+  })
+
+  it('janela curta, semanal e limites por modelo; reset_after_seconds quando não vem reset_at', () => {
+    const fiveHours = { used_percent: 42, limit_window_seconds: 18000, reset_after_seconds: 3600, reset_at: sec(NOW + HOUR) }
+    const week = { used_percent: 12, limit_window_seconds: 604800, reset_after_seconds: 2 * 86400 } as WhamWindow
+    const model = {
+      limit_name: 'GPT-6',
+      metered_feature: 'codex_model',
+      rate_limit: { allowed: true, limit_reached: false, primary_window: { ...week, used_percent: 70 }, secondary_window: null }
+    }
+    const windows = parseCodexApiUsage(whamResponse(fiveHours, { secondary: week, additional: [model, { lixo: true }] }), NOW)
+    expect(windows).toEqual([
+      { label: '5 h', usedPercent: 42, resetsAt: NOW + HOUR, windowMinutes: 300 },
+      { label: 'Semanal', usedPercent: 12, resetsAt: NOW + 2 * DAY, windowMinutes: 10080 },
+      { label: 'Semanal · GPT-6', usedPercent: 70, resetsAt: NOW + 2 * DAY, windowMinutes: 10080 }
+    ])
+  })
+
+  it('lança UsageFormatError para formato desconhecido', () => {
+    expect(() => parseCodexApiUsage({ rate_limit: { primary_window: { used: 'x' } } }, NOW)).toThrow(UsageFormatError)
+    expect(() => parseCodexApiUsage('nada', NOW)).toThrow(UsageFormatError)
+  })
+})
+
+describe('readCodexUsage pela API', () => {
+  it('consulta chatgpt.com com o login do Codex, sem seguir redirecionamento, sem precisar de sessão do Codex', async () => {
+    writeCodexAuth()
+    const f = fakeFetch(() => wham())
+    const usage = await readCodexUsage(codexRoot, NOW, { fetch: f.fetch })
+    expect(f.calls).toHaveLength(1)
+    expect(f.calls[0]!.url).toBe(CODEX_USAGE_URL)
+    expect(new URL(CODEX_USAGE_URL).host).toBe('chatgpt.com')
+    expect(f.calls[0]!.init?.redirect).toBe('error')
+    const headers = new Headers(f.calls[0]!.init?.headers)
+    expect(headers.get('authorization')).toBe(`Bearer ${FAKE_CODEX_TOKEN}`)
+    expect(headers.get('chatgpt-account-id')).toBe('conta-123')
+    expect(usage).toMatchObject({ agent: 'codex', updatedAt: NOW, windows: [{ label: 'Semanal', usedPercent: 0 }] })
+    expect(usage?.error).toBeUndefined()
+    expect(JSON.stringify(usage)).not.toContain('FAKE')
+  })
+
+  it('a API ganha do rollout antigo: 99% gravado há dias vira o 0% atual', async () => {
+    writeCodexAuth()
+    writeRollout('2026/09/21', 'velho', jsonl(tokenCount(NOW - 3 * DAY, weekly(99))), NOW - 3 * DAY)
+    const usage = await readCodexUsage(codexRoot, NOW, { fetch: fakeFetch(() => wham()).fetch })
+    expect(usage?.windows.map((w) => w.usedPercent)).toEqual([0])
+    expect(usage?.updatedAt).toBe(NOW)
+  })
+
+  it('login recusado cai para o último uso gravado pelo Codex, dizendo por quê, sem vazar o token', async () => {
+    writeCodexAuth()
+    writeRollout('2026/09/24', 'h', jsonl(tokenCount(NOW - HOUR, weekly(55))), NOW - HOUR)
+    const f = fakeFetch(() => new Response(`{"detail":"bad token ${FAKE_CODEX_TOKEN}"}`, { status: 401 }))
+    const usage = await readCodexUsage(codexRoot, NOW, { fetch: f.fetch })
+    expect(usage?.windows.map((w) => w.usedPercent)).toEqual([55])
+    expect(usage?.updatedAt).toBe(NOW - HOUR)
+    expect(usage?.error).toMatch(/Login do Codex recusado \(HTTP 401\).*último uso gravado/)
+    expect(JSON.stringify(usage)).not.toContain('FAKE')
+  })
+
+  it('falha de rede sem rollout vira erro, nunca exceção', async () => {
+    writeCodexAuth()
+    const f = fakeFetch(() => {
+      throw new TypeError(`fetch failed Authorization: Bearer ${FAKE_CODEX_TOKEN}`)
+    })
+    const usage = await readCodexUsage(codexRoot, NOW, { fetch: f.fetch })
+    expect(usage).toMatchObject({ agent: 'codex', windows: [], error: 'Sem resposta de chatgpt.com (TypeError)' })
+    expect(JSON.stringify(usage)).not.toContain('FAKE')
+  })
+
+  it('resposta em formato desconhecido cai para o rollout com o motivo', async () => {
+    writeCodexAuth()
+    writeRollout('2026/09/24', 'h', jsonl(tokenCount(NOW - HOUR, weekly(20))), NOW - HOUR)
+    const usage = await readCodexUsage(codexRoot, NOW, { fetch: fakeFetch(() => wham({ rate_limit: 'x' })).fetch })
+    expect(usage?.windows.map((w) => w.usedPercent)).toEqual([20])
+    expect(usage?.error).toMatch(/formato desconhecido/)
+  })
+
+  it('login por chave de API não chama a rede e usa só os rollouts', async () => {
+    writeCodexAuth('apikey')
+    writeRollout('2026/09/24', 'h', jsonl(tokenCount(NOW - HOUR, weekly(33))), NOW - HOUR)
+    const f = fakeFetch(() => wham())
+    const usage = await readCodexUsage(codexRoot, NOW, { fetch: f.fetch })
+    expect(f.calls).toHaveLength(0)
+    expect(usage?.windows.map((w) => w.usedPercent)).toEqual([33])
+  })
+})
+
+describe('leitor: 429 da API do Codex', () => {
+  it('recua 10 min, mantém o último uso gravado e diz quando consulta de novo', async () => {
+    writeCodexAuth()
+    writeRollout('2026/09/24', 'h', jsonl(tokenCount(NOW - HOUR, weekly(40))), NOW - HOUR)
+    const f = fakeFetch(() => new Response('{}', { status: 429 }))
+    let clock = NOW
+    const reader = createUsageReader({ claudeRoot, codexRoot, fetch: f.fetch, now: () => clock })
+    const [codex] = await reader.read()
+    expect(codex).toMatchObject({ agent: 'codex', nextCheckAt: NOW + 10 * MIN })
+    expect(codex?.windows.map((w) => w.usedPercent)).toEqual([40])
+    expect(codex?.error).toMatch(/HTTP 429/)
+    clock = NOW + 5 * MIN
+    await reader.read()
+    expect(f.calls).toHaveLength(1)
+  })
+})
+
+describe('leitor: próxima consulta de verdade', () => {
+  it('diz quando cada agente consulta de novo; atualizar antes disso devolve o mesmo dado e o mesmo horário', async () => {
+    writeCredentials(NOW + DAY)
+    writeCodexAuth()
+    const f = fakeFetch(() => (f.calls.at(-1)!.url === CODEX_USAGE_URL ? wham() : ok()))
+    let clock = NOW
+    const reader = createUsageReader({ claudeRoot, codexRoot, fetch: f.fetch, now: () => clock })
+    const first = await reader.read()
+    expect(first.map((u) => [u.agent, u.nextCheckAt])).toEqual([
+      ['claude', NOW + 5 * MIN],
+      ['codex', NOW + MIN]
+    ])
+    clock += 30_000
+    const again = await reader.read()
+    expect(f.calls).toHaveLength(2)
+    expect(again.map((u) => u.nextCheckAt)).toEqual([NOW + 5 * MIN, NOW + MIN])
+    clock = NOW + MIN
+    await reader.read()
+    expect(f.calls.map((c) => new URL(c.url).host)).toEqual(['api.anthropic.com', 'chatgpt.com', 'chatgpt.com'])
   })
 })

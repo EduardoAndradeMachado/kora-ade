@@ -6,7 +6,7 @@ import type { AgentUsage, UsageWindow } from '../shared/usage-types'
 
 const MINUTE = 60_000
 const WEEK_MS = 7 * 24 * 60 * MINUTE
-// O Codex é leitura de arquivo local; o Claude é uma API que devolve 429 se consultada demais.
+// A API de uso do Codex (a do /status dele) aguenta consulta frequente; a do Claude devolve 429 se consultada demais.
 export const CODEX_MIN_INTERVAL_MS = MINUTE
 export const CLAUDE_MIN_INTERVAL_MS = 5 * MINUTE
 export const BACKOFF_START_MS = 10 * MINUTE
@@ -205,7 +205,9 @@ async function recentRollouts(codexRoot: string, now: number): Promise<{ path: s
 
 const codexFileCache = new Map<string, { mtimeMs: number; size: number; parse: CodexParse }>()
 
-export async function readCodexUsage(codexRoot: string, now = Date.now()): Promise<AgentUsage | null> {
+// Reserva quando a API não responde ou não há login do ChatGPT: o último token_count que o próprio Codex gravou.
+// Só muda quando o Codex é usado.
+export async function readCodexLocalUsage(codexRoot: string, now = Date.now()): Promise<AgentUsage | null> {
   const files = await recentRollouts(codexRoot, now)
   if (files.length === 0) return null
   const snapshots: CodexSnapshot[] = []
@@ -242,11 +244,142 @@ export async function readCodexUsage(codexRoot: string, now = Date.now()): Promi
   }
 }
 
+// Único destino do token do login do ChatGPT que o Codex guarda. Mesmo endpoint que o Codex consulta no /status.
+export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage'
+const CODEX_API_SOURCE = 'chatgpt.com/backend-api/wham/usage'
+const USAGE_TIMEOUT_MS = 10_000
+
+const CodexAuthSchema = z.object({
+  auth_mode: z.string().nullish(),
+  tokens: z.object({ access_token: z.string().min(1), account_id: z.string().min(1).nullish() }).nullish()
+})
+
+const CodexApiWindowSchema = z.object({
+  used_percent: z.number(),
+  limit_window_seconds: z.number().positive().nullish(),
+  reset_after_seconds: z.number().nullish(),
+  reset_at: z.number().nullish()
+})
+
+const CodexApiLimitSchema = z.object({
+  primary_window: CodexApiWindowSchema.nullish(),
+  secondary_window: CodexApiWindowSchema.nullish()
+})
+
+const CodexApiUsageSchema = z.object({
+  rate_limit: CodexApiLimitSchema.nullish(),
+  additional_rate_limits: z.array(z.unknown()).nullish()
+})
+
+const CodexApiAdditionalSchema = z.object({ limit_name: z.string().nullish(), rate_limit: CodexApiLimitSchema.nullish() })
+
+/** Converte a resposta de /wham/usage; lança UsageFormatError se ela não tiver o formato esperado. */
+export function parseCodexApiUsage(json: unknown, now: number): UsageWindow[] {
+  const parsed = CodexApiUsageSchema.safeParse(json)
+  if (!parsed.success) throw new UsageFormatError('Resposta de uso do Codex em formato desconhecido')
+  const windows: UsageWindow[] = []
+  const add = (limit: z.infer<typeof CodexApiLimitSchema> | null | undefined, name: string | null): void => {
+    for (const w of [limit?.primary_window, limit?.secondary_window]) {
+      if (!w) continue
+      const minutes = w.limit_window_seconds != null ? Math.round(w.limit_window_seconds / 60) : null
+      const resetsAt =
+        w.reset_at != null ? w.reset_at * 1000 : w.reset_after_seconds != null ? now + w.reset_after_seconds * 1000 : null
+      const base = windowLabel(minutes)
+      windows.push(normalizeWindow(name ? `${base} · ${name}` : base, w.used_percent, resetsAt, minutes, now))
+    }
+  }
+  add(parsed.data.rate_limit, null)
+  // O limite geral vem primeiro; os de modelo depois, em ordem alfabética, como no rollout.
+  const extras = (parsed.data.additional_rate_limits ?? [])
+    .map((item) => CodexApiAdditionalSchema.safeParse(item))
+    .flatMap((r) => (r.success ? [r.data] : []))
+    .sort((a, b) => (a.limit_name ?? '').localeCompare(b.limit_name ?? ''))
+  for (const extra of extras) add(extra.rate_limit, extra.limit_name?.trim() || null)
+  return windows
+}
+
+/**
+ * Única função que envia o token do Codex para a rede: GET em CODEX_USAGE_URL com `Authorization: Bearer`.
+ * `redirect: 'error'` impede que um redirecionamento leve o token a outro host.
+ */
+export async function fetchCodexUsageJson(
+  accessToken: string,
+  accountId: string | null,
+  fetchImpl: typeof fetch = fetch
+): Promise<unknown> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
+  if (accountId) headers['ChatGPT-Account-Id'] = accountId
+  const res = await fetchImpl(CODEX_USAGE_URL, {
+    method: 'GET',
+    headers,
+    redirect: 'error',
+    signal: AbortSignal.timeout(USAGE_TIMEOUT_MS)
+  })
+  if (!res.ok) throw new UsageHttpError(res.status, parseRetryAfter(res.headers.get('retry-after'), Date.now()))
+  return await res.json()
+}
+
+function codexErrorMessage(err: unknown): string {
+  if (err instanceof UsageFormatError) return err.message
+  if (err instanceof UsageHttpError) {
+    if (err.status === 401 || err.status === 403) return `Login do Codex recusado (HTTP ${err.status}); abra o Codex para renovar`
+    if (err.status === 429) return 'chatgpt.com limitou as consultas de uso (HTTP 429)'
+    return `chatgpt.com respondeu HTTP ${err.status}`
+  }
+  // Só o nome do erro: a mensagem de falhas de rede não é nossa e não vale arriscar que carregue cabeçalhos.
+  const name = err instanceof Error ? err.name : 'erro'
+  return `Sem resposta de chatgpt.com (${name})`
+}
+
+// Login por chave de API não tem limite de plano para consultar: fica só o que os rollouts mostram.
+async function readCodexAuth(codexRoot: string): Promise<{ accessToken: string; accountId: string | null } | null> {
+  let raw: string
+  try {
+    raw = await readFile(join(codexRoot, 'auth.json'), 'utf8')
+  } catch {
+    return null
+  }
+  try {
+    const parsed = CodexAuthSchema.safeParse(JSON.parse(raw))
+    if (!parsed.success || !parsed.data.tokens) return null
+    if (parsed.data.auth_mode && parsed.data.auth_mode !== 'chatgpt') return null
+    return { accessToken: parsed.data.tokens.access_token, accountId: parsed.data.tokens.account_id ?? null }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Uso atual do Codex pela mesma API do /status dele, sem depender de o Codex ter sido usado. Sem login do ChatGPT
+ * ou com a API falhando, mostra o último uso gravado nos rollouts, com o motivo. Não renovamos o token: o refresh
+ * trocaria o refresh_token e deixaria o Codex com um login revogado.
+ */
+export async function readCodexUsage(
+  codexRoot: string,
+  now = Date.now(),
+  deps: { fetch?: typeof fetch } = {}
+): Promise<UsageRead | null> {
+  const auth = await readCodexAuth(codexRoot)
+  if (!auth) return readCodexLocalUsage(codexRoot, now)
+  try {
+    const json = await fetchCodexUsageJson(auth.accessToken, auth.accountId, deps.fetch)
+    return { agent: 'codex', windows: parseCodexApiUsage(json, now), updatedAt: now, source: CODEX_API_SOURCE }
+  } catch (err) {
+    const reason = codexErrorMessage(err)
+    const local = await readCodexLocalUsage(codexRoot, now)
+    const failed: UsageRead =
+      local && local.windows.length > 0
+        ? { ...local, error: `${reason}; mostrando o último uso gravado pelo Codex` }
+        : { agent: 'codex', windows: [], updatedAt: now, source: CODEX_API_SOURCE, error: reason }
+    if (err instanceof UsageHttpError && err.status === 429) failed.rateLimited = { retryAfterMs: err.retryAfterMs }
+    return failed
+  }
+}
+
 // ───────────────────────────── Claude ─────────────────────────────
 
 // Único destino do token OAuth do usuário. Mesmo endpoint que o Claude Code consulta para o /usage.
 export const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
-const CLAUDE_TIMEOUT_MS = 10_000
 
 const CredentialsSchema = z.object({
   claudeAiOauth: z.object({ accessToken: z.string().min(1), expiresAt: z.number().nullish() })
@@ -315,7 +448,7 @@ export function parseClaudeUsage(json: unknown, now: number): UsageWindow[] {
   return windows
 }
 
-export class ClaudeHttpError extends Error {
+export class UsageHttpError extends Error {
   constructor(
     readonly status: number,
     readonly retryAfterMs: number | null = null
@@ -342,15 +475,15 @@ export async function fetchClaudeUsageJson(accessToken: string, fetchImpl: typeo
     method: 'GET',
     headers: { Authorization: `Bearer ${accessToken}`, 'anthropic-beta': 'oauth-2025-04-20', Accept: 'application/json' },
     redirect: 'error',
-    signal: AbortSignal.timeout(CLAUDE_TIMEOUT_MS)
+    signal: AbortSignal.timeout(USAGE_TIMEOUT_MS)
   })
-  if (!res.ok) throw new ClaudeHttpError(res.status, parseRetryAfter(res.headers.get('retry-after'), Date.now()))
+  if (!res.ok) throw new UsageHttpError(res.status, parseRetryAfter(res.headers.get('retry-after'), Date.now()))
   return await res.json()
 }
 
 function claudeErrorMessage(err: unknown): string {
   if (err instanceof UsageFormatError) return err.message
-  if (err instanceof ClaudeHttpError) {
+  if (err instanceof UsageHttpError) {
     if (err.status === 401 || err.status === 403)
       return `Login do Claude recusado (HTTP ${err.status}); abra o Claude Code para renovar`
     if (err.status === 429) return 'api.anthropic.com limitou as consultas de uso (HTTP 429)'
@@ -367,12 +500,12 @@ export interface ClaudeDeps {
 }
 
 // Só circula no main: o leitor usa para decidir quando tentar de novo e tira antes de mandar à interface.
-export interface ClaudeRead extends AgentUsage {
+export interface UsageRead extends AgentUsage {
   rateLimited?: { retryAfterMs: number | null }
 }
 
 /** null quando não há login OAuth do Claude Code nesta máquina (sem .credentials.json). */
-export async function readClaudeUsage(claudeRoot: string, deps: ClaudeDeps = {}): Promise<ClaudeRead | null> {
+export async function readClaudeUsage(claudeRoot: string, deps: ClaudeDeps = {}): Promise<UsageRead | null> {
   const now = deps.now ?? Date.now()
   const source = 'api.anthropic.com/api/oauth/usage'
   const fail = (error: string): AgentUsage => ({ agent: 'claude', windows: [], updatedAt: now, source, error })
@@ -401,8 +534,8 @@ export async function readClaudeUsage(claudeRoot: string, deps: ClaudeDeps = {})
     const json = await fetchClaudeUsageJson(credentials.accessToken, deps.fetch)
     return { agent: 'claude', windows: parseClaudeUsage(json, now), updatedAt: now, source }
   } catch (err) {
-    const failed: ClaudeRead = fail(claudeErrorMessage(err))
-    if (err instanceof ClaudeHttpError && err.status === 429) failed.rateLimited = { retryAfterMs: err.retryAfterMs }
+    const failed: UsageRead = fail(claudeErrorMessage(err))
+    if (err instanceof UsageHttpError && err.status === 429) failed.rateLimited = { retryAfterMs: err.retryAfterMs }
     return failed
   }
 }
@@ -468,14 +601,18 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
     }
   }
 
-  const throttled = (key: AgentUsage['agent'], load: () => Promise<ClaudeRead | null>): Promise<AgentUsage | null> => {
+  // O botão de atualizar não fura o intervalo: a interface mostra quando sai a próxima consulta de verdade.
+  const withNextCheck = (value: AgentUsage | null, nextAt: number): AgentUsage | null =>
+    value && { ...value, nextCheckAt: nextAt }
+
+  const throttled = (key: AgentUsage['agent'], load: () => Promise<UsageRead | null>): Promise<AgentUsage | null> => {
     const map = loaded()
     const slot = map.get(key)
     if (slot?.inflight) return slot.inflight
-    if (slot && now() < slot.nextAt) return Promise.resolve(slot.value)
+    if (slot && now() < slot.nextAt) return Promise.resolve(withNextCheck(slot.value, slot.nextAt))
     const previous = slot?.value ?? null
     const inflight = load()
-      .catch((err: unknown): ClaudeRead | null => ({
+      .catch((err: unknown): UsageRead | null => ({
         agent: key,
         windows: [],
         updatedAt: now(),
@@ -484,7 +621,7 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
       }))
       .then((result) => {
         const at = now()
-        const { rateLimited, ...next } = result ?? ({} as ClaudeRead)
+        const { rateLimited, ...next } = result ?? ({} as UsageRead)
         const failures = rateLimited ? (slot?.failures ?? 0) + 1 : 0
         const nextAt = at + (rateLimited ? backoffMs(failures, rateLimited.retryAfterMs) : INTERVAL[key])
         let value: AgentUsage | null = result === null ? null : next
@@ -494,7 +631,7 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
         }
         map.set(key, { nextAt, failures, value, inflight: null })
         persist()
-        return value
+        return withNextCheck(value, nextAt)
       })
     map.set(key, { nextAt: slot?.nextAt ?? 0, failures: slot?.failures ?? 0, value: previous, inflight })
     return inflight
@@ -504,7 +641,7 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
     async read() {
       const results = await Promise.all([
         throttled('claude', () => readClaudeUsage(deps.claudeRoot, { fetch: deps.fetch, now: now() })),
-        throttled('codex', () => readCodexUsage(deps.codexRoot, now()))
+        throttled('codex', () => readCodexUsage(deps.codexRoot, now(), { fetch: deps.fetch }))
       ])
       return results.filter((r): r is AgentUsage => r !== null)
     }
