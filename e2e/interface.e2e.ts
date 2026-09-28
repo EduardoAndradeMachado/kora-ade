@@ -550,6 +550,7 @@ test('R15 clique direito no projeto: itens, copiar caminho, Explorer, remover co
     'Nova aba Claude',
     'Nova aba Codex',
     'Novo terminal',
+    'Renomear',
     'Atualizar ícone',
     'Abrir no Explorer',
     'Copiar caminho',
