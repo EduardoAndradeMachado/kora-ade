@@ -16,6 +16,7 @@ export interface GitState {
   // piscar desabilitados a cada atualização automática.
   busy: string | null
   error: string | null
+  // Atualizar pedido pelo usuário: também tira da tela o erro da última ação.
   refresh(): void
   // true se deu certo; o erro fica em `error`.
   run(action: () => Promise<unknown>, busyLabel?: string): Promise<boolean>
@@ -29,7 +30,10 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
   const [worktrees, setWorktrees] = useState<GitWorktree[]>([])
   const [remote, setRemote] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Separados: a atualização automática (polling, foco, watcher) só limpa o próprio erro. Se limpasse o da
+  // ação, o motivo de um Push recusado sumiria da tela em até 5 s.
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
 
@@ -47,8 +51,8 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
       jobs.push(window.kora.gitWorktrees(projectId).then((w) => !cancelled && setWorktrees(w)))
     }
     Promise.all(jobs).then(
-      () => !cancelled && setError(null),
-      (err: unknown) => !cancelled && setError(ipcErrorMessage(err))
+      () => !cancelled && setLoadError(null),
+      (err: unknown) => !cancelled && setLoadError(ipcErrorMessage(err))
     ).finally(() => !cancelled && setLoading(false))
     return () => {
       cancelled = true
@@ -90,12 +94,13 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
   const run = async (action: () => Promise<unknown>, busyLabel = 'Aguarde…'): Promise<boolean> => {
     setLoading(true)
     setBusy(busyLabel)
+    setActionError(null)
     try {
       await action()
       refresh()
       return true
     } catch (err) {
-      setError(ipcErrorMessage(err))
+      setActionError(ipcErrorMessage(err))
       setLoading(false)
       return false
     } finally {
@@ -103,5 +108,10 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
     }
   }
 
-  return { status, branches, worktrees, remote, loading, busy, error, refresh, run }
+  const userRefresh = (): void => {
+    setActionError(null)
+    refresh()
+  }
+
+  return { status, branches, worktrees, remote, loading, busy, error: actionError ?? loadError, refresh: userRefresh, run }
 }

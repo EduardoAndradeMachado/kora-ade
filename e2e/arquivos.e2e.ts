@@ -465,6 +465,12 @@ test('R32 Git em pasta sem repositório: Inicializar cria o repo; vincular ao Gi
   await url.press('Enter')
   await expect(panel.getByText(/não pode conter usuário, senha ou token/)).toBeVisible()
   expect(() => git(env.project, env, 'remote', 'get-url', 'origin')).toThrow()
+  // A atualização automática (aqui pelo foco da janela) não pode apagar o erro da ação: o arquivo novo
+  // aparecendo na lista prova que ela rodou.
+  writeFileSync(join(env.project, 'depois-do-erro.txt'), 'x\n')
+  await run.page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(panel.locator('[data-git-file="depois-do-erro.txt"]')).toBeVisible()
+  await expect(panel.getByText(/não pode conter usuário, senha ou token/)).toBeVisible()
 
   await panel.getByRole('button', { name: 'Vincular ao GitHub' }).click()
   await url.fill('  https://github.com/dono/repo/  ')

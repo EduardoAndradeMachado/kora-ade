@@ -877,6 +877,14 @@ const MUTANTS = [
     replace: 'onClick={() => run(async () => (await support.clear(), null))}'
   },
   {
+    id: 'M32',
+    grep: 'R32 ',
+    file: 'src/renderer/src/lib/use-git.ts',
+    bug: 'atualização automática apaga o erro da última ação do usuário',
+    find: '      () => !cancelled && setLoadError(null),',
+    replace: '      () => !cancelled && (setLoadError(null), setActionError(null)),'
+  },
+  {
     id: 'M81',
     grep: 'R81 ',
     file: 'src/preload/index.ts',
