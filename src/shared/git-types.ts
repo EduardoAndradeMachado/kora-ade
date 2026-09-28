@@ -40,3 +40,13 @@ export interface GitWorktree {
   prunable: boolean
   current: boolean
 }
+
+// Os dois lados do diff de um arquivo. Não staged: index → disco. Staged: HEAD → index.
+// Lado que não existe (arquivo novo, apagado) vem vazio; binário vem sem conteúdo.
+export type GitCommitResult = 'committed' | 'nothing-staged'
+
+export interface GitDiff {
+  original: string
+  modified: string
+  binary: boolean
+}

@@ -1,6 +1,6 @@
 import type { Alerts, KoraState, ProjectGroup, ThemePreference } from './state'
 import type { AgentActivity, AgentSession } from './agent'
-import type { GitBranch, GitStatus, GitWorktree } from './git-types'
+import type { GitBranch, GitCommitResult, GitDiff, GitStatus, GitWorktree } from './git-types'
 import type { AgentUsage } from './usage-types'
 import type { UpdateStatus } from './update'
 
@@ -150,6 +150,20 @@ export interface KoraApi {
   gitRemoteUrl(projectId: string): Promise<string | null>
   // Só aceita URL do GitHub (https ou ssh), sem credenciais; devolve a forma gravada.
   gitSetRemote(projectId: string, url: string): Promise<string>
+  // Caminhos relativos ao projeto; renomeado staged precisa dos dois (novo e origPath) para sair da fila inteiro.
+  gitStage(projectId: string, paths: string[]): Promise<void>
+  gitUnstage(projectId: string, paths: string[]): Promise<void>
+  // Só o que não está na fila: rastreado volta à versão do index, não rastreado vai para a Lixeira.
+  gitDiscard(projectId: string, paths: string[]): Promise<void>
+  gitDiff(projectId: string, path: string, staged: boolean): Promise<GitDiff>
+  // Fila vazia devolve 'nothing-staged' sem commitar; stageAll coloca todas as alterações do projeto antes.
+  gitCommit(projectId: string, message: string, stageAll: boolean): Promise<GitCommitResult>
+  // Branch sem upstream é publicada (push -u) no origin.
+  gitPush(projectId: string): Promise<void>
+  gitPull(projectId: string): Promise<void>
+  gitFetch(projectId: string): Promise<void>
+  // Pull e depois Push.
+  gitSync(projectId: string): Promise<void>
   projectIcon(projectId: string): Promise<string | null>
   refreshProjectIcon(projectId: string): Promise<string | null>
 

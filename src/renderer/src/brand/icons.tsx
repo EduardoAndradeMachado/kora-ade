@@ -2,13 +2,15 @@ import { cn } from '@/lib/utils'
 
 // Iconografia da identidade: grade de 24, traço 1,75, pontas redondas; silhueta convencional, contorno na cor do
 // texto e no máximo um detalhe em âmbar (var(--icon-accent)), que fica cinza quando o ícone está inativo.
-// Ícones simples (setas, chevron, check, arrastar, +, X) ficam sem âmbar.
+// Ícones simples (setas, chevron, check, arrastar, +, −, desfazer, X) ficam sem âmbar.
 const STROKE = 1.75
 
 type Draw = (accent: string) => React.JSX.Element
 
 const FOLDER = 'M3 7.5A2.5 2.5 0 0 1 5.5 5h3.3a1.5 1.5 0 0 1 1.1.5l1.6 2h7A2.5 2.5 0 0 1 21 10v7.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5Z'
-const PAGE = 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'
+// Nuvem aberta embaixo para a seta do remoto passar.
+const CLOUD = 'M8 18.5H7a4.5 4.5 0 0 1-.8-8.93A6 6 0 0 1 17.7 8.1 4.75 4.75 0 0 1 17 18.5h-1'
+const PAGE ='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'
 const GEAR =
   'M9.73 5.38 L10.17 2.98 L13.83 2.98 L14.27 5.38 L15.08 5.71 L17.08 4.33 L19.67 6.92 L18.29 8.92 L18.62 9.73 L21.02 10.17 L21.02 13.83 L18.62 14.27 L18.29 15.08 L19.67 17.08 L17.08 19.67 L15.08 18.29 L14.27 18.62 L13.83 21.02 L10.17 21.02 L9.73 18.62 L8.92 18.29 L6.92 19.67 L4.33 17.08 L5.71 15.08 L5.38 14.27 L2.98 13.83 L2.98 10.17 L5.38 9.73 L5.71 8.92 L4.33 6.92 L6.92 4.33 L8.92 5.71Z'
 
@@ -20,6 +22,8 @@ const BRAND = {
     </>
   ),
   novaAba: () => <path d="M12 5v14M5 12h14" />,
+  menos: () => <path d="M5 12h14" />,
+  descartar: () => <path d="M9 14.5 4.5 10 9 5.5M4.5 10h10a5 5 0 0 1 0 10H11" />,
   terminal: (a) => (
     <>
       <rect x="3" y="4" width="18" height="16" rx="3" />
@@ -197,6 +201,19 @@ const BRAND = {
   ),
   setaCima: () => <path d="M12 19V5M6 11l6-6 6 6" />,
   setaBaixo: () => <path d="M12 5v14M6 13l6 6 6-6" />,
+  sincronizar: () => <path d="M8 4.5v15M4.5 16l3.5 3.5 3.5-3.5M16 19.5v-15M12.5 8 16 4.5 19.5 8" />,
+  buscarRemoto: (a) => (
+    <>
+      <path d={CLOUD} />
+      <path d="M12 11v9M9 17l3 3 3-3" stroke={a} />
+    </>
+  ),
+  publicar: (a) => (
+    <>
+      <path d={CLOUD} />
+      <path d="M12 20v-9M9 14l3-3 3 3" stroke={a} />
+    </>
+  ),
   ok: () => <path d="M5 12.5l4.5 4.5L19 7.5" />,
   cadeado: (a) => (
     <>

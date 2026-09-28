@@ -3,6 +3,7 @@ import './assets/main.css'
 import './brand/tokens.css'
 import { App } from './App'
 import { ConfirmProvider } from './components/ConfirmDialog'
+import { TipLayer } from './components/Tip'
 
 // Vitrine de desenvolvimento: fora do build de produção (import.meta.env.DEV some no empacotamento).
 const vitrine = import.meta.env.DEV && location.hash === '#vitrine'
@@ -46,6 +47,7 @@ if (!vitrine) {
   createRoot(document.getElementById('root')!).render(
     <ConfirmProvider>
       <App />
+      <TipLayer />
     </ConfirmProvider>
   )
 }

@@ -877,6 +877,78 @@ const MUTANTS = [
     replace: 'onClick={() => run(async () => (await support.clear(), null))}'
   },
   {
+    id: 'M81',
+    grep: 'R81 ',
+    file: 'src/preload/index.ts',
+    bug: '"Colocar na fila" chama o tirar da fila',
+    find: "gitStage: (id, paths) => ipcRenderer.invoke('git:stage', id, paths)",
+    replace: "gitStage: (id, paths) => ipcRenderer.invoke('git:unstage', id, paths)"
+  },
+  {
+    id: 'M81b',
+    grep: 'R81 ',
+    file: 'src/renderer/src/components/GitPanel.tsx',
+    bug: 'clique na linha abre o diff do lado errado (fila × alterações)',
+    find: 'else onOpenDiff(file.path, file.staged)',
+    replace: 'else onOpenDiff(file.path, !file.staged)'
+  },
+  {
+    id: 'M81c',
+    grep: 'R81 ',
+    file: 'src/renderer/src/components/DiffView.tsx',
+    bug: 'diff aberto não acompanha o arquivo mudando no disco',
+    find: 'if (changedProject === projectId && (change.git || touchesFile(change, path))) void fetchDiff()',
+    replace: 'if (false && touchesFile(change, path)) void fetchDiff()'
+  },
+  {
+    id: 'M81d',
+    grep: 'R81 ',
+    file: 'src/renderer/src/components/GitPanel.tsx',
+    bug: 'descartar sem pedir confirmação',
+    find: "const ok = await confirm({ title, message: parts.join(' '), confirmLabel: 'Descartar', danger: true })",
+    replace: 'const ok = title !== parts.join()'
+  },
+  {
+    id: 'M81e',
+    grep: 'R81 ',
+    file: 'src/renderer/src/components/GitPanel.tsx',
+    bug: 'Ctrl+Enter na mensagem não commita',
+    find: "if (e.key === 'Enter' && e.ctrlKey) {",
+    replace: "if (e.key === 'Enter' && e.ctrlKey && e.altKey) {"
+  },
+  {
+    id: 'M81f',
+    grep: 'R81 ',
+    file: 'src/renderer/src/components/GitPanel.tsx',
+    bug: 'commit coloca tudo na fila sem perguntar (leva o que não foi escolhido)',
+    find: "if ((await onCommit(message, false)) !== 'nothing-staged') return",
+    replace: "if ((await onCommit(message, true)) !== 'nothing-staged') return"
+  },
+  {
+    id: 'M81g',
+    grep: 'R81 ',
+    file: 'src/main/git.ts',
+    bug: 'main não confere a fila antes de commitar (sem a pergunta, fila vazia vira erro)',
+    find: "    else if ((await runGit(root, ['diff', '--cached', '--quiet'], { okCodes: [1] })).code === 0) return 'nothing-staged'\n",
+    replace: ''
+  },
+  {
+    id: 'M81h',
+    grep: 'R81 ',
+    file: 'src/renderer/src/components/GitPanel.tsx',
+    bug: 'Push mostra o "atrás" no lugar do "à frente"',
+    find: '{status.ahead > 0 && <span className="font-semibold">{status.ahead}</span>}',
+    replace: '{status.behind > 0 && <span className="font-semibold">{status.behind}</span>}'
+  },
+  {
+    id: 'M81i',
+    grep: 'R81 ',
+    file: 'src/renderer/src/components/Tip.tsx',
+    bug: 'dica da identidade nunca aparece ao passar o mouse',
+    find: '  return shown ? <Bubble key={shown.label + shown.anchor.x + shown.anchor.y} {...shown} /> : null',
+    replace: '  return null'
+  },
+  {
     id: 'M82',
     grep: 'R82 ',
     file: 'src/shared/state.ts',

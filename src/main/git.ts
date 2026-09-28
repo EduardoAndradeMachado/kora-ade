@@ -1,9 +1,14 @@
 import { execFile, type ExecFileException } from 'node:child_process'
-import { existsSync, statSync } from 'node:fs'
-import { join, normalize } from 'node:path'
-import type { GitBranch, GitFile, GitFileStatus, GitStatus, GitWorktree } from '../shared/git-types'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { join, normalize, relative, sep } from 'node:path'
+import type { GitBranch, GitCommitResult, GitDiff, GitFile, GitFileStatus, GitStatus, GitWorktree } from '../shared/git-types'
+import { resolveInside } from './files'
 
 const TIMEOUT_MS = 15_000
+// Rede e hooks de commit demoram mais que um status; o login do Git Credential Manager pode abrir o navegador.
+const NETWORK_TIMEOUT_MS = 180_000
+const COMMIT_TIMEOUT_MS = 120_000
+const MAX_DIFF_BYTES = 5 * 1024 * 1024
 const MAX_BUFFER = 64 * 1024 * 1024
 const NOT_A_REPO = /not a git repository/i
 
@@ -11,19 +16,25 @@ export class GitError extends Error {
   constructor(
     message: string,
     readonly exitCode: number | null,
-    readonly stderr: string
+    readonly stderr: string,
+    readonly stdout = ''
   ) {
     super(message)
   }
 }
 
-function gitEnv(): NodeJS.ProcessEnv {
+function gitEnv(literalPathspecs: boolean): NodeJS.ProcessEnv {
   return {
     ...process.env,
+    // Nos caminhos vindos da interface, "[x].txt" é o arquivo, não um glob. Não vale para todo comando:
+    // o check-ignore recusa pathspec com essa marca.
+    ...(literalPathspecs && { GIT_LITERAL_PATHSPECS: '1' }),
     // O Claude/Codex e o git do usuário rodam no mesmo repo em paralelo: um `status` nosso
     // não pode pegar o index.lock e fazer o commit deles falhar.
     GIT_OPTIONAL_LOCKS: '0',
     GIT_TERMINAL_PROMPT: '0',
+    // Pull que vira merge abriria o editor da mensagem, que ninguém vê e travaria até o timeout.
+    GIT_MERGE_AUTOEDIT: 'no',
     GIT_PAGER: 'cat',
     PAGER: 'cat',
     // As mensagens de erro são comparadas por texto (ex.: "not a git repository").
@@ -37,13 +48,18 @@ interface RunResult {
   code: number
 }
 
-function runGit(root: string, args: string[], opts: { input?: string; okCodes?: number[] } = {}): Promise<RunResult> {
+function runGit(
+  root: string,
+  args: string[],
+  opts: { input?: string; okCodes?: number[]; timeoutMs?: number; literalPathspecs?: boolean } = {}
+): Promise<RunResult> {
   const okCodes = opts.okCodes ?? [0]
+  const timeout = opts.timeoutMs ?? TIMEOUT_MS
   return new Promise((resolvePromise, reject) => {
     const child = execFile(
       'git',
       ['--no-pager', '-c', 'color.ui=never', ...args],
-      { cwd: root, env: gitEnv(), timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER, windowsHide: true, encoding: 'utf8' },
+      { cwd: root, env: gitEnv(opts.literalPathspecs === true), timeout, maxBuffer: MAX_BUFFER, windowsHide: true, encoding: 'utf8' },
       (err: ExecFileException | null, stdout: string, stderr: string) => {
         if (!err) return resolvePromise({ stdout, code: 0 })
         if (err.code === 'ENOENT') {
@@ -53,11 +69,12 @@ function runGit(root: string, args: string[], opts: { input?: string; okCodes?: 
           return reject(new GitError(message, null, ''))
         }
         if (err.killed || err.signal) {
-          return reject(new GitError(`O git demorou mais de ${TIMEOUT_MS / 1000}s e foi interrompido (git ${args[0]}).`, null, stderr))
+          return reject(new GitError(`O git demorou mais de ${timeout / 1000}s e foi interrompido (git ${args[0]}).`, null, stderr))
         }
         const code = typeof err.code === 'number' ? err.code : null
         if (code !== null && okCodes.includes(code)) return resolvePromise({ stdout, code })
-        reject(new GitError(stderr.trim() || err.message, code, stderr))
+        // Alguns motivos só saem no stdout (ex.: "nothing to commit").
+        reject(new GitError(stderr.trim() || stdout.trim() || err.message, code, stderr, stdout))
       }
     )
     // Se o git sair antes de ler o stdin (ex.: pasta que não é repo), a escrita dá EPIPE;
@@ -478,4 +495,196 @@ export async function gitSetRemote(root: string, input: string): Promise<string>
     throw err
   }
   return url
+}
+
+// Saídas do git que têm um próximo passo claro; o resto vai com o texto original do git.
+const HINTS: [RegExp, string][] = [
+  [
+    /Please tell me who you are|Author identity unknown/i,
+    'O git não sabe seu nome e e-mail. Configure com git config --global user.name e user.email e commite de novo.'
+  ],
+  [/nothing to commit|nothing added to commit|no changes added to commit/i, 'Nada na fila para commitar.'],
+  [/unmerged files|unresolved conflict/i, 'Há arquivos em conflito. Resolva, coloque na fila e commite de novo.'],
+  [
+    /\[rejected\]|non-fast-forward|fetch first/i,
+    'O remoto tem commits que você ainda não tem. Faça Pull (ou Sincronizar) antes do Push.'
+  ],
+  [
+    /divergent branches|Need to specify how to reconcile/i,
+    'A branch local e a remota divergiram e o git não sabe se junta por merge ou por rebase. Escolha uma vez no terminal (git config pull.rebase false para merge, true para rebase) e faça o Pull de novo.'
+  ],
+  [
+    /local changes to the following files would be overwritten|untracked working tree files would be overwritten/i,
+    'O Pull sobrescreveria alterações locais. Commite ou descarte essas alterações e faça o Pull de novo.'
+  ],
+  [/Automatic merge failed|CONFLICT \(/, 'O Pull trouxe conflitos. Resolva os arquivos em Conflitos, coloque na fila e commite.'],
+  [
+    /Authentication failed|could not read Username|Permission denied \(publickey\)|terminal prompts disabled/i,
+    'O git não conseguiu se autenticar no remoto. Faça login uma vez pelo terminal (ex.: git push) e tente de novo.'
+  ],
+  [
+    /Could not resolve host|unable to access|Could not read from remote repository/i,
+    'Não foi possível falar com o remoto. Confira a conexão e a URL do repositório.'
+  ]
+]
+
+async function withHint<T>(action: string, task: () => Promise<T>): Promise<T> {
+  try {
+    return await task()
+  } catch (err) {
+    if (!(err instanceof GitError)) throw err
+    const output = [err.message, err.stderr, err.stdout].join('\n')
+    const hint = HINTS.find(([pattern]) => pattern.test(output))?.[1]
+    throw new GitError(hint ?? `${action}: ${err.message}`, err.exitCode, err.stderr, err.stdout)
+  }
+}
+
+const PATHSPEC_STDIN = ['--pathspec-from-file=-', '--pathspec-file-nul']
+
+// Caminho do renderer (relativo ao projeto, com o separador do SO) conferido contra a raiz. O git roda com
+// cwd na pasta do projeto, então esse mesmo caminho relativo serve de pathspec. A raiz não é um arquivo.
+function projectRel(root: string, path: string): string {
+  const rel = relative(root, resolveInside(root, path))
+  if (!rel) throw new GitError('Caminho inválido: a pasta do projeto não é um arquivo.', null, '')
+  return rel
+}
+
+const toGitPath = (rel: string): string => rel.split(sep).join('/')
+
+// Pelo stdin, a lista não esbarra no limite de tamanho da linha de comando do Windows.
+function pathspecs(root: string, paths: readonly string[]): string {
+  if (paths.length === 0) throw new GitError('Nenhum arquivo informado.', null, '')
+  return paths.map((p) => toGitPath(projectRel(root, p)) + '\0').join('')
+}
+
+export function gitStage(root: string, paths: readonly string[]): Promise<void> {
+  return withHint('Não foi possível colocar na fila', async () => {
+    await runGit(root, ['add', '-A', ...PATHSPEC_STDIN], { input: pathspecs(root, paths), literalPathspecs: true })
+  })
+}
+
+// `reset` em vez de `restore --staged`: funciona também antes do primeiro commit, quando HEAD não existe.
+export function gitUnstage(root: string, paths: readonly string[]): Promise<void> {
+  return withHint('Não foi possível tirar da fila', async () => {
+    await runGit(root, ['reset', '-q', ...PATHSPEC_STDIN], { input: pathspecs(root, paths), literalPathspecs: true })
+  })
+}
+
+// Descarta só o que não está na fila: arquivo rastreado volta à versão do index; não rastreado vai para
+// `trash` (a Lixeira, no app), porque o git não guarda cópia dele e apagar não teria volta.
+export async function gitDiscard(root: string, paths: readonly string[], trash: (abs: string) => Promise<void>): Promise<void> {
+  const wanted = new Set(paths.map((p) => projectRel(root, p)))
+  const status = await gitStatus(root)
+  if (!status.isRepo) throw new GitError('Esta pasta não é um repositório git.', null, '')
+  const restore: string[] = []
+  const untracked: string[] = []
+  for (const file of status.files) {
+    if (file.staged || !wanted.has(file.path)) continue
+    if (file.status === 'conflicted') {
+      throw new GitError(`"${file.path}" está em conflito. Resolva o conflito antes de descartar.`, null, '')
+    }
+    if (file.status === 'untracked') untracked.push(file.path)
+    else restore.push(file.path)
+  }
+  if (restore.length > 0) {
+    await withHint('Não foi possível descartar', async () => {
+      await runGit(root, ['restore', '--worktree', ...PATHSPEC_STDIN], { input: pathspecs(root, restore), literalPathspecs: true })
+    })
+  }
+  for (const rel of untracked) await trash(resolveInside(root, rel))
+}
+
+// Conteúdo do blob em `rev` (ex.: "HEAD:./a.txt", ":./a.txt"); null se o caminho não existe ali.
+async function blobAt(root: string, rev: string): Promise<string | null> {
+  const { stdout, code } = await runGit(root, ['rev-parse', '--verify', '-q', rev], { okCodes: [1] })
+  if (code !== 0) return null
+  const oid = stdout.trim()
+  const size = Number((await runGit(root, ['cat-file', '-s', oid])).stdout.trim())
+  if (size > MAX_DIFF_BYTES) throw new GitError('Arquivo grande demais para mostrar o diff aqui.', null, '')
+  return (await runGit(root, ['cat-file', 'blob', oid])).stdout
+}
+
+function diskText(file: string): string {
+  if (!existsSync(file)) return ''
+  if (statSync(file).size > MAX_DIFF_BYTES) throw new GitError('Arquivo grande demais para mostrar o diff aqui.', null, '')
+  return readFileSync(file, 'utf8')
+}
+
+export async function gitDiff(root: string, path: string, staged: boolean): Promise<GitDiff> {
+  const rel = projectRel(root, path)
+  const spec = `./${toGitPath(rel)}`
+  let original: string
+  let modified: string
+  if (staged) {
+    const entry = (await gitStatus(root)).files.find((f) => f.staged && f.path === rel)
+    const from = entry?.origPath ? `./${toGitPath(entry.origPath)}` : spec
+    original = (await blobAt(root, `HEAD:${from}`)) ?? ''
+    modified = (await blobAt(root, `:${spec}`)) ?? ''
+  } else {
+    original = (await blobAt(root, `:${spec}`)) ?? ''
+    modified = diskText(resolveInside(root, rel))
+  }
+  if (original.includes('\0') || modified.includes('\0')) return { original: '', modified: '', binary: true }
+  return { original, modified, binary: false }
+}
+
+// Fila vazia devolve 'nothing-staged' sem commitar: quem decide é o index de agora, não o status que a
+// interface tinha (pode estar atrasado). A interface pergunta e chama de novo com `stageAll`, que coloca
+// antes todas as alterações do projeto (o "commit inteligente" do VS Code).
+export async function gitCommit(root: string, message: string, stageAll: boolean): Promise<GitCommitResult> {
+  if (!message.trim()) throw new GitError('Escreva a mensagem do commit.', null, '')
+  return withHint('O commit falhou', async () => {
+    if (stageAll) await runGit(root, ['add', '-A', '--', '.'])
+    else if ((await runGit(root, ['diff', '--cached', '--quiet'], { okCodes: [1] })).code === 0) return 'nothing-staged'
+    // Mensagem pelo stdin: várias linhas, acentos e aspas chegam intactos.
+    await runGit(root, ['commit', '--file=-'], { input: message, timeoutMs: COMMIT_TIMEOUT_MS })
+    return 'committed'
+  })
+}
+
+async function currentBranch(root: string): Promise<GitStatus & { branch: string }> {
+  const status = await gitStatus(root)
+  if (!status.isRepo) throw new GitError('Esta pasta não é um repositório git.', null, '')
+  if (status.detached || !status.branch) {
+    throw new GitError('HEAD destacado: troque para uma branch antes de enviar ou receber commits.', null, '')
+  }
+  return { ...status, branch: status.branch }
+}
+
+async function publishRemote(root: string): Promise<string> {
+  const remotes = (await runGit(root, ['remote'])).stdout.split(/\r?\n/).filter(Boolean)
+  if (remotes.includes('origin')) return 'origin'
+  if (remotes.length === 1) return remotes[0]!
+  throw new GitError(
+    remotes.length === 0
+      ? 'Sem repositório remoto. Vincule ao GitHub antes do Push.'
+      : 'Há mais de um remoto e nenhum se chama origin. Publique a branch pelo terminal.',
+    null,
+    ''
+  )
+}
+
+// Branch sem upstream é publicada no remoto e passa a rastreá-lo, como o "Publicar branch" do VS Code.
+export async function gitPush(root: string): Promise<void> {
+  const status = await currentBranch(root)
+  const args = status.upstream ? ['push'] : ['push', '-u', await publishRemote(root), `refs/heads/${status.branch}`]
+  await withHint('O Push falhou', () => runGit(root, args, { timeoutMs: NETWORK_TIMEOUT_MS }))
+}
+
+export async function gitPull(root: string): Promise<void> {
+  const status = await currentBranch(root)
+  if (!status.upstream) {
+    throw new GitError(`A branch "${status.branch}" ainda não existe no remoto. Publique com Push primeiro.`, null, '')
+  }
+  await withHint('O Pull falhou', () => runGit(root, ['pull'], { timeoutMs: NETWORK_TIMEOUT_MS }))
+}
+
+export async function gitFetch(root: string): Promise<void> {
+  await withHint('Não foi possível buscar do remoto', () => runGit(root, ['fetch'], { timeoutMs: NETWORK_TIMEOUT_MS }))
+}
+
+export async function gitSync(root: string): Promise<void> {
+  const status = await currentBranch(root)
+  if (status.upstream) await gitPull(root)
+  await gitPush(root)
 }

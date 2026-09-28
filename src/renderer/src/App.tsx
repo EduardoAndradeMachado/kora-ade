@@ -32,6 +32,7 @@ import type { UpdateStatus } from '@shared/update'
 // quando o app fica ocioso, para o primeiro clique num arquivo já encontrar o editor pronto.
 const loadCodeView = () => import('@/components/CodeView').then((m) => ({ default: m.CodeView }))
 const CodeView = lazy(loadCodeView)
+const DiffView = lazy(() => import('@/components/DiffView').then((m) => ({ default: m.DiffView })))
 const MONACO_PRELOAD_DELAY_MS = 3000
 import { DormantView } from '@/components/DormantView'
 import { useChoose, useConfirm } from '@/components/ConfirmDialog'
@@ -101,6 +102,7 @@ export function App(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [tabMenu, setTabMenu] = useState<{ projectId: string; tabId: string; where: TabPlace; x: number; y: number } | null>(null)
   const [renameRequest, setRenameRequest] = useState<RenameRequest | null>(null)
+  const [commitDrafts, setCommitDrafts] = useState<Record<string, string>>({})
   const confirm = useConfirm()
   const choose = useChoose()
   const fileSavers = useRef(new Map<string, () => Promise<boolean>>())
@@ -514,11 +516,22 @@ export function App(): React.JSX.Element {
       void window.kora.openFile(project.id, path).catch((err: unknown) => setError(ipcErrorMessage(err)))
       return
     }
-    const existing = (tabs[project.id] ?? []).find((t) => t.kind === 'file' && t.path === path)
+    const existing = (tabs[project.id] ?? []).find((t) => t.kind === 'file' && !t.diff && t.path === path)
     const id = existing?.id ?? `file:${project.id}:${path}`
     if (!existing) {
       const title = path.split(/[\\/]/).pop() ?? path
       const tab: Tab = { kind: 'file', id, title, path, viewer, editing: viewer === 'code', dirty: false }
+      setTabs((prev) => ({ ...prev, [project.id]: [...(prev[project.id] ?? []), tab] }))
+    }
+    selectTab(project.id, id)
+  }
+
+  const openDiff = (project: Project, path: string, staged: boolean): void => {
+    const id = `diff:${staged ? 'staged' : 'working'}:${project.id}:${path}`
+    if (!(tabs[project.id] ?? []).some((t) => t.id === id)) {
+      const name = path.split(/[\\/]/).pop() ?? path
+      const title = `${name} (${staged ? 'na fila' : 'alterações'})`
+      const tab: Tab = { kind: 'file', id, title, path, viewer: 'code', editing: false, dirty: false, diff: { staged } }
       setTabs((prev) => ({ ...prev, [project.id]: [...(prev[project.id] ?? []), tab] }))
     }
     selectTab(project.id, id)
@@ -868,6 +881,21 @@ export function App(): React.JSX.Element {
             list.map((tab) => {
               const visible = projectId === selectedId && activeTab[projectId] === tab.id && !missing.has(projectId)
               if (tab.kind === 'file') {
+                if (tab.diff) {
+                  return (
+                    <Suspense key={`${tab.id}:diff`} fallback={<div className="absolute inset-0 bg-canvas" />}>
+                      <DiffView
+                        projectId={projectId}
+                        path={tab.path}
+                        staged={tab.diff.staged}
+                        visible={visible}
+                        fontSize={state.settings.fileFontSize}
+                        wordWrap={state.settings.fileWordWrap}
+                        onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                      />
+                    </Suspense>
+                  )
+                }
                 if (tab.viewer === 'pdf') {
                   return (
                     <PdfView
@@ -1008,6 +1036,11 @@ export function App(): React.JSX.Element {
             )
           }
           onOpenFile={(path) => openFile(selected, path)}
+          onOpenDiff={(path, staged) => openDiff(selected, path, staged)}
+          commitDraft={commitDrafts[selected.id] ?? ''}
+          onCommitDraftChange={(update) =>
+            setCommitDrafts((drafts) => ({ ...drafts, [selected.id]: update(drafts[selected.id] ?? '') }))
+          }
           onOpenSession={(session) => openSession(selected, session, true)}
           onPinSession={(session) => openSession(selected, session, false)}
           onOpenWorktree={(path) => void openWorktree(path)}

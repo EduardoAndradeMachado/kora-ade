@@ -27,12 +27,21 @@ import { resolveTerminalLink } from './terminal-links'
 import {
   gitBranches,
   gitCheckout,
+  gitCommit,
   gitCreateBranch,
+  gitDiff,
+  gitDiscard,
+  gitFetch,
   gitIgnored,
   gitInit,
+  gitPull,
+  gitPush,
   gitRemoteUrl,
   gitSetRemote,
+  gitStage,
   gitStatus,
+  gitSync,
+  gitUnstage,
   gitWorktrees
 } from './git'
 import { KORA_FILE_PRIVILEGED_SCHEMES, registerKoraFileProtocol } from './file-protocol'
@@ -580,6 +589,21 @@ function registerIpc(): void {
   ipcMain.handle('git:ignored', async (_e, id: string, relPaths: string[]) =>
     [...(await gitIgnored(projectRoot(id), Array.isArray(relPaths) ? relPaths.map(String) : []))]
   )
+  const pathList = (paths: unknown): string[] => (Array.isArray(paths) ? paths.map(String) : [])
+  ipcMain.handle('git:stage', (_e, id: string, paths: unknown) => gitStage(projectRoot(id), pathList(paths)))
+  ipcMain.handle('git:unstage', (_e, id: string, paths: unknown) => gitUnstage(projectRoot(id), pathList(paths)))
+  // Não rastreado descartado vai para a Lixeira, como o excluir do explorador.
+  ipcMain.handle('git:discard', (_e, id: string, paths: unknown) =>
+    gitDiscard(projectRoot(id), pathList(paths), (abs) => shell.trashItem(abs))
+  )
+  ipcMain.handle('git:diff', (_e, id: string, rel: string, staged: boolean) => gitDiff(projectRoot(id), String(rel), staged === true))
+  ipcMain.handle('git:commit', (_e, id: string, message: string, stageAll: boolean) =>
+    gitCommit(projectRoot(id), String(message), stageAll === true)
+  )
+  ipcMain.handle('git:push', (_e, id: string) => gitPush(projectRoot(id)))
+  ipcMain.handle('git:pull', (_e, id: string) => gitPull(projectRoot(id)))
+  ipcMain.handle('git:fetch', (_e, id: string) => gitFetch(projectRoot(id)))
+  ipcMain.handle('git:sync', (_e, id: string) => gitSync(projectRoot(id)))
 
   ipcMain.handle('usage:read', () => usage.read())
 

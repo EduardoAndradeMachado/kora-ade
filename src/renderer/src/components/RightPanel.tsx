@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Icon, type IconName } from '@/brand/icons'
 import type { Project } from '@shared/state'
 import type { SessionSummary } from '@shared/ipc'
+import type { GitCommitResult } from '@shared/git-types'
 import { FileTree } from '@/components/FileTree'
 import { SessionsPanel } from '@/components/SessionsPanel'
 import { GitPanel } from '@/components/GitPanel'
@@ -22,6 +23,10 @@ interface Props {
   // Conversas com aba aberta e o nome dado a essa aba (null: aba sem nome do usuário).
   openSessions: Map<string, string | null>
   onOpenFile(path: string): void
+  onOpenDiff(path: string, staged: boolean): void
+  // Mensagem do commit guardada fora do painel, que é recriado a cada troca de projeto.
+  commitDraft: string
+  onCommitDraftChange(update: (current: string) => string): void
   onOpenSession(session: SessionSummary): void
   onPinSession(session: SessionSummary): void
   onOpenWorktree(path: string): void
@@ -34,6 +39,7 @@ export function RightPanel(props: Props): React.JSX.Element {
   const [view, setView] = useState<View>('files')
   const [reloadKey, setReloadKey] = useState(0)
   const git = useGit(props.project.id, reloadKey, view === 'git')
+  const id = props.project.id
 
   return (
     <aside className="flex w-72 shrink-0 flex-col border-l bg-background">
@@ -96,15 +102,35 @@ export function RightPanel(props: Props): React.JSX.Element {
                 branches={git.branches}
                 worktrees={git.worktrees}
                 loading={git.loading}
+                busy={git.busy}
                 error={git.error}
                 onRefresh={git.refresh}
-                onCreateBranch={(name, checkout) => git.run(() => window.kora.gitCreateBranch(props.project.id, name, checkout))}
-                onCheckout={(name, remote) => git.run(() => window.kora.gitCheckout(props.project.id, name, remote))}
+                onCreateBranch={(name, checkout) => void git.run(() => window.kora.gitCreateBranch(id, name, checkout))}
+                onCheckout={(name, remote) => void git.run(() => window.kora.gitCheckout(id, name, remote))}
                 remote={git.remote}
-                onInit={() => git.run(() => window.kora.gitInit(props.project.id))}
-                onSetRemote={(url) => git.run(async () => void (await window.kora.gitSetRemote(props.project.id, url)))}
+                onInit={() => void git.run(() => window.kora.gitInit(id))}
+                onSetRemote={(url) => void git.run(() => window.kora.gitSetRemote(id, url))}
                 onOpenFile={props.onOpenFile}
+                onOpenDiff={props.onOpenDiff}
                 onOpenWorktree={props.onOpenWorktree}
+                onStage={(paths) => void git.run(() => window.kora.gitStage(id, paths), 'Colocando na fila…')}
+                onUnstage={(paths) => void git.run(() => window.kora.gitUnstage(id, paths), 'Tirando da fila…')}
+                onDiscard={(paths) => void git.run(() => window.kora.gitDiscard(id, paths), 'Descartando…')}
+                commitMessage={props.commitDraft}
+                onCommitMessageChange={(message) => props.onCommitDraftChange(() => message)}
+                onCommit={async (message, stageAll) => {
+                  let result: GitCommitResult | null = null
+                  const ok = await git.run(async () => {
+                    result = await window.kora.gitCommit(id, message, stageAll)
+                  }, 'Commitando…')
+                  // Só limpa se a mensagem não mudou enquanto o commit rodava.
+                  if (result === 'committed') props.onCommitDraftChange((current) => (current === message ? '' : current))
+                  return ok ? result : null
+                }}
+                onPush={() => void git.run(() => window.kora.gitPush(id), 'Enviando (Push)…')}
+                onPull={() => void git.run(() => window.kora.gitPull(id), 'Trazendo (Pull)…')}
+                onSync={() => void git.run(() => window.kora.gitSync(id), 'Sincronizando…')}
+                onFetch={() => void git.run(() => window.kora.gitFetch(id), 'Buscando do remoto…')}
               />
             </div>
           )}

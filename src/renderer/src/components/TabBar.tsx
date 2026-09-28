@@ -31,6 +31,8 @@ export type Tab =
       dirty: boolean
       // Pedido de ir até uma linha (ex.: Ctrl+clique em "src/a.ts:42" no terminal); n muda a cada pedido.
       jump?: { line: number; n: number }
+      // Aba de diff do git (só leitura) em vez do arquivo: staged compara HEAD com a fila, senão a fila com o disco.
+      diff?: { staged: boolean }
     }
 
 export type TabPlace = 'bar' | 'side'
@@ -45,7 +47,7 @@ export const isDormant = (tab: Tab): boolean => tab.kind === 'terminal' && !tab.
 export function TabIcon({ tab, selected, className }: { tab: Tab; selected: boolean; className?: string }): React.JSX.Element {
   const dim = isDormant(tab) && 'opacity-50'
   if (tab.kind === 'file') {
-    const name: IconName = { markdown: 'arquivo', code: 'codigo', pdf: 'pdf', image: 'imagem' }[tab.viewer] as IconName
+    const name: IconName = tab.diff ? 'git' : ({ markdown: 'arquivo', code: 'codigo', pdf: 'pdf', image: 'imagem' }[tab.viewer] as IconName)
     return <Icon name={name} active={selected} className={cn('size-3.5', className)} />
   }
   if (tab.agent) {

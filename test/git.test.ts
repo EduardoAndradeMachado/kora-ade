@@ -1,17 +1,26 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, normalize } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   gitBranches,
   gitCheckout,
+  gitCommit,
   gitCreateBranch,
+  gitDiff,
+  gitDiscard,
+  gitFetch,
   gitIgnored,
   gitInit,
+  gitPull,
+  gitPush,
   gitRemoteUrl,
   gitSetRemote,
+  gitStage,
   gitStatus,
+  gitSync,
+  gitUnstage,
   gitWorktrees,
   normalizeRemoteUrl,
   parsePorcelainV2,
@@ -640,5 +649,348 @@ describe('remoto origin', () => {
     const plain = join(parent, 'sem-git')
     mkdirSync(plain)
     await expect(gitSetRemote(plain, 'https://github.com/a/b')).rejects.toThrow(/ainda não é um repositório git/)
+  })
+})
+
+describe('fila (stage) e descarte', () => {
+  const staged = async (root = repo): Promise<string[]> =>
+    (await gitStatus(root)).files.filter((f) => f.staged).map((f) => f.path).sort()
+  const unstaged = async (root = repo): Promise<string[]> =>
+    (await gitStatus(root)).files.filter((f) => !f.staged).map((f) => `${f.status}:${f.path}`).sort()
+
+  it('coloca na fila só os arquivos pedidos, inclusive apagado, não rastreado e nome que parece glob', async () => {
+    write('a.txt', 'a alterado\n')
+    write('b.txt', 'b alterado\n')
+    unlinkSync(join(repo, 'c.txt'))
+    write('[x].txt', 'colchete\n')
+    write('x.txt', 'não é o [x]\n')
+    write(join('pasta', 'novo arquivo.txt'), 'novo\n')
+
+    await gitStage(repo, ['a.txt', 'c.txt', '[x].txt', join('pasta', 'novo arquivo.txt')])
+
+    expect(await staged()).toEqual(['[x].txt', 'a.txt', 'c.txt', join('pasta', 'novo arquivo.txt')].sort())
+    expect(await unstaged()).toEqual(['modified:b.txt', 'untracked:x.txt'])
+  })
+
+  it('tira da fila sem mexer no conteúdo do disco; renomeado sai inteiro com os dois caminhos', async () => {
+    write('a.txt', 'a alterado\n')
+    git(repo, 'add', 'a.txt')
+    git(repo, 'mv', '1 velho.txt', 'novo.txt')
+
+    await gitUnstage(repo, ['a.txt', 'novo.txt', '1 velho.txt'])
+
+    expect(await staged()).toEqual([])
+    expect(readFileSync(join(repo, 'a.txt'), 'utf8')).toBe('a alterado\n')
+    expect(await unstaged()).toEqual(['deleted:1 velho.txt', 'modified:a.txt', 'untracked:novo.txt'])
+  })
+
+  it('tira da fila antes do primeiro commit (sem HEAD)', async () => {
+    const fresh = join(parent, 'sem-commit')
+    initRepo(fresh)
+    write('um.txt', '1\n', fresh)
+    git(fresh, 'add', 'um.txt')
+
+    await gitUnstage(fresh, ['um.txt'])
+
+    expect(await staged(fresh)).toEqual([])
+    expect(await unstaged(fresh)).toEqual(['untracked:um.txt'])
+  })
+
+  it('projeto numa subpasta: caminhos relativos ao projeto', async () => {
+    const project = join(repo, 'pasta')
+    write(join('pasta', 'd.txt'), 'alterado\n')
+
+    await gitStage(project, ['d.txt'])
+
+    expect(git(repo, 'diff', '--cached', '--name-only').trim()).toBe('pasta/d.txt')
+  })
+
+  it('recusa caminho fora do projeto sem mexer no index', async () => {
+    const project = join(repo, 'pasta')
+    write('a.txt', 'fora\n')
+
+    await expect(gitStage(project, [join('..', 'a.txt')])).rejects.toThrow(/fora do projeto/)
+    await expect(gitStage(repo, [''])).rejects.toThrow(/Caminho inválido/)
+    await expect(gitStage(repo, [])).rejects.toThrow(/Nenhum arquivo/)
+    expect(await staged()).toEqual([])
+  })
+
+  it('descartar volta o rastreado à versão da fila e manda o não rastreado para a lixeira', async () => {
+    write('a.txt', 'a alterado\n')
+    unlinkSync(join(repo, 'c.txt'))
+    write('dupla.txt', 'v2\n')
+    git(repo, 'add', 'dupla.txt')
+    write('dupla.txt', 'v3\n')
+    write('solto.txt', 'solto\n')
+    const trashed: string[] = []
+
+    await gitDiscard(repo, ['a.txt', 'c.txt', 'dupla.txt', 'solto.txt'], async (abs) => {
+      trashed.push(abs)
+    })
+
+    expect(readFileSync(join(repo, 'a.txt'), 'utf8')).toBe('a\n')
+    expect(readFileSync(join(repo, 'c.txt'), 'utf8')).toBe('c\n')
+    expect(readFileSync(join(repo, 'dupla.txt'), 'utf8')).toBe('v2\n')
+    expect(await staged()).toEqual(['dupla.txt'])
+    expect(trashed).toEqual([join(repo, 'solto.txt')])
+  })
+
+  it('descartar não toca no que não foi pedido nem no que só está na fila', async () => {
+    write('a.txt', 'a alterado\n')
+    write('b.txt', 'b na fila\n')
+    git(repo, 'add', 'b.txt')
+    git(repo, 'rm', '-q', 'c.txt')
+
+    await gitDiscard(repo, ['b.txt', 'c.txt'], async () => {
+      throw new Error('não deveria ir para a lixeira')
+    })
+
+    expect(readFileSync(join(repo, 'a.txt'), 'utf8')).toBe('a alterado\n')
+    expect(readFileSync(join(repo, 'b.txt'), 'utf8')).toBe('b na fila\n')
+    expect(existsSync(join(repo, 'c.txt'))).toBe(false)
+    expect(await staged()).toEqual(['b.txt', 'c.txt'])
+  })
+
+  it('descartar arquivo em conflito é recusado', async () => {
+    git(repo, 'switch', '-q', '-c', 'lado')
+    write('a.txt', 'lado\n')
+    commitAll(repo, 'lado')
+    git(repo, 'switch', '-q', 'main')
+    write('a.txt', 'main\n')
+    commitAll(repo, 'main')
+    expect(() => git(repo, 'merge', 'lado')).toThrow()
+
+    await expect(gitDiscard(repo, ['a.txt'], async () => {})).rejects.toThrow(/em conflito/)
+  })
+})
+
+describe('diff de um arquivo', () => {
+  it('não staged compara a fila com o disco', async () => {
+    write('dupla.txt', 'v2\n')
+    git(repo, 'add', 'dupla.txt')
+    write('dupla.txt', 'v3\n')
+
+    expect(await gitDiff(repo, 'dupla.txt', false)).toEqual({ original: 'v2\n', modified: 'v3\n', binary: false })
+  })
+
+  it('staged compara HEAD com a fila', async () => {
+    write('dupla.txt', 'v2\n')
+    git(repo, 'add', 'dupla.txt')
+    write('dupla.txt', 'v3\n')
+
+    expect(await gitDiff(repo, 'dupla.txt', true)).toEqual({ original: 'v1\n', modified: 'v2\n', binary: false })
+  })
+
+  it('novo, apagado e não rastreado têm um lado vazio', async () => {
+    write('novo.txt', 'novo\n')
+    git(repo, 'add', 'novo.txt')
+    unlinkSync(join(repo, 'c.txt'))
+    write('solto.txt', 'solto\n')
+
+    expect(await gitDiff(repo, 'novo.txt', true)).toMatchObject({ original: '', modified: 'novo\n' })
+    expect(await gitDiff(repo, 'c.txt', false)).toMatchObject({ original: 'c\n', modified: '' })
+    expect(await gitDiff(repo, 'solto.txt', false)).toMatchObject({ original: '', modified: 'solto\n' })
+  })
+
+  it('renomeado staged mostra o conteúdo antigo do caminho de origem', async () => {
+    git(repo, 'mv', '1 velho.txt', 'novo.txt')
+    write('novo.txt', 'conteúdo que sobrevive ao rename\nmais uma linha\n')
+    git(repo, 'add', 'novo.txt')
+
+    expect(await gitDiff(repo, 'novo.txt', true)).toEqual({
+      original: 'conteúdo que sobrevive ao rename\n',
+      modified: 'conteúdo que sobrevive ao rename\nmais uma linha\n',
+      binary: false
+    })
+  })
+
+  it('projeto numa subpasta e repositório sem commit', async () => {
+    write(join('pasta', 'd.txt'), 'd novo\n')
+    expect(await gitDiff(join(repo, 'pasta'), 'd.txt', false)).toMatchObject({ original: 'd\n', modified: 'd novo\n' })
+
+    const fresh = join(parent, 'sem-commit')
+    initRepo(fresh)
+    write('um.txt', '1\n', fresh)
+    git(fresh, 'add', 'um.txt')
+    expect(await gitDiff(fresh, 'um.txt', true)).toMatchObject({ original: '', modified: '1\n' })
+  })
+
+  it('binário não vem como texto', async () => {
+    writeFileSync(join(repo, 'img.bin'), Buffer.from([0x89, 0x50, 0x00, 0x01]))
+    commitAll(repo, 'binário')
+    writeFileSync(join(repo, 'img.bin'), Buffer.from([0x89, 0x50, 0x00, 0x02]))
+
+    expect(await gitDiff(repo, 'img.bin', false)).toEqual({ original: '', modified: '', binary: true })
+  })
+})
+
+describe('commit', () => {
+  const lastMessage = (): string => git(repo, 'log', '-1', '--format=%B').replace(/\n+$/, '')
+
+  it('commita só o que está na fila, com a mensagem de várias linhas intacta', async () => {
+    write('a.txt', 'a alterado\n')
+    write('b.txt', 'b alterado\n')
+    git(repo, 'add', 'a.txt')
+    const message = 'feat: ação "com aspas" e $HOME\n\ncorpo com acentuação: não, já, café'
+
+    expect(await gitCommit(repo, message, false)).toBe('committed')
+
+    expect(lastMessage()).toBe(message)
+    expect(git(repo, 'show', '--name-only', '--format=', 'HEAD').trim()).toBe('a.txt')
+    expect((await gitStatus(repo)).files).toEqual([{ path: 'b.txt', status: 'modified', staged: false }])
+  })
+
+  it('stageAll coloca tudo do projeto na fila antes (inclusive não rastreado e apagado)', async () => {
+    write('a.txt', 'a alterado\n')
+    unlinkSync(join(repo, 'c.txt'))
+    write('solto.txt', 'solto\n')
+
+    expect(await gitCommit(repo, 'tudo', true)).toBe('committed')
+
+    expect((await gitStatus(repo)).files).toEqual([])
+    expect(git(repo, 'show', '--name-status', '--format=', 'HEAD').trim().split(/\r?\n/).sort()).toEqual([
+      'A\tsolto.txt',
+      'D\tc.txt',
+      'M\ta.txt'
+    ])
+  })
+
+  it('fila vazia devolve nothing-staged sem commitar nem colocar nada na fila; mensagem vazia é recusada', async () => {
+    const head = git(repo, 'rev-parse', 'HEAD')
+    write('a.txt', 'a alterado\n')
+
+    await expect(gitCommit(repo, '   \n', false)).rejects.toThrow('Escreva a mensagem do commit.')
+    expect(await gitCommit(repo, 'nada', false)).toBe('nothing-staged')
+    expect(git(repo, 'rev-parse', 'HEAD')).toBe(head)
+    expect((await gitStatus(repo)).files).toEqual([{ path: 'a.txt', status: 'modified', staged: false }])
+  })
+
+  it('fila vazia antes do primeiro commit também devolve nothing-staged', async () => {
+    const fresh = join(parent, 'sem-commit')
+    initRepo(fresh)
+    write('um.txt', '1\n', fresh)
+
+    expect(await gitCommit(fresh, 'primeiro', false)).toBe('nothing-staged')
+    expect(await gitCommit(fresh, 'primeiro', true)).toBe('committed')
+    expect(git(fresh, 'log', '--format=%s').trim()).toBe('primeiro')
+  })
+
+  it('stageAll sem nenhuma alteração explica em português', async () => {
+    await expect(gitCommit(repo, 'nada', true)).rejects.toThrow('Nada na fila para commitar.')
+  })
+
+  it('commit com conflito não resolvido pede para resolver antes', async () => {
+    git(repo, 'switch', '-q', '-c', 'lado')
+    write('a.txt', 'lado\n')
+    commitAll(repo, 'lado')
+    git(repo, 'switch', '-q', 'main')
+    write('a.txt', 'main\n')
+    commitAll(repo, 'main')
+    expect(() => git(repo, 'merge', 'lado')).toThrow()
+
+    await expect(gitCommit(repo, 'merge', false)).rejects.toThrow('Há arquivos em conflito. Resolva, coloque na fila e commite de novo.')
+  })
+
+  it('hook que recusa o commit mostra o motivo do hook', async () => {
+    write(join('.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho "lint quebrou" >&2\nexit 1\n')
+    write('a.txt', 'a alterado\n')
+    git(repo, 'add', 'a.txt')
+
+    await expect(gitCommit(repo, 'x', false)).rejects.toThrow(/O commit falhou: lint quebrou/)
+  })
+})
+
+describe('push, pull, buscar e sincronizar', () => {
+  let remote: string
+  let other: string
+
+  const commitIn = (dir: string, file: string, message: string): void => {
+    write(file, `${message}\n`, dir)
+    commitAll(dir, message)
+  }
+  const remoteLog = (branch = 'main'): string => git(remote, 'log', '--format=%s', branch).trim()
+
+  beforeEach(() => {
+    remote = join(parent, 'remoto.git')
+    git(parent, 'init', '-q', '--bare', '-b', 'main', remote)
+    git(repo, 'remote', 'add', 'origin', remote)
+    git(repo, 'push', '-q', '-u', 'origin', 'main')
+    other = join(parent, 'outro')
+    git(parent, 'clone', '-q', remote, other)
+    git(other, 'config', 'user.name', 'Outro')
+    git(other, 'config', 'user.email', 'outro@kora.local')
+    git(other, 'config', 'commit.gpgsign', 'false')
+  })
+
+  it('push envia os commits locais', async () => {
+    commitIn(repo, 'l.txt', 'local 1')
+
+    await gitPush(repo)
+
+    expect(remoteLog()).toBe('local 1\ninicial')
+    expect(await gitStatus(repo)).toMatchObject({ ahead: 0, behind: 0 })
+  })
+
+  it('push de branch sem upstream publica no origin e passa a rastrear', async () => {
+    git(repo, 'switch', '-q', '-c', 'nova')
+    commitIn(repo, 'n.txt', 'na nova')
+
+    await gitPush(repo)
+
+    expect(remoteLog('nova')).toBe('na nova\ninicial')
+    expect(await gitStatus(repo)).toMatchObject({ branch: 'nova', upstream: 'origin/nova', ahead: 0 })
+  })
+
+  it('push recusado pelo remoto explica que falta o pull', async () => {
+    commitIn(other, 'r.txt', 'remoto')
+    git(other, 'push', '-q')
+    commitIn(repo, 'l.txt', 'local')
+
+    await expect(gitPush(repo)).rejects.toThrow(/Faça Pull \(ou Sincronizar\) antes do Push/)
+  })
+
+  it('buscar atualiza o "atrás"; pull traz os commits', async () => {
+    commitIn(other, 'r.txt', 'remoto')
+    git(other, 'push', '-q')
+
+    await gitFetch(repo)
+    expect(await gitStatus(repo)).toMatchObject({ behind: 1 })
+
+    await gitPull(repo)
+    expect(readFileSync(join(repo, 'r.txt'), 'utf8')).toBe('remoto\n')
+    expect(await gitStatus(repo)).toMatchObject({ ahead: 0, behind: 0 })
+  })
+
+  it('pull sem upstream pede para publicar antes', async () => {
+    git(repo, 'switch', '-q', '-c', 'sem-upstream')
+    await expect(gitPull(repo)).rejects.toThrow(/ainda não existe no remoto/)
+  })
+
+  it('sincronizar com os dois lados à frente faz pull (merge) e push', async () => {
+    git(repo, 'config', 'pull.rebase', 'false')
+    commitIn(other, 'r.txt', 'remoto')
+    git(other, 'push', '-q')
+    commitIn(repo, 'l.txt', 'local')
+
+    await gitSync(repo)
+
+    expect(await gitStatus(repo)).toMatchObject({ ahead: 0, behind: 0 })
+    const pushed = remoteLog()
+    expect(pushed).toContain('remoto')
+    expect(pushed).toContain('local')
+  })
+
+  it('pull com branches divergentes e sem configuração explica o que escolher', async () => {
+    commitIn(other, 'r.txt', 'remoto')
+    git(other, 'push', '-q')
+    commitIn(repo, 'l.txt', 'local')
+
+    await expect(gitPull(repo)).rejects.toThrow(/divergiram/)
+  })
+
+  it('HEAD destacado recusa push e pull', async () => {
+    git(repo, 'checkout', '-q', '--detach')
+    await expect(gitPush(repo)).rejects.toThrow(/HEAD destacado/)
+    await expect(gitPull(repo)).rejects.toThrow(/HEAD destacado/)
   })
 })

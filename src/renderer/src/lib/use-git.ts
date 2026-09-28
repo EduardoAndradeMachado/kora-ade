@@ -12,9 +12,13 @@ export interface GitState {
   worktrees: GitWorktree[]
   remote: string | null
   loading: boolean
+  // Ação do usuário em andamento (commit, push…), separada do `loading` do polling: os botões não podem
+  // piscar desabilitados a cada atualização automática.
+  busy: string | null
   error: string | null
   refresh(): void
-  run(action: () => Promise<void>): void
+  // true se deu certo; o erro fica em `error`.
+  run(action: () => Promise<unknown>, busyLabel?: string): Promise<boolean>
 }
 
 // O Claude/Codex mexem no repositório o tempo todo: o aviso do watcher atualiza na hora, e o polling
@@ -26,6 +30,7 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
   const [remote, setRemote] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
 
   const refresh = useCallback(() => setTick((t) => t + 1), [])
@@ -82,16 +87,21 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
     }
   }, [refresh])
 
-  const run = (action: () => Promise<void>): void => {
+  const run = async (action: () => Promise<unknown>, busyLabel = 'Aguarde…'): Promise<boolean> => {
     setLoading(true)
-    action().then(
-      () => refresh(),
-      (err: unknown) => {
-        setError(ipcErrorMessage(err))
-        setLoading(false)
-      }
-    )
+    setBusy(busyLabel)
+    try {
+      await action()
+      refresh()
+      return true
+    } catch (err) {
+      setError(ipcErrorMessage(err))
+      setLoading(false)
+      return false
+    } finally {
+      setBusy(null)
+    }
   }
 
-  return { status, branches, worktrees, remote, loading, error, refresh, run }
+  return { status, branches, worktrees, remote, loading, busy, error, refresh, run }
 }

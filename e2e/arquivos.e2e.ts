@@ -490,19 +490,19 @@ test('R21 Git: branch atual, locais, remotas e worktrees; criar branch e trocar 
 
   const head = panel.locator('div.h-8 button').first()
   await expect(head).toContainText('main')
-  const branchRows = panel.locator('div[title*="Clique para trocar"], div[title*="Branch atual"]')
+  const branchRows = panel.locator('div[data-tip*="Clique para trocar"], div[data-tip*="Branch atual"]')
   await expect(branchRows).toHaveCount(3)
   const names = await branchRows.locator('span.flex-1').allTextContents()
   expect(names.sort()).toEqual(['feature-x', 'main', 'wt-branch'])
 
   await expect(panel.getByText('Remotas')).toBeVisible()
   await panel.locator('span.flex-1', { hasText: /^origin$/ }).click()
-  const remoteRows = panel.locator('div[title*="rastreando origin/"]')
+  const remoteRows = panel.locator('div[data-tip*="rastreando origin/"]')
   await expect(remoteRows.locator('span.flex-1')).toHaveText(['feature-x', 'main'])
 
   await expect(panel.getByText('Worktrees')).toBeVisible()
-  await expect(panel.locator('div[title*="wt-teste"]')).toContainText('wt-branch')
-  await expect(panel.locator('div[title*="worktree atual"]')).toContainText('proj-teste')
+  await expect(panel.locator('div[data-tip*="wt-teste"]')).toContainText('wt-branch')
+  await expect(panel.locator('div[data-tip*="worktree atual"]')).toContainText('proj-teste')
 
   await panel.getByRole('button', { name: 'Nova branch' }).click()
   const input = panel.getByPlaceholder('nome-da-branch')
@@ -511,11 +511,119 @@ test('R21 Git: branch atual, locais, remotas e worktrees; criar branch e trocar 
   await expect.poll(() => git(env.project, env, 'branch', '--show-current')).toBe('nova-branch')
   await expect(head).toContainText('nova-branch')
 
-  await panel.locator('div[title*="Clique para trocar"]').filter({ hasText: 'feature-x' }).click()
+  await panel.locator('div[data-tip*="Clique para trocar"]').filter({ hasText: 'feature-x' }).click()
   await expect.poll(() => git(env.project, env, 'branch', '--show-current')).toBe('feature-x')
   await expect(head).toContainText('feature-x')
   expect(await run.nativeDialogs()).toEqual([])
   void page
+})
+
+test('R81 Git como no VS Code: diff ao clicar, descartar, fila e tirar da fila, commit (Ctrl+Enter e sem nada na fila), push, buscar e pull', async ({ kora }) => {
+  const env = kora.env()
+  seedRepo(env)
+  // O app roda o git com HOME = env.home: é daí que sai o autor do commit feito pela interface.
+  writeFileSync(join(env.home, '.gitconfig'), '[user]\n\tname = Kora E2E\n\temail = e2e@kora.invalid\n[commit]\n\tgpgsign = false\n')
+  const remote = join(env.root, 'remoto.git')
+  git(env.root, env, 'init', '-q', '--bare', '-b', 'main', remote)
+  git(env.project, env, 'branch', '-M', 'main')
+  git(env.project, env, 'remote', 'add', 'origin', remote)
+  git(env.project, env, 'push', '-q', '-u', 'origin', 'main')
+  writeFileSync(join(env.project, 'tracked.txt'), 'alterado\n')
+  writeFileSync(join(env.project, 'src', 'app.ts'), 'export const valor = 2\n')
+  writeFileSync(join(env.project, 'novo.txt'), 'não rastreado\n')
+
+  const run = await kora.launch(env)
+  const page = run.page
+  const panel = panelOf(run)
+  await panel.getByRole('button', { name: 'Git' }).click()
+
+  const fileRow = (group: string, rel: string) =>
+    panel.locator(`[data-git-group="files:${group}"] [data-git-file="${rel.replaceAll('\\', '\\\\')}"]`)
+  const rowAction = async (group: string, rel: string, label: string): Promise<void> => {
+    const r = fileRow(group, rel)
+    await r.hover()
+    await r.getByRole('button', { name: label }).click()
+  }
+  const cached = (): string => git(env.project, env, 'diff', '--cached', '--name-only')
+  const diffSide = (side: 'original' | 'modified') =>
+    page.locator('[data-diff-view]').filter({ visible: true }).locator(`.monaco-diff-editor .editor.${side} .view-lines:not(.line-delete)`)
+
+  // Clique na alteração abre o diff fila ↔ disco, e o diff acompanha o arquivo mudando no disco.
+  await fileRow('changes', 'tracked.txt').click()
+  await expect(ui.barTab(page, 'tracked.txt (alterações)')).toBeVisible()
+  await expect(diffSide('original')).toContainText('original')
+  await expect(diffSide('modified')).toContainText('alterado')
+  writeFileSync(join(env.project, 'tracked.txt'), 'alterado de novo\n')
+  await expect(diffSide('modified')).toContainText('alterado de novo')
+
+  // Descartar pede confirmação no diálogo do app e volta o arquivo à versão da fila.
+  await rowAction('changes', join('src', 'app.ts'), 'Descartar alterações')
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('Descartar as alterações em "app.ts"?')
+  await dialog.getByRole('button', { name: 'Descartar' }).click()
+  // O git do app usa a config de sistema do Git for Windows (autocrlf): o arquivo volta com CRLF.
+  await expect.poll(() => readFileSync(join(env.project, 'src', 'app.ts'), 'utf8').replace(/\r\n/g, '\n')).toBe('export const valor = 1\n')
+  await expect(fileRow('changes', join('src', 'app.ts'))).toHaveCount(0)
+
+  // Fila: colocar, abrir o diff HEAD ↔ fila, tirar e colocar de novo.
+  await rowAction('changes', 'tracked.txt', 'Colocar na fila')
+  await expect.poll(cached).toBe('tracked.txt')
+  await fileRow('staged', 'tracked.txt').click()
+  await expect(ui.barTab(page, 'tracked.txt (na fila)')).toBeVisible()
+  await expect(diffSide('original')).toContainText('original')
+  await expect(diffSide('modified')).toContainText('alterado de novo')
+  await rowAction('staged', 'tracked.txt', 'Tirar da fila')
+  await expect.poll(cached).toBe('')
+  await expect(fileRow('changes', 'tracked.txt')).toBeVisible()
+  await rowAction('changes', 'tracked.txt', 'Colocar na fila')
+  await expect.poll(cached).toBe('tracked.txt')
+
+  // Commit com Ctrl+Enter leva só o que está na fila; a mensagem de várias linhas chega intacta.
+  const message = panel.getByRole('textbox', { name: 'Mensagem do commit' })
+  await message.fill('feat: commit pelo Kora\n\ncorpo com acentuação')
+  await message.press('Control+Enter')
+  await expect.poll(() => git(env.project, env, 'log', '-1', '--format=%B')).toBe('feat: commit pelo Kora\n\ncorpo com acentuação')
+  expect(git(env.project, env, 'show', '--name-only', '--format=', 'HEAD')).toBe('tracked.txt')
+  await expect(message).toHaveValue('')
+  await expect(fileRow('untracked', 'novo.txt')).toBeVisible()
+
+  // Push mostra quantos commits vão e envia.
+  const push = panel.getByRole('button', { name: /^Push/ })
+  await expect(push).toHaveText('Push1')
+  await push.click()
+  await expect.poll(() => git(remote, env, 'log', '-1', '--format=%s', 'main')).toBe('feat: commit pelo Kora')
+  await expect(push).toHaveText('Push')
+
+  // Commit de outro clone: Buscar mostra o "atrás" e Pull traz o arquivo.
+  const other = join(env.root, 'outro')
+  git(env.root, env, 'clone', '-q', remote, other)
+  writeFileSync(join(other, 'remoto.txt'), 'veio do remoto\n')
+  git(other, env, 'add', '-A')
+  git(other, env, 'commit', '-q', '-m', 'commit remoto')
+  git(other, env, 'push', '-q', 'origin', 'main')
+  const pull = panel.getByRole('button', { name: /^Pull/ })
+  // Dica na identidade do app, não o title nativo do Windows.
+  const fetch = panel.getByRole('button', { name: 'Buscar' })
+  await expect(fetch).not.toHaveAttribute('title')
+  await fetch.hover()
+  await expect(page.getByRole('tooltip')).toContainText('Atualiza o que o remoto tem, sem mexer nos seus arquivos.')
+  await fetch.click()
+  await expect(page.getByRole('tooltip')).toHaveCount(0)
+  await expect(pull).toHaveText('Pull1')
+  await pull.click()
+  await expect.poll(() => existsSync(join(env.project, 'remoto.txt'))).toBe(true)
+  await expect(pull).toHaveText('Pull')
+
+  // Sem nada na fila, o commit pergunta e coloca tudo (inclusive o não rastreado).
+  writeFileSync(join(env.project, 'tracked.txt'), 'terceira versão\n')
+  await message.fill('chore: tudo de uma vez')
+  await panel.getByRole('button', { name: 'Commitar' }).click()
+  await expect(dialog).toContainText('Colocar todas as alterações do projeto na fila e commitar?')
+  await dialog.getByRole('button', { name: 'Colocar tudo e commitar' }).click()
+  await expect.poll(() => git(env.project, env, 'log', '-1', '--format=%s')).toBe('chore: tudo de uma vez')
+  expect(git(env.project, env, 'show', '--name-only', '--format=', 'HEAD').split(/\r?\n/).sort()).toEqual(['novo.txt', 'tracked.txt'])
+  await expect(panel.getByText('Nenhuma alteração.')).toBeVisible()
+  expect(await run.nativeDialogs()).toEqual([])
 })
 
 test('R42 editor: botão Salvar no topo grava o arquivo; sem alteração fica desabilitado; nada é salvo sozinho', async ({ kora }) => {

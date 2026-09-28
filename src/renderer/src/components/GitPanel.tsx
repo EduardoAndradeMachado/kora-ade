@@ -1,23 +1,37 @@
 import { useState } from 'react'
-import { Icon } from '@/brand/icons'
-import type { GitBranch, GitFile, GitFileStatus, GitStatus, GitWorktree } from '@shared/git-types'
+import { Icon, type IconName } from '@/brand/icons'
+import type { GitBranch, GitCommitResult, GitFile, GitFileStatus, GitStatus, GitWorktree } from '@shared/git-types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/brand/Button'
+import { useConfirm } from '@/components/ConfirmDialog'
 
 interface Props {
   status: GitStatus | null
   branches: GitBranch[]
   worktrees: GitWorktree[]
   loading: boolean
+  busy: string | null
   error: string | null
   onRefresh(): void
   onCreateBranch(name: string, checkout: boolean): void
   onCheckout(name: string, remote: string | null): void
   onOpenFile(path: string): void
+  onOpenDiff(path: string, staged: boolean): void
   onOpenWorktree(path: string): void
   remote: string | null
   onInit(): void
   onSetRemote(url: string): void
+  onStage(paths: string[]): void
+  onUnstage(paths: string[]): void
+  onDiscard(paths: string[]): void
+  commitMessage: string
+  onCommitMessageChange(message: string): void
+  // null: falhou (o erro aparece no painel).
+  onCommit(message: string, stageAll: boolean): Promise<GitCommitResult | null>
+  onPush(): void
+  onPull(): void
+  onSync(): void
+  onFetch(): void
 }
 
 const shortRemote = (url: string): string => url.replace(/^(https:\/\/github\.com\/|git@github\.com:)/, '').replace(/\.git$/, '')
@@ -30,7 +44,7 @@ function RemoteRow({ remote, onSave }: { remote: string | null; onSave(url: stri
         <Icon name="externo" className="size-3 shrink-0" />
         {remote ? (
           <>
-            <span className="min-w-0 flex-1 truncate" title={remote}>
+            <span className="min-w-0 flex-1 truncate" data-tip={remote}>
               origin · {shortRemote(remote)}
             </span>
             <button type="button" onClick={() => setDraft(remote)} className="rounded px-1 hover:bg-secondary hover:text-foreground">
@@ -120,17 +134,56 @@ function AheadBehind({ ahead, behind }: { ahead: number; behind: number }): Reac
   )
 }
 
+interface RowAction {
+  label: string
+  icon: IconName
+  danger?: boolean
+  run(): void
+}
+
+// Ações da linha aparecem só com o mouse em cima, como no VS Code; o clique não chega na linha.
+function RowActions({ actions, disabled }: { actions: RowAction[]; disabled: boolean }): React.JSX.Element | null {
+  if (actions.length === 0) return null
+  return (
+    <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+      {actions.map((action) => (
+        <button
+          key={action.label}
+          type="button"
+          data-tip={action.label}
+          aria-label={action.label}
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation()
+            action.run()
+          }}
+          className={cn(
+            'rounded p-0.5 text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent',
+            action.danger ? 'hover:text-destructive' : 'hover:text-foreground'
+          )}
+        >
+          <Icon name={action.icon} className="size-3.5" />
+        </button>
+      ))}
+    </span>
+  )
+}
+
 function SectionHeader({
   title,
   count,
   open,
   depth = 0,
+  actions = [],
+  disabled = false,
   onToggle
 }: {
   title: string
   count: number
   open: boolean
   depth?: number
+  actions?: RowAction[]
+  disabled?: boolean
   onToggle(): void
 }): React.JSX.Element {
   return (
@@ -139,34 +192,185 @@ function SectionHeader({
       style={{ paddingLeft: 4 + depth * 12 }}
       className={cn(
         ROW,
-        'gap-1 text-[11px] font-medium text-muted-foreground',
+        'group gap-1 text-[11px] font-medium text-muted-foreground',
         depth === 0 && 'uppercase tracking-wide'
       )}
     >
       <Icon name="expandir" className={cn('size-3 shrink-0 transition-transform', open && 'rotate-90')} />
       <span className="flex-1 truncate">{title}</span>
+      <RowActions actions={actions} disabled={disabled} />
       <span className="rounded-full bg-secondary px-1.5 text-[10px] leading-4 normal-case">{count}</span>
     </div>
   )
 }
 
-function FileRow({ file, onOpenFile }: { file: GitFile; onOpenFile(path: string): void }): React.JSX.Element {
+// Renomeado na fila só sai inteiro levando o caminho antigo junto (senão a exclusão do antigo fica na fila).
+const pathsOf = (files: GitFile[]): string[] => files.flatMap((f) => (f.origPath ? [f.path, f.origPath] : [f.path]))
+
+// Não rastreado e conflito não têm diff útil com a fila: abre o próprio arquivo.
+const opensAsFile = (file: GitFile): boolean => file.status === 'untracked' || file.status === 'conflicted'
+
+function FileRow({
+  file,
+  actions,
+  disabled,
+  onOpen
+}: {
+  file: GitFile
+  actions: RowAction[]
+  disabled: boolean
+  onOpen(file: GitFile): void
+}): React.JSX.Element {
   const { name, dir } = splitPath(file.path)
   const badge = STATUS_BADGE[file.status]
   const deleted = file.status === 'deleted'
-  const title = `${file.origPath ? `${file.origPath} → ${file.path}` : file.path} — ${badge.label}`
+  const click = opensAsFile(file) ? 'clique para abrir o arquivo' : 'clique para ver o diff'
+  const title = `${file.origPath ? `${file.origPath} → ${file.path}` : file.path} — ${badge.label}\n${click}`
 
   return (
-    <div
-      title={title}
-      onClick={() => {
-        if (!deleted) onOpenFile(file.path)
-      }}
-      className={cn(ROW, 'pl-5')}
-    >
+    <div data-git-file={file.path} data-tip={title} onClick={() => onOpen(file)} className={cn(ROW, 'group pl-4')}>
+      <Icon name="arquivo" className={cn('size-3.5 shrink-0 text-muted-foreground', deleted && 'opacity-50')} />
       <span className={cn('min-w-0 truncate text-foreground', deleted && 'line-through opacity-70')}>{name}</span>
       <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{dir}</span>
+      <RowActions actions={actions} disabled={disabled} />
       <span className={cn('w-3 shrink-0 text-center font-mono text-[11px]', badge.className)}>{badge.letter}</span>
+    </div>
+  )
+}
+
+function CommitBox({
+  message,
+  disabled,
+  canCommit,
+  onChange,
+  onCommit
+}: {
+  message: string
+  disabled: boolean
+  canCommit: boolean
+  onChange(message: string): void
+  onCommit(): void
+}): React.JSX.Element {
+  const ready = !disabled && canCommit && message.trim() !== ''
+  return (
+    <div className="flex shrink-0 flex-col gap-1.5 border-b px-2 py-2">
+      <textarea
+        aria-label="Mensagem do commit"
+        value={message}
+        rows={Math.min(6, Math.max(2, message.split('\n').length))}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && e.ctrlKey) {
+            e.preventDefault()
+            if (ready) onCommit()
+          }
+        }}
+        placeholder="Mensagem do commit (Ctrl+Enter)"
+        spellCheck={false}
+        className="w-full resize-none rounded-md border bg-card px-2 py-1.5 text-xs leading-relaxed outline-none select-text focus:border-ring"
+      />
+      <Button
+        disabled={!ready}
+        onClick={onCommit}
+        data-tip="Commitar"
+        data-tip-detail="Grava o que está na fila. Sem nada na fila, pergunta se coloca tudo."
+        data-tip-shortcut="Ctrl+Enter"
+        className="w-full py-1.5"
+      >
+        <Icon name="ok" className="size-3.5" />
+        Commitar
+      </Button>
+    </div>
+  )
+}
+
+const commits = (n: number): string => `${n} ${n === 1 ? 'commit' : 'commits'}`
+
+const SYNC_BUTTON =
+  'flex h-7 min-w-0 flex-1 items-center justify-center gap-1 rounded-md bg-secondary px-1.5 text-[11px] text-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-secondary'
+
+function SyncRow({
+  status,
+  disabled,
+  onPush,
+  onPull,
+  onSync,
+  onFetch
+}: {
+  status: GitStatus
+  disabled: boolean
+  onPush(): void
+  onPull(): void
+  onSync(): void
+  onFetch(): void
+}): React.JSX.Element {
+  const upstream = status.upstream
+  return (
+    <div className="flex shrink-0 flex-col gap-1 border-b px-2 py-1.5">
+      <div className="flex items-center gap-1">
+        {upstream ? (
+          <>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={onPull}
+              data-tip="Pull"
+              data-tip-detail={status.behind > 0 ? `Traz ${commits(status.behind)} de ${upstream}.` : `Nada novo em ${upstream}. Buscar confere se chegou algo.`}
+              className={SYNC_BUTTON}
+            >
+              <Icon name="setaBaixo" className="size-3 shrink-0" />
+              Pull
+              {status.behind > 0 && <span className="font-semibold">{status.behind}</span>}
+            </button>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={onPush}
+              data-tip="Push"
+              data-tip-detail={status.ahead > 0 ? `Envia ${commits(status.ahead)} para ${upstream}.` : `Nada para enviar a ${upstream}.`}
+              className={SYNC_BUTTON}
+            >
+              <Icon name="setaCima" className="size-3 shrink-0" />
+              Push
+              {status.ahead > 0 && <span className="font-semibold">{status.ahead}</span>}
+            </button>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={onSync}
+              data-tip="Sincronizar"
+              data-tip-detail={`Pull e depois Push com ${upstream}.`}
+              className={SYNC_BUTTON}
+            >
+              <Icon name="sincronizar" className="size-3 shrink-0" />
+              Sincronizar
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onPush}
+            data-tip="Publicar branch"
+            data-tip-detail={`A branch "${status.branch}" ainda não existe no remoto. Envia para o origin e passa a acompanhá-lo.`}
+            className={SYNC_BUTTON}
+          >
+            <Icon name="publicar" className="size-3.5 shrink-0" />
+            Publicar branch
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onFetch}
+          aria-label="Buscar"
+          data-tip="Buscar"
+          data-tip-detail="Atualiza o que o remoto tem, sem mexer nos seus arquivos."
+          className={cn(SYNC_BUTTON, 'w-7 flex-none px-0')}
+        >
+          <Icon name="buscarRemoto" className="size-3.5 shrink-0" />
+        </button>
+      </div>
     </div>
   )
 }
@@ -198,7 +402,7 @@ function BranchRow({
       : 'Clique para trocar para esta branch'
   return (
     <div
-      title={branchTitle(branch, action)}
+      data-tip={branchTitle(branch, action)}
       style={{ paddingLeft: 8 + depth * 12 }}
       onClick={() => {
         if (!branch.current && !disabled) onCheckout(branch.name, branch.remote)
@@ -234,7 +438,7 @@ function WorktreeRow({
 
   return (
     <div
-      title={[worktree.path, ...notes].join('\n')}
+      data-tip={[worktree.path, ...notes].join('\n')}
       onClick={() => {
         if (openable) onOpenWorktree(worktree.path)
       }}
@@ -286,7 +490,9 @@ function NewBranchInput({
         />
         <button
           type="button"
-          title="Criar branch (Enter)"
+          data-tip="Criar branch"
+          data-tip-shortcut="Enter"
+          aria-label="Criar branch"
           disabled={disabled || !name.trim()}
           onClick={submit}
           className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
@@ -295,7 +501,9 @@ function NewBranchInput({
         </button>
         <button
           type="button"
-          title="Cancelar (Esc)"
+          data-tip="Cancelar"
+          data-tip-shortcut="Esc"
+          aria-label="Cancelar"
           onClick={onCancel}
           className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
         >
@@ -315,16 +523,29 @@ export function GitPanel({
   branches,
   worktrees,
   loading,
+  busy,
   error,
   onRefresh,
   onCreateBranch,
   onCheckout,
   onOpenFile,
+  onOpenDiff,
   onOpenWorktree,
   remote,
   onInit,
-  onSetRemote
+  onSetRemote,
+  onStage,
+  onUnstage,
+  onDiscard,
+  commitMessage,
+  onCommitMessageChange,
+  onCommit,
+  onPush,
+  onPull,
+  onSync,
+  onFetch
 }: Props): React.JSX.Element {
+  const confirm = useConfirm()
   const [branchesOpen, setBranchesOpen] = useState(true)
   const [creating, setCreating] = useState(false)
   // Guarda só as seções que o usuário inverteu em relação ao padrão (remotas começam fechadas, o resto aberto).
@@ -349,6 +570,64 @@ export function GitPanel({
     if (b.remote !== null) byRemote.set(b.remote, [...(byRemote.get(b.remote) ?? []), b])
   }
   const remoteCount = branches.length - locals.length
+  const working = busy !== null
+  const files = isRepo ? status.files : []
+
+  const openEntry = (file: GitFile): void => {
+    if (opensAsFile(file)) onOpenFile(file.path)
+    else onOpenDiff(file.path, file.staged)
+  }
+
+  // Rastreado volta à versão da fila (sem volta pelo git); não rastreado vai para a Lixeira (volta por lá).
+  const discard = async (targets: GitFile[]): Promise<void> => {
+    const untracked = targets.filter((f) => f.status === 'untracked').length
+    const tracked = targets.length - untracked
+    const single = targets.length === 1 ? splitPath(targets[0]!.path).name : null
+    const title = single
+      ? untracked
+        ? `Mover "${single}" para a Lixeira?`
+        : `Descartar as alterações em "${single}"?`
+      : `Descartar ${targets.length} alterações?`
+    const parts = [
+      tracked > 0 &&
+        (single ? 'O arquivo volta à versão da fila (ou do último commit). Não dá para desfazer.' : `${tracked} arquivo(s) voltam à versão da fila (ou do último commit). Não dá para desfazer.`),
+      untracked > 0 &&
+        (single ? 'O arquivo não é rastreado pelo git e vai para a Lixeira.' : `${untracked} arquivo(s) não rastreados vão para a Lixeira.`)
+    ].filter(Boolean)
+    const ok = await confirm({ title, message: parts.join(' '), confirmLabel: 'Descartar', danger: true })
+    if (ok) onDiscard(targets.map((f) => f.path))
+  }
+
+  const commit = async (): Promise<void> => {
+    const message = commitMessage
+    if ((await onCommit(message, false)) !== 'nothing-staged') return
+    const ok = await confirm({
+      title: 'Nada na fila',
+      message: 'Colocar todas as alterações do projeto na fila e commitar?',
+      confirmLabel: 'Colocar tudo e commitar'
+    })
+    if (ok) await onCommit(message, true)
+  }
+
+  const fileActions = (file: GitFile): RowAction[] => {
+    const open: RowAction[] =
+      file.status === 'deleted' || opensAsFile(file) ? [] : [{ label: 'Abrir arquivo', icon: 'arquivo', run: () => onOpenFile(file.path) }]
+    if (file.staged) return [...open, { label: 'Tirar da fila', icon: 'menos', run: () => onUnstage(pathsOf([file])) }]
+    const discardAction: RowAction[] =
+      file.status === 'conflicted' ? [] : [{ label: 'Descartar alterações', icon: 'descartar', danger: true, run: () => void discard([file]) }]
+    return [...open, ...discardAction, { label: 'Colocar na fila', icon: 'novaAba', run: () => onStage([file.path]) }]
+  }
+
+  const groupActions = (id: string, list: GitFile[]): RowAction[] => {
+    if (id === 'files:staged') return [{ label: 'Tirar tudo da fila', icon: 'menos', run: () => onUnstage(pathsOf(list)) }]
+    if (id === 'files:conflicts') return []
+    return [
+      { label: 'Descartar todas', icon: 'descartar', danger: true, run: () => void discard(list) },
+      { label: 'Colocar tudo na fila', icon: 'novaAba', run: () => onStage(list.map((f) => f.path)) }
+    ]
+  }
+
+  const canSync = isRepo && !status.detached && status.branch !== null && (status.upstream !== null || remote !== null)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -356,14 +635,14 @@ export function GitPanel({
         <button
           type="button"
           disabled={!isRepo}
-          title={isRepo ? 'Branches e worktrees' : undefined}
+          data-tip={isRepo ? 'Branches e worktrees' : undefined}
           onClick={() => setBranchesOpen((open) => !open)}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-xs hover:bg-secondary/60 disabled:hover:bg-transparent"
         >
           <Icon name="git" className="size-3.5 shrink-0 text-muted-foreground" />
           <span className={cn('truncate font-medium', status?.detached && 'italic')}>{isRepo ? headLabel : 'Git'}</span>
           {isRepo && status.upstream && (
-            <span title={`${status.ahead} à frente e ${status.behind} atrás de ${status.upstream}`}>
+            <span data-tip={`${status.ahead} à frente e ${status.behind} atrás de ${status.upstream}`}>
               <AheadBehind ahead={status.ahead} behind={status.behind} />
             </span>
           )}
@@ -375,7 +654,8 @@ export function GitPanel({
         </button>
         <button
           type="button"
-          title="Atualizar"
+          data-tip="Atualizar"
+          aria-label="Atualizar"
           disabled={loading}
           onClick={onRefresh}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:hover:bg-transparent"
@@ -385,6 +665,24 @@ export function GitPanel({
       </div>
 
       {isRepo && <RemoteRow remote={remote} onSave={onSetRemote} />}
+      {isRepo && (
+        <CommitBox
+          message={commitMessage}
+          disabled={working}
+          canCommit={files.some((f) => f.status !== 'conflicted')}
+          onChange={onCommitMessageChange}
+          onCommit={() => void commit()}
+        />
+      )}
+      {canSync && (
+        <SyncRow status={status} disabled={working} onPush={onPush} onPull={onPull} onSync={onSync} onFetch={onFetch} />
+      )}
+      {busy && (
+        <p role="status" className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground">
+          <Icon name="atualizar" className="size-3 animate-spin" />
+          {busy}
+        </p>
+      )}
       {error && <p className="break-words px-3 py-1.5 text-xs text-destructive select-text">{error}</p>}
 
       <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-1 py-1">
@@ -487,14 +785,29 @@ export function GitPanel({
 
         {isRepo &&
           FILE_GROUPS.map((group) => {
-            const files = status.files.filter(group.match)
-            if (files.length === 0) return null
+            const list = files.filter(group.match)
+            if (list.length === 0) return null
             const open = isOpen(group.id, true)
             return (
-              <div key={group.id}>
-                <SectionHeader title={group.title} count={files.length} open={open} onToggle={() => toggle(group.id)} />
+              <div key={group.id} data-git-group={group.id}>
+                <SectionHeader
+                  title={group.title}
+                  count={list.length}
+                  open={open}
+                  actions={groupActions(group.id, list)}
+                  disabled={working}
+                  onToggle={() => toggle(group.id)}
+                />
                 {open &&
-                  files.map((file) => <FileRow key={`${group.id}:${file.path}`} file={file} onOpenFile={onOpenFile} />)}
+                  list.map((file) => (
+                    <FileRow
+                      key={`${group.id}:${file.path}`}
+                      file={file}
+                      actions={fileActions(file)}
+                      disabled={working}
+                      onOpen={openEntry}
+                    />
+                  ))}
               </div>
             )
           })}
