@@ -17,7 +17,7 @@ import {
   readCodexUsage,
   UsageFormatError
 } from '../src/main/usage'
-import { formatRemaining, formatResetAt, isCritical, mostConstrained } from '../src/shared/usage-format'
+import { formatRemaining, formatResetAt, formatResetIn, isCritical, mostConstrained } from '../src/shared/usage-format'
 
 const NOW = Date.parse('2026-09-24T14:00:00.000Z')
 const MIN = 60_000
@@ -482,6 +482,13 @@ describe('formatação', () => {
     expect(formatRemaining(2 * HOUR)).toBe('2h')
     expect(formatRemaining(30_000)).toBe('<1m')
     expect(formatRemaining(-1)).toBe('agora')
+  })
+
+  it('complemento de "reseta": agora quando já passou, senão "em" + tempo', () => {
+    expect(formatResetIn(0)).toBe('agora')
+    expect(formatResetIn(-5 * MIN)).toBe('agora')
+    expect(formatResetIn(4 * DAY + 9 * HOUR)).toBe('em 4d 9h')
+    expect(formatResetIn(30_000)).toBe('em <1m')
   })
 
   it('hora do reset em pt-BR, relativa a hoje e amanhã', () => {

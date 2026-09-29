@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { AgentUsage, UsageWindow } from '@shared/usage-types'
-import { formatRemaining, formatResetAt, isCritical, mostConstrained } from '@shared/usage-format'
+import { formatResetAt, formatResetIn, isCritical, mostConstrained } from '@shared/usage-format'
 import { Icon } from '@/brand/icons'
 import { cn } from '@/lib/utils'
 import { AgentIcon, agentLabel } from './AgentIcon'
@@ -46,7 +46,7 @@ function Bar({ percent, className }: { percent: number; className?: string }): R
 }
 
 const resetIn = (w: UsageWindow, now: number): string =>
-  w.resetsAt === null ? 'sem reset pendente' : `reseta em ${formatRemaining(w.resetsAt - now)}`
+  w.resetsAt === null ? 'sem reset pendente' : `reseta ${formatResetIn(w.resetsAt - now)}`
 
 function CompactAgent({ usage, now }: { usage: AgentUsage; now: number }): React.JSX.Element {
   const tight = mostConstrained(usage.windows)
@@ -100,7 +100,7 @@ function AgentDetail({ usage, now }: { usage: AgentUsage; now: number }): React.
           <span className="text-[11px] text-muted-foreground">
             {w.resetsAt === null
               ? 'Sem reset pendente'
-              : `Reseta em ${formatRemaining(w.resetsAt - now)} · ${formatResetAt(w.resetsAt, now)}`}
+              : `Reseta ${formatResetIn(w.resetsAt - now)} · ${formatResetAt(w.resetsAt, now)}`}
           </span>
         </div>
       ))}

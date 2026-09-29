@@ -28,6 +28,9 @@ export function formatRemaining(ms: number): string {
   return `${minutes}m`
 }
 
+/** Complemento de "reseta": "agora" quando já passou, senão "em 3h 8m". */
+export const formatResetIn = (ms: number): string => (ms <= 0 ? 'agora' : `em ${formatRemaining(ms)}`)
+
 export function formatResetAt(resetsAt: number, now: number, timeZone?: string): string {
   const time = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone }).format(resetsAt)
   const day = (t: number): string => new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeZone }).format(t)
