@@ -884,11 +884,13 @@ export function App(): React.JSX.Element {
             list.map((tab) => {
               const visible = projectId === selectedId && activeTab[projectId] === tab.id && !missing.has(projectId)
               if (tab.kind === 'file') {
+                const projectPath = state.projects.find((p) => p.id === projectId)?.path ?? ''
                 if (tab.diff) {
                   return (
                     <Suspense key={`${tab.id}:diff`} fallback={<div className="absolute inset-0 bg-canvas" />}>
                       <DiffView
                         projectId={projectId}
+                        projectPath={projectPath}
                         path={tab.path}
                         staged={tab.diff.staged}
                         visible={visible}
@@ -904,6 +906,7 @@ export function App(): React.JSX.Element {
                     <PdfView
                       key={tab.id}
                       projectId={projectId}
+                      projectPath={projectPath}
                       path={tab.path}
                       visible={visible}
                       onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
@@ -915,6 +918,7 @@ export function App(): React.JSX.Element {
                     <ImageView
                       key={tab.id}
                       projectId={projectId}
+                      projectPath={projectPath}
                       path={tab.path}
                       visible={visible}
                       onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
@@ -926,6 +930,7 @@ export function App(): React.JSX.Element {
                     <MarkdownView
                       key={`${tab.id}:preview`}
                       projectId={projectId}
+                      projectPath={projectPath}
                       path={tab.path}
                       visible={visible}
                       fontSize={state.settings.fileFontSize}
@@ -938,6 +943,7 @@ export function App(): React.JSX.Element {
                   <Suspense key={`${tab.id}:edit`} fallback={<div className="absolute inset-0 bg-canvas" />}>
                     <CodeView
                       projectId={projectId}
+                      projectPath={projectPath}
                       path={tab.path}
                       visible={visible}
                       fontSize={state.settings.fileFontSize}

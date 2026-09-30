@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 
 interface Props {
   projectId: string
+  projectPath: string
   path: string
   onReload(): void
   onOpenPath(rel: string, line: number | null): void
@@ -14,16 +15,17 @@ interface Props {
 
 export const headerButton = 'rounded-md p-1 hover:bg-secondary hover:text-foreground'
 
-export function ViewerHeader({ projectId, path, onReload, onOpenPath, onOpenExternal, children }: Props): React.JSX.Element {
+export function ViewerHeader({ projectId, projectPath, path, onReload, onOpenPath, onOpenExternal, children }: Props): React.JSX.Element {
   const [editing, setEditing] = useState(false)
+  const absolutePath = `${projectPath}\\${path}`
 
   return (
     <div className="flex h-8 shrink-0 items-center gap-2 border-b px-4 text-xs text-muted-foreground">
       {editing ? (
-        <PathEditor projectId={projectId} path={path} onOpen={onOpenPath} onDone={() => setEditing(false)} />
+        <PathEditor projectId={projectId} path={absolutePath} onOpen={onOpenPath} onDone={() => setEditing(false)} />
       ) : (
         <>
-          <CopyablePath path={path} />
+          <CopyablePath path={absolutePath} />
           <button
             type="button"
             data-tip="Editar caminho para abrir outro arquivo"
@@ -69,8 +71,9 @@ function CopyablePath({ path }: { path: string }): React.JSX.Element {
       onClick={copy}
       className="group/path -mx-1.5 flex min-w-0 items-center gap-1.5 rounded px-1.5 py-0.5 hover:bg-secondary hover:text-foreground"
     >
-      <span data-path className="truncate">
-        {path}
+      {/* rtl só para as reticências cortarem o começo do caminho e manterem o nome do arquivo visível */}
+      <span data-path dir="rtl" className="truncate text-left">
+        <bdi dir="ltr">{path}</bdi>
       </span>
       <Icon
         name={copied ? 'ok' : 'copiar'}

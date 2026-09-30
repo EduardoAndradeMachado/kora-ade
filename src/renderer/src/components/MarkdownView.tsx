@@ -8,6 +8,7 @@ import { ModeToggle } from '@/components/ModeToggle'
 
 interface Props {
   projectId: string
+  projectPath: string
   path: string
   visible: boolean
   fontSize: number
@@ -15,7 +16,7 @@ interface Props {
   onOpenPath(rel: string, line: number | null): void
 }
 
-export function MarkdownView({ projectId, path, visible, fontSize, onEdit, onOpenPath }: Props): React.JSX.Element {
+export function MarkdownView({ projectId, projectPath, path, visible, fontSize, onEdit, onOpenPath }: Props): React.JSX.Element {
   const [source, setSource] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -54,7 +55,7 @@ export function MarkdownView({ projectId, path, visible, fontSize, onEdit, onOpe
 
   return (
     <div className={cn('absolute inset-0 flex flex-col bg-canvas', !visible && 'invisible')}>
-      <ViewerHeader projectId={projectId} path={path} onOpenPath={onOpenPath} onReload={() => setReloadKey((k) => k + 1)}>
+      <ViewerHeader projectId={projectId} projectPath={projectPath} path={path} onOpenPath={onOpenPath} onReload={() => setReloadKey((k) => k + 1)}>
         <ModeToggle editing={false} onChange={(editing) => editing && onEdit()} />
       </ViewerHeader>
       {/* Selecionável até a borda, não só a coluna do texto: botão direito e arrastar a seleção funcionam também

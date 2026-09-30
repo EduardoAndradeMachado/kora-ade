@@ -6,13 +6,14 @@ import { ViewerHeader } from '@/components/ViewerHeader'
 
 interface Props {
   projectId: string
+  projectPath: string
   path: string
   visible: boolean
   onOpenPath(rel: string, line: number | null): void
 }
 
 // O visualizador de PDF é o do próprio Chromium, carregado pelo protocolo kora-file do main.
-export function PdfView({ projectId, path, visible, onOpenPath }: Props): React.JSX.Element {
+export function PdfView({ projectId, projectPath, path, visible, onOpenPath }: Props): React.JSX.Element {
   const [version, setVersion] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -22,7 +23,7 @@ export function PdfView({ projectId, path, visible, onOpenPath }: Props): React.
 
   return (
     <div className={cn('absolute inset-0 flex flex-col bg-canvas', !visible && 'invisible')}>
-      <ViewerHeader projectId={projectId} path={path} onOpenPath={onOpenPath} onReload={() => setVersion((v) => v + 1)} onOpenExternal={openExternal} />
+      <ViewerHeader projectId={projectId} projectPath={projectPath} path={path} onOpenPath={onOpenPath} onReload={() => setVersion((v) => v + 1)} onOpenExternal={openExternal} />
       {notice && <p className="border-b bg-destructive/10 px-4 py-1.5 text-xs text-destructive">{notice}</p>}
       <iframe
         title={path}

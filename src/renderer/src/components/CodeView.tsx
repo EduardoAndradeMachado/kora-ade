@@ -9,6 +9,7 @@ import { headerButton, ViewerHeader } from '@/components/ViewerHeader'
 
 interface Props {
   projectId: string
+  projectPath: string
   path: string
   visible: boolean
   fontSize: number
@@ -40,6 +41,7 @@ const bannerButton = 'rounded-md border border-current/30 px-2 py-0.5 hover:bg-w
 
 export function CodeView({
   projectId,
+  projectPath,
   path,
   visible,
   fontSize,
@@ -318,7 +320,7 @@ export function CodeView({
 
   return (
     <div className={cn('absolute inset-0 flex flex-col bg-canvas', !visible && 'invisible')}>
-      <ViewerHeader projectId={projectId} path={path} onOpenPath={onOpenPath} onReload={() => void onHeaderReload()}>
+      <ViewerHeader projectId={projectId} projectPath={projectPath} path={path} onOpenPath={onOpenPath} onReload={() => void onHeaderReload()}>
         {busy ? (
           <span className="shrink-0">Salvando…</span>
         ) : (

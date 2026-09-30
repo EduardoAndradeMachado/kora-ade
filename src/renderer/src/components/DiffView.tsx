@@ -8,6 +8,7 @@ import { headerButton, ViewerHeader } from '@/components/ViewerHeader'
 
 interface Props {
   projectId: string
+  projectPath: string
   path: string
   staged: boolean
   visible: boolean
@@ -24,7 +25,7 @@ let modelCounter = 0
 const modelUri = (side: string, projectId: string, path: string): monaco.Uri =>
   monaco.Uri.file(`/${projectId}/${path.replace(/\\/g, '/')}`).with({ query: `diff=${side}-${++modelCounter}` })
 
-export function DiffView({ projectId, path, staged, visible, fontSize, wordWrap, onOpenPath }: Props): React.JSX.Element {
+export function DiffView({ projectId, projectPath, path, staged, visible, fontSize, wordWrap, onOpenPath }: Props): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null)
   const modelsRef = useRef<{ original: monaco.editor.ITextModel; modified: monaco.editor.ITextModel } | null>(null)
@@ -108,7 +109,7 @@ export function DiffView({ projectId, path, staged, visible, fontSize, wordWrap,
 
   return (
     <div data-diff-view={staged ? 'staged' : 'working'} className={cn('absolute inset-0 flex flex-col bg-canvas', !visible && 'invisible')}>
-      <ViewerHeader projectId={projectId} path={path} onOpenPath={onOpenPath} onReload={() => loadRef.current()}>
+      <ViewerHeader projectId={projectId} projectPath={projectPath} path={path} onOpenPath={onOpenPath} onReload={() => loadRef.current()}>
         {load.status === 'ready' && load.same && <span className="shrink-0">Sem diferenças</span>}
         <span className="shrink-0" data-tip={staged ? 'Último commit (HEAD) à esquerda, versão na fila à direita' : 'Versão na fila à esquerda, arquivo no disco à direita'}>
           {staged ? 'HEAD ↔ na fila' : 'na fila ↔ disco'}
