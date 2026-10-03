@@ -50,6 +50,8 @@ export class Terminals {
       cols,
       rows,
       cwd,
+      // O ConPTY do sistema engole a consulta de cor de fundo usada pelos destaques do Codex.
+      useConptyDll: process.platform === 'win32' && startup?.kind === 'codex',
       env: terminalEnv(process.env)
     })
     this.sessions.set(id, proc)

@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtempSync, realpathSync } from 'node:fs'
+import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Terminals } from '../src/main/terminals'
+import type { Startup } from '../src/shared/agent'
 
 const outputs = new Map<string, string>()
 const terminals = new Terminals({
@@ -26,6 +27,34 @@ async function waitFor(check: () => boolean, ms = 30000): Promise<void> {
 }
 
 describe('Terminals (PowerShell real via node-pty)', () => {
+  it.each<{ label: string; startup?: Startup; forwardsBackground: boolean }>([
+    { label: 'shell', forwardsBackground: false },
+    { label: 'Claude novo', startup: { kind: 'claude', mode: 'new', sessionId: randomUUID() }, forwardsBackground: false },
+    { label: 'Claude retomado', startup: { kind: 'claude', mode: 'resume', sessionId: randomUUID() }, forwardsBackground: false },
+    { label: 'Codex novo', startup: { kind: 'codex', mode: 'new' }, forwardsBackground: true },
+    { label: 'Codex retomado', startup: { kind: 'codex', mode: 'resume', sessionId: randomUUID() }, forwardsBackground: true }
+  ])('$label: preserva a consulta de fundo somente nas abas Codex', async ({ startup, forwardsBackground }) => {
+    const id = randomUUID()
+    const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'kora-background-')))
+    const probe = join(dir, 'background.cjs')
+    const query = '\x1b]11;?\x07'
+    const marker = `BACKGROUND_DONE_${randomUUID()}`
+    writeFileSync(probe, `process.stdout.write(${JSON.stringify(`${query}\r\n${marker}\r\n`)})`, 'utf8')
+    for (const agent of ['claude', 'codex']) {
+      writeFileSync(join(dir, `${agent}.cmd`), `@"${process.execPath}" "${probe}"\r\n`, 'utf8')
+    }
+    const originalPath = process.env['PATH']
+    process.env['PATH'] = `${dir};${originalPath}`
+    try {
+      terminals.spawn(id, dir, 200, 30, startup)
+      if (!startup) terminals.write(id, `& '${process.execPath}' '${probe}'\r`)
+      await waitFor(() => plainOutput(id).includes(marker))
+      expect(outputs.get(id)?.includes(query)).toBe(forwardsBackground)
+    } finally {
+      process.env['PATH'] = originalPath
+    }
+  })
+
   it('abre o shell na pasta do projeto', async () => {
     const cwd = realpathSync.native(mkdtempSync(join(tmpdir(), 'kora-pty-')))
     const id = randomUUID()
