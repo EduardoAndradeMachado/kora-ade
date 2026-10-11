@@ -751,6 +751,7 @@ describe('leitor: próxima consulta de verdade', () => {
     let clock = NOW
     const reader = createUsageReader({ claudeRoot, codexRoot, fetch: f.fetch, now: () => clock })
     const first = await reader.read()
+    expect(f.calls.map((c) => c.url).sort()).toEqual([CLAUDE_USAGE_URL, CODEX_USAGE_URL].sort())
     expect(first.map((u) => [u.agent, u.nextCheckAt])).toEqual([
       ['claude', NOW + 5 * MIN],
       ['codex', NOW + MIN]
@@ -761,6 +762,7 @@ describe('leitor: próxima consulta de verdade', () => {
     expect(again.map((u) => u.nextCheckAt)).toEqual([NOW + 5 * MIN, NOW + MIN])
     clock = NOW + MIN
     await reader.read()
-    expect(f.calls.map((c) => new URL(c.url).host)).toEqual(['api.anthropic.com', 'chatgpt.com', 'chatgpt.com'])
+    expect(f.calls).toHaveLength(3)
+    expect(f.calls[2]!.url).toBe(CODEX_USAGE_URL)
   })
 })
