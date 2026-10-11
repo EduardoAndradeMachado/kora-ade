@@ -338,7 +338,29 @@ describe('readClaudeUsage', () => {
     const f = fakeFetch(() => new Response(`{"error":"invalid token ${FAKE_TOKEN}"}`, { status: 401 }))
     const usage = await readClaudeUsage(claudeRoot, { fetch: f.fetch, now: NOW })
     expect(usage?.windows).toEqual([])
-    expect(usage?.error).toMatch(/HTTP 401/)
+    expect(usage?.error).toBe('Consulta de uso do Claude não autorizada (HTTP 401); o Claude Code precisa renovar o token')
+    expect(JSON.stringify(usage)).not.toContain('FAKE')
+  })
+
+  it('não trata recusa da consulta de uso como login expirado', async () => {
+    writeCredentials()
+    const f = fakeFetch(() => new Response(`{"error":"forbidden ${FAKE_TOKEN}"}`, { status: 403 }))
+    const usage = await readClaudeUsage(claudeRoot, { fetch: f.fetch, now: NOW })
+    expect(usage?.windows).toEqual([])
+    expect(usage?.error).toBe('Consulta de uso do Claude recusada (HTTP 403)')
+    expect(JSON.stringify(usage)).not.toContain('FAKE')
+  })
+
+  it('identifica o limite de consultas sem pedir um novo login', async () => {
+    writeCredentials()
+    const f = fakeFetch(() => new Response(`{"error":"rate limited ${FAKE_TOKEN}"}`, {
+      status: 429,
+      headers: { 'retry-after': '1800' }
+    }))
+    const usage = await readClaudeUsage(claudeRoot, { fetch: f.fetch, now: NOW })
+    expect(usage?.windows).toEqual([])
+    expect(usage?.error).toBe('Consultas de uso do Claude temporariamente limitadas (HTTP 429)')
+    expect(usage?.rateLimited).toEqual({ retryAfterMs: 30 * MIN })
     expect(JSON.stringify(usage)).not.toContain('FAKE')
   })
 
@@ -358,12 +380,12 @@ describe('readClaudeUsage', () => {
     expect(usage?.error).toMatch(/formato desconhecido|nenhuma janela/)
   })
 
-  it('não chama a rede com o token expirado', async () => {
+  it('aguarda a renovação do token de consulta sem afirmar que o login expirou', async () => {
     writeCredentials(NOW - MIN)
     const f = fakeFetch(() => ok())
     const usage = await readClaudeUsage(claudeRoot, { fetch: f.fetch, now: NOW })
     expect(f.calls).toHaveLength(0)
-    expect(usage?.error).toMatch(/expirado/)
+    expect(usage?.error).toBe('Uso indisponível: o token de consulta venceu; aguardando renovação pelo Claude Code')
   })
 
   it('devolve null sem credenciais, sem chamar a rede', async () => {
@@ -416,6 +438,35 @@ describe('leitor com throttle', () => {
     const [claude] = await createUsageReader({ claudeRoot, codexRoot, fetch: f.fetch, now: () => clock, cache }).read()
     expect(f.calls).toHaveLength(1)
     expect(claude?.windows.map((w) => w.usedPercent)).toEqual([30, 13, 10])
+  })
+
+  it.each([false, true])('atualizar consulta o token renovado sem esperar cinco minutos (reabrir o app: %s)', async (reopen) => {
+    writeCredentials(NOW - MIN)
+    const f = fakeFetch(() => ok())
+    const cache = memoryCache()
+    let clock = NOW
+    const deps = { claudeRoot, codexRoot, fetch: f.fetch, now: () => clock, cache }
+    let reader = createUsageReader(deps)
+    const [pending] = await reader.read()
+    expect(pending?.error).toMatch(/token de consulta venceu/)
+    expect(pending?.windows).toEqual([])
+    expect(pending).not.toHaveProperty('credentialsExpired')
+    expect(cache.data['claude']?.value).not.toHaveProperty('credentialsExpired')
+    await reader.read()
+    expect(f.calls).toHaveLength(0)
+
+    clock += 1_000
+    writeCredentials(NOW + DAY)
+    if (reopen) reader = createUsageReader(deps)
+    const [recovered] = await reader.read()
+    expect(f.calls).toHaveLength(1)
+    expect(recovered?.windows.map((w) => w.usedPercent)).toEqual([30, 13, 10])
+    expect(recovered?.error).toBeUndefined()
+
+    clock += MIN
+    writeCredentials(NOW + 2 * DAY)
+    await reader.read()
+    expect(f.calls).toHaveLength(1)
   })
 
   it('429 sem Retry-After recua 10 min, depois 20 min; mantém as janelas anteriores e diz quando tenta de novo', async () => {

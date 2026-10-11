@@ -506,9 +506,10 @@ export async function fetchClaudeUsageJson(accessToken: string, fetchImpl: typeo
 function claudeErrorMessage(err: unknown): string {
   if (err instanceof UsageFormatError) return err.message
   if (err instanceof UsageHttpError) {
-    if (err.status === 401 || err.status === 403)
-      return `Login do Claude recusado (HTTP ${err.status}); abra o Claude Code para renovar`
-    if (err.status === 429) return 'api.anthropic.com limitou as consultas de uso (HTTP 429)'
+    if (err.status === 401)
+      return 'Consulta de uso do Claude não autorizada (HTTP 401); o Claude Code precisa renovar o token'
+    if (err.status === 403) return 'Consulta de uso do Claude recusada (HTTP 403)'
+    if (err.status === 429) return 'Consultas de uso do Claude temporariamente limitadas (HTTP 429)'
     return `api.anthropic.com respondeu HTTP ${err.status}`
   }
   // Só o nome do erro: a mensagem de falhas de rede não é nossa e não vale arriscar que carregue cabeçalhos.
@@ -526,6 +527,7 @@ export interface ClaudeDeps {
 // Só circula no main: o leitor usa para decidir quando tentar de novo e tira antes de mandar à interface.
 export interface UsageRead extends AgentUsage {
   rateLimited?: { retryAfterMs: number | null }
+  credentialsExpired?: true
 }
 
 /** null quando não há login OAuth do Claude Code nesta máquina (sem .credentials.json). */
@@ -551,7 +553,10 @@ export async function readClaudeUsage(claudeRoot: string, deps: ClaudeDeps = {})
   }
   // Não renovamos o token: o refresh troca o refresh_token e deixaria o Claude Code com um token revogado.
   if (credentials.expiresAt != null && credentials.expiresAt <= now) {
-    return fail('Login do Claude expirado; abra o Claude Code para renovar')
+    return {
+      ...fail('Uso indisponível: o token de consulta venceu; aguardando renovação pelo Claude Code'),
+      credentialsExpired: true
+    }
   }
 
   try {
@@ -604,7 +609,8 @@ export function backoffMs(failures: number, retryAfterMs: number | null): number
 /**
  * Cada agente é consultado no máximo 1x por intervalo (5 min o Claude, 1 min o Codex), por mais que a UI peça,
  * inclusive o botão de atualizar; chamadas simultâneas compartilham a mesma consulta. Depois de um 429 a próxima
- * consulta respeita o Retry-After ou recua de 10 min até 1 h. Se uma consulta falhar, as janelas anteriores
+ * consulta respeita o Retry-After ou recua de 10 min até 1 h. Token vencido não consome o intervalo de consulta.
+ * Se uma consulta falhar, as janelas anteriores
  * continuam visíveis com o erro anexado.
  */
 export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<AgentUsage[]>; forget(agent: AgentUsage['agent']): void } {
@@ -651,9 +657,9 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
       }))
       .then((result) => {
         const at = now()
-        const { rateLimited, ...next } = result ?? ({} as UsageRead)
+        const { rateLimited, credentialsExpired, ...next } = result ?? ({} as UsageRead)
         const failures = rateLimited ? (slot?.failures ?? 0) + 1 : 0
-        const nextAt = at + (rateLimited ? backoffMs(failures, rateLimited.retryAfterMs) : INTERVAL[key])
+        const nextAt = credentialsExpired ? at : at + (rateLimited ? backoffMs(failures, rateLimited.retryAfterMs) : INTERVAL[key])
         let value: AgentUsage | null = result === null ? null : next
         if (value && rateLimited) value = { ...value, error: `${value.error}; nova consulta ${formatResetAt(nextAt, at, deps.timeZone)}` }
         if (value?.error && value.windows.length === 0 && previous && previous.windows.length > 0) {
