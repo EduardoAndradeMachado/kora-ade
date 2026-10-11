@@ -450,6 +450,26 @@ describe('leitor com throttle', () => {
     expect(recovered?.error).toBeUndefined()
   })
 
+  it('trocar a conta do Claude consulta a nova na hora, e a resposta atrasada da anterior não vira cache', async () => {
+    writeCredentials(NOW + DAY)
+    let release: (() => void) | null = null
+    const pending = new Promise<Response>((resolve) => (release = () => resolve(ok())))
+    const f = fakeFetch(() => (f.calls.length === 1 ? (pending as unknown as Response) : ok()))
+    const reader = createUsageReader({ claudeRoot, codexRoot, fetch: f.fetch, now: () => NOW })
+    const late = reader.read()
+    while (f.calls.length === 0) await new Promise((r) => setTimeout(r, 5))
+    reader.forget('claude')
+    release!()
+    await late
+    await reader.read()
+    expect(f.calls).toHaveLength(2)
+    await reader.read()
+    expect(f.calls).toHaveLength(2)
+    reader.forget('claude')
+    await reader.read()
+    expect(f.calls).toHaveLength(3)
+  })
+
   it('429 com Retry-After espera o que o servidor pediu (com piso de 5 min e teto de 1 h)', async () => {
     expect(backoffMs(1, 30 * MIN)).toBe(30 * MIN)
     expect(backoffMs(1, 1_000)).toBe(5 * MIN)

@@ -2,6 +2,7 @@ import type { Alerts, KoraState, ProjectGroup, ThemePreference } from './state'
 import type { AgentActivity, AgentSession } from './agent'
 import type { GitBranch, GitCommitResult, GitDiff, GitStatus, GitWorktree } from './git-types'
 import type { AgentUsage } from './usage-types'
+import type { ClaudeAccountsView } from './claude-accounts'
 import type { UpdateStatus } from './update'
 
 export interface FileEntry {
@@ -135,6 +136,16 @@ export interface KoraApi {
   // Manda os arquivos da conversa para a Lixeira; recusa se ela estiver ligada a uma aba.
   deleteSession(projectId: string, session: Pick<SessionSummary, 'kind' | 'sessionId'>): Promise<void>
   readUsage(): Promise<AgentUsage[]>
+  // Contas do Claude guardadas no Kora; trocar muda o login do Claude Code no computador todo.
+  claudeAccounts(): Promise<ClaudeAccountsView>
+  switchClaudeAccount(id: string): Promise<ClaudeAccountsView>
+  removeClaudeAccount(id: string): Promise<ClaudeAccountsView>
+  // Abre o navegador para entrar numa conta; o login atual não muda. O fim chega por onClaudeAccountsChanged.
+  startClaudeLogin(email?: string): Promise<void>
+  sendClaudeLoginCode(code: string): void
+  cancelClaudeLogin(): void
+  dismissClaudeLogin(): void
+  onClaudeAccountsChanged(listener: () => void): () => void
   listOrphans(): Promise<{ key: string; title: string; project: string; agent: AgentSession['kind'] | null; memoryMb: number; processCount: number }[]>
   killOrphan(key: string): Promise<void>
   killAllOrphans(): Promise<void>

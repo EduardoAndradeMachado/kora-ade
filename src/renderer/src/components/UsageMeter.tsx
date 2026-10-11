@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { AgentUsage, UsageWindow } from '@shared/usage-types'
+import type { WeeklyUsage } from '@shared/claude-accounts'
 import { formatResetAt, formatResetIn, isCritical, mostConstrained } from '@shared/usage-format'
 import { Icon } from '@/brand/icons'
 import { cn } from '@/lib/utils'
 import { AgentIcon, agentLabel } from './AgentIcon'
+import { ClaudeAccountSwitcher } from './ClaudeAccounts'
 
 interface Props {
   usage: AgentUsage[]
@@ -72,15 +74,24 @@ function CompactAgent({ usage, now }: { usage: AgentUsage; now: number }): React
   )
 }
 
-function AgentDetail({ usage, now }: { usage: AgentUsage; now: number }): React.JSX.Element {
+function claudeWeekly(claude: AgentUsage): WeeklyUsage | null {
+  const weekly = claude.windows.find((w) => w.label === 'Semanal' && w.windowMinutes === 10080)
+  return weekly ? { usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt, recordedAt: claude.updatedAt } : null
+}
+
+function AgentDetail({ usage, now, onRefresh }: { usage: AgentUsage; now: number; onRefresh(): void }): React.JSX.Element {
   return (
     <section className="flex flex-col gap-2">
       <header className="flex items-center gap-2">
         <AgentIcon kind={usage.agent} className="size-3.5" />
         <span className="text-xs font-medium">{agentLabel(usage.agent)}</span>
-        <span className="ml-auto truncate text-[11px] text-muted-foreground" data-tip={usage.source}>
-          {usage.source}
-        </span>
+        {usage.agent === 'claude' ? (
+          <ClaudeAccountSwitcher now={now} liveWeekly={claudeWeekly(usage)} onSwitched={onRefresh} />
+        ) : (
+          <span className="ml-auto truncate text-[11px] text-muted-foreground" data-tip={usage.source}>
+            {usage.source}
+          </span>
+        )}
       </header>
       {usage.error && (
         <p className="flex items-start gap-1.5 text-[11px] text-destructive">
@@ -190,7 +201,7 @@ export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
             ) : (
               usage.map((u, i) => (
                 <div key={u.agent} className={cn(i > 0 && 'border-t pt-3')}>
-                  <AgentDetail usage={u} now={now} />
+                  <AgentDetail usage={u} now={now} onRefresh={onRefresh} />
                 </div>
               ))
             )}

@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, release } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, shell, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, safeStorage, shell, Tray } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { loadState, saveState } from './store'
 import { addProject, applyLayout, forgetSessionName, mergeTabs, missingProjectIds, namedSessions, relocateProject, removeProject, renameProject, setProjectCollapsed, setTabAgent } from './projects'
@@ -15,6 +15,7 @@ import { createEntry, openInDefaultBrowser, renameEntry } from './file-actions'
 import { ProjectIcons } from './project-icons'
 import { savePastedImage } from './pasted-image'
 import { createUsageReader } from './usage'
+import { ClaudeAccounts } from './claude-accounts'
 import { KillOnCloseJob } from './job-object'
 import { ProcessRegistry, type Survivor } from './process-registry'
 import { ProjectWatchers } from './project-watcher'
@@ -63,9 +64,15 @@ const usage = createUsageReader({
   cache: {
     load: () => JSON.parse(readFileSync(usageCacheFile(), 'utf8')),
     save: (slots) => writeFileSync(usageCacheFile(), JSON.stringify(slots), 'utf8')
+  },
+  onClaudeUsage: (accessToken, windows) => {
+    claudeAccounts?.recordUsage(accessToken, windows).catch(() => {})
   }
 })
 let projectIcons: ProjectIcons
+let claudeAccounts: ClaudeAccounts
+// Pega as renovações que o Claude Code faz a cada ~8 h: a cópia da conta ativa no cofre fica sempre a mais nova.
+const CLAUDE_ACCOUNTS_SYNC_MS = 60_000
 
 let mainWindow: BrowserWindow | null = null
 let state: KoraState
@@ -606,6 +613,19 @@ function registerIpc(): void {
   ipcMain.handle('git:sync', (_e, id: string) => gitSync(projectRoot(id)))
 
   ipcMain.handle('usage:read', () => usage.read())
+  ipcMain.handle('claude-accounts:list', () => claudeAccounts.list())
+  ipcMain.handle('claude-accounts:switch', async (_e, id: string) => {
+    const view = await claudeAccounts.switchTo(String(id))
+    usage.forget('claude')
+    return view
+  })
+  ipcMain.handle('claude-accounts:remove', (_e, id: string) => claudeAccounts.remove(String(id)))
+  ipcMain.handle('claude-accounts:login', (_e, email: unknown) =>
+    claudeAccounts.startLogin(typeof email === 'string' ? email : undefined)
+  )
+  ipcMain.on('claude-accounts:login-code', (_e, code: unknown) => claudeAccounts.loginCode(String(code)))
+  ipcMain.on('claude-accounts:login-cancel', () => claudeAccounts.cancelLogin())
+  ipcMain.on('claude-accounts:login-dismiss', () => claudeAccounts.dismissLogin())
 
   ipcMain.handle('orphans:list', () =>
     [...survivors.values()].map((s) => ({
@@ -788,6 +808,29 @@ void app.whenReady().then(() => {
   nativeTheme.themeSource = state.settings.theme
   registerKoraFileProtocol(projectRoot)
   projectIcons = new ProjectIcons(join(app.getPath('userData'), 'icons'))
+  claudeAccounts = new ClaudeAccounts({
+    claudeRoot: join(homedir(), '.claude'),
+    globalConfigFile: join(homedir(), '.claude.json'),
+    vaultFile: join(app.getPath('userData'), 'claude-accounts.json'),
+    scratchDir: app.getPath('userData'),
+    // DPAPI do Windows: só o mesmo usuário nesta máquina abre os logins guardados.
+    secrets: {
+      encrypt: (plain) => {
+        if (!safeStorage.isEncryptionAvailable()) throw new Error('Criptografia do Windows indisponível; o Kora não guarda logins sem ela')
+        return safeStorage.encryptString(plain).toString('base64')
+      },
+      decrypt: (cipher) => safeStorage.decryptString(Buffer.from(cipher, 'base64'))
+    },
+    onChange: () => mainWindow?.webContents.send('claude-accounts:changed')
+  })
+  setInterval(() => {
+    claudeAccounts
+      .sync()
+      .then((changed) => {
+        if (changed) mainWindow?.webContents.send('claude-accounts:changed')
+      })
+      .catch(() => {})
+  }, CLAUDE_ACCOUNTS_SYNC_MS)
   // O menu padrão do Electron traz Ctrl+W (fecha a janela) e Ctrl+R (recarrega a interface e derruba os
   // terminais); os atalhos do Kora ficam todos na interface.
   Menu.setApplicationMenu(null)

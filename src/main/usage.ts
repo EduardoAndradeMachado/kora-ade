@@ -497,6 +497,8 @@ function claudeErrorMessage(err: unknown): string {
 export interface ClaudeDeps {
   fetch?: typeof fetch
   now?: number
+  // O token vai junto só para o main saber de qual conta é a leitura; nunca sai do processo.
+  onUsage?(accessToken: string, windows: UsageWindow[]): void
 }
 
 // Só circula no main: o leitor usa para decidir quando tentar de novo e tira antes de mandar à interface.
@@ -532,7 +534,9 @@ export async function readClaudeUsage(claudeRoot: string, deps: ClaudeDeps = {})
 
   try {
     const json = await fetchClaudeUsageJson(credentials.accessToken, deps.fetch)
-    return { agent: 'claude', windows: parseClaudeUsage(json, now), updatedAt: now, source }
+    const windows = parseClaudeUsage(json, now)
+    deps.onUsage?.(credentials.accessToken, windows)
+    return { agent: 'claude', windows, updatedAt: now, source }
   } catch (err) {
     const failed: UsageRead = fail(claudeErrorMessage(err))
     if (err instanceof UsageHttpError && err.status === 429) failed.rateLimited = { retryAfterMs: err.retryAfterMs }
@@ -561,6 +565,7 @@ export interface UsageReaderDeps {
   now?: () => number
   cache?: UsageCache
   timeZone?: string
+  onClaudeUsage?: ClaudeDeps['onUsage']
 }
 
 interface Slot extends CachedSlot {
@@ -580,9 +585,11 @@ export function backoffMs(failures: number, retryAfterMs: number | null): number
  * consulta respeita o Retry-After ou recua de 10 min até 1 h. Se uma consulta falhar, as janelas anteriores
  * continuam visíveis com o erro anexado.
  */
-export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<AgentUsage[]> } {
+export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<AgentUsage[]>; forget(agent: AgentUsage['agent']): void } {
   const now = deps.now ?? Date.now
   let slots: Map<string, Slot> | null = null
+  // Consulta que estava no ar quando o login trocou é da conta anterior: chega, mas não vai para o cache.
+  const epochs: Record<AgentUsage['agent'], number> = { claude: 0, codex: 0 }
   const loaded = (): Map<string, Slot> => {
     if (slots) return slots
     slots = new Map()
@@ -611,6 +618,7 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
     if (slot?.inflight) return slot.inflight
     if (slot && now() < slot.nextAt) return Promise.resolve(withNextCheck(slot.value, slot.nextAt))
     const previous = slot?.value ?? null
+    const epoch = epochs[key]
     const inflight = load()
       .catch((err: unknown): UsageRead | null => ({
         agent: key,
@@ -629,6 +637,7 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
         if (value?.error && value.windows.length === 0 && previous && previous.windows.length > 0) {
           value = { ...previous, error: value.error }
         }
+        if (epoch !== epochs[key]) return withNextCheck(value, nextAt)
         map.set(key, { nextAt, failures, value, inflight: null })
         persist()
         return withNextCheck(value, nextAt)
@@ -640,10 +649,16 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
   return {
     async read() {
       const results = await Promise.all([
-        throttled('claude', () => readClaudeUsage(deps.claudeRoot, { fetch: deps.fetch, now: now() })),
+        throttled('claude', () => readClaudeUsage(deps.claudeRoot, { fetch: deps.fetch, now: now(), onUsage: deps.onClaudeUsage })),
         throttled('codex', () => readCodexUsage(deps.codexRoot, now(), { fetch: deps.fetch }))
       ])
       return results.filter((r): r is AgentUsage => r !== null)
+    },
+    // O login trocou de conta: o intervalo mínimo e as janelas guardadas eram da conta anterior.
+    forget(agent) {
+      epochs[agent]++
+      loaded().delete(agent)
+      persist()
     }
   }
 }
