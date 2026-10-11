@@ -14,6 +14,8 @@ export interface AgentUsage {
   /** epoch ms do momento a que o dado se refere (último evento do Codex, última consulta do Claude). */
   updatedAt: number
   source: string
+  // E-mail da conta conectada, quando o agente o deixa legível no disco (Codex); o do Claude vem do cofre de contas.
+  account?: string
   error?: string
   /** epoch ms da próxima consulta de verdade; antes disso, atualizar devolve o mesmo dado. */
   nextCheckAt?: number

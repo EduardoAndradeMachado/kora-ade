@@ -88,9 +88,7 @@ function AgentDetail({ usage, now, onRefresh }: { usage: AgentUsage; now: number
         {usage.agent === 'claude' ? (
           <ClaudeAccountSwitcher now={now} liveWeekly={claudeWeekly(usage)} onSwitched={onRefresh} />
         ) : (
-          <span className="ml-auto truncate text-[11px] text-muted-foreground" data-tip={usage.source}>
-            {usage.source}
-          </span>
+          usage.account && <span className="ml-auto truncate px-1.5 text-[11px] text-muted-foreground">{usage.account}</span>
         )}
       </header>
       {usage.error && (

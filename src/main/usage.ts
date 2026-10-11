@@ -251,8 +251,22 @@ const USAGE_TIMEOUT_MS = 10_000
 
 const CodexAuthSchema = z.object({
   auth_mode: z.string().nullish(),
-  tokens: z.object({ access_token: z.string().min(1), account_id: z.string().min(1).nullish() }).nullish()
+  tokens: z
+    .object({ access_token: z.string().min(1), account_id: z.string().min(1).nullish(), id_token: z.string().nullish() })
+    .nullish()
 })
+
+// O e-mail vem do id_token (JWT) que o próprio Codex guardou; só para mostrar, então a assinatura não é conferida.
+function codexEmail(idToken: string | null | undefined): string | null {
+  const payload = idToken?.split('.')[1]
+  if (!payload) return null
+  try {
+    const email: unknown = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))?.email
+    return typeof email === 'string' && email.includes('@') ? email : null
+  } catch {
+    return null
+  }
+}
 
 const CodexApiWindowSchema = z.object({
   used_percent: z.number(),
@@ -332,7 +346,9 @@ function codexErrorMessage(err: unknown): string {
 }
 
 // Login por chave de API não tem limite de plano para consultar: fica só o que os rollouts mostram.
-async function readCodexAuth(codexRoot: string): Promise<{ accessToken: string; accountId: string | null } | null> {
+async function readCodexAuth(
+  codexRoot: string
+): Promise<{ accessToken: string; accountId: string | null; email: string | null } | null> {
   let raw: string
   try {
     raw = await readFile(join(codexRoot, 'auth.json'), 'utf8')
@@ -343,7 +359,11 @@ async function readCodexAuth(codexRoot: string): Promise<{ accessToken: string; 
     const parsed = CodexAuthSchema.safeParse(JSON.parse(raw))
     if (!parsed.success || !parsed.data.tokens) return null
     if (parsed.data.auth_mode && parsed.data.auth_mode !== 'chatgpt') return null
-    return { accessToken: parsed.data.tokens.access_token, accountId: parsed.data.tokens.account_id ?? null }
+    return {
+      accessToken: parsed.data.tokens.access_token,
+      accountId: parsed.data.tokens.account_id ?? null,
+      email: codexEmail(parsed.data.tokens.id_token)
+    }
   } catch {
     return null
   }
@@ -363,7 +383,8 @@ export async function readCodexUsage(
   if (!auth) return readCodexLocalUsage(codexRoot, now)
   try {
     const json = await fetchCodexUsageJson(auth.accessToken, auth.accountId, deps.fetch)
-    return { agent: 'codex', windows: parseCodexApiUsage(json, now), updatedAt: now, source: CODEX_API_SOURCE }
+    const account = auth.email ? { account: auth.email } : {}
+    return { agent: 'codex', windows: parseCodexApiUsage(json, now), updatedAt: now, source: CODEX_API_SOURCE, ...account }
   } catch (err) {
     const reason = codexErrorMessage(err)
     const local = await readCodexLocalUsage(codexRoot, now)
@@ -371,6 +392,7 @@ export async function readCodexUsage(
       local && local.windows.length > 0
         ? { ...local, error: `${reason}; mostrando o último uso gravado pelo Codex` }
         : { agent: 'codex', windows: [], updatedAt: now, source: CODEX_API_SOURCE, error: reason }
+    if (auth.email) failed.account = auth.email
     if (err instanceof UsageHttpError && err.status === 429) failed.rateLimited = { retryAfterMs: err.retryAfterMs }
     return failed
   }
