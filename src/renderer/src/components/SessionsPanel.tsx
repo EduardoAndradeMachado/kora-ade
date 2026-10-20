@@ -38,7 +38,10 @@ export function SessionsPanel({ projectId, reloadKey, openSessions, onOpen, onPi
   const remove = async (session: SessionSummary): Promise<void> => {
     const ok = await confirm({
       title: `Apagar a conversa "${session.title}"?`,
-      message: `Os arquivos dela vão para a Lixeira do Windows (dá para restaurar por lá). O ${agentLabel(session.kind)} deixa de listar e de retomar essa conversa.`,
+      message:
+        session.kind === 'opencode'
+          ? 'A conversa será apagada do OpenCode. Ela não vai para a Lixeira do Windows e não dá para restaurar.'
+          : `Os arquivos dela vão para a Lixeira do Windows (dá para restaurar por lá). O ${agentLabel(session.kind)} deixa de listar e de retomar essa conversa.`,
       confirmLabel: 'Apagar conversa',
       danger: true
     })
@@ -103,7 +106,7 @@ export function SessionsPanel({ projectId, reloadKey, openSessions, onOpen, onPi
       {notice && <p className="px-3 pb-2 text-xs text-destructive">{notice}</p>}
       {sessions.length === 0 && (
         <p className="px-3 py-2 text-xs text-muted-foreground">
-          Nenhuma conversa do Claude ou do Codex nesta pasta ainda.
+          Nenhuma conversa do Claude, do Codex ou do OpenCode nesta pasta ainda.
         </p>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">

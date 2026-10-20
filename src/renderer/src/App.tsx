@@ -55,6 +55,7 @@ const DEFAULT_TITLE: Record<NewTabChoice, string> = {
   shell: 'Terminal',
   claude: 'Claude',
   codex: 'Codex',
+  opencode: 'OpenCode',
   existing: 'Sessão fixada'
 }
 
@@ -1024,6 +1025,7 @@ export function App(): React.JSX.Element {
               actions={[
                 { label: 'Claude', onClick: () => newTab(selected, 'claude') },
                 { label: 'Codex', onClick: () => newTab(selected, 'codex') },
+                { label: 'OpenCode', onClick: () => newTab(selected, 'opencode') },
                 { label: 'Terminal', onClick: () => newTab(selected, 'shell') }
               ]}
             />

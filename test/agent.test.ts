@@ -25,16 +25,26 @@ const claudePidFile = (pid: number, sessionId: string, status = 'idle'): string 
   })
 
 describe('comando de abertura da aba', () => {
-  it('monta claude/codex novo e retomada', () => {
+  it('monta claude/codex/opencode novo e retomada', () => {
     const id = '01a0d12c-6ac8-7591-8c6f-3a67bf0c629e'
     expect(startupCommand({ kind: 'claude', mode: 'new', sessionId: id })).toBe(`claude --session-id ${id}`)
     expect(startupCommand({ kind: 'claude', mode: 'resume', sessionId: id })).toBe(`claude --resume ${id}`)
     expect(startupCommand({ kind: 'codex', mode: 'resume', sessionId: id })).toBe(`codex resume ${id} --no-daemon`)
     expect(startupCommand({ kind: 'codex', mode: 'new' })).toBe('codex --no-daemon')
+    const opencode = 'ses_ea5258bf1ffeWny5CnC3VXe6V3'
+    expect(startupCommand({ kind: 'opencode', mode: 'new', sessionId: opencode })).toBe(
+      `opencode --standalone --session ${opencode}`
+    )
+    expect(startupCommand({ kind: 'opencode', mode: 'resume', sessionId: opencode })).toBe(
+      `opencode --standalone --session ${opencode}`
+    )
   })
 
   it('recusa ID que não é UUID (vai para a linha de comando do PowerShell)', () => {
     expect(() => startupCommand({ kind: 'claude', mode: 'resume', sessionId: 'x; Remove-Item C:\\' })).toThrow(/inválido/)
+    expect(() => startupCommand({ kind: 'opencode', mode: 'resume', sessionId: 'ses_x; Remove-Item C:\\' })).toThrow(
+      /inválido/
+    )
   })
 })
 

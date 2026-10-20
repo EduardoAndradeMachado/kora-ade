@@ -13,6 +13,19 @@ export function AgentIcon({ kind, className }: { kind: AgentKind; className?: st
       </svg>
     )
   }
+  if (kind === 'opencode') {
+    // Marca do OpenCode (o "o" quadrado do favicon oficial), monocromática para acompanhar o tema.
+    return (
+      <svg viewBox="0 0 512 512" aria-label="OpenCode" className={cn('size-4 shrink-0 text-foreground', className)}>
+        <path
+          fillRule="evenodd"
+          clipRule="evenodd"
+          d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z"
+          fill="currentColor"
+        />
+      </svg>
+    )
+  }
   // O Codex se apresenta como ">_" no topo da própria TUI; selo preenchido para não confundir com o terminal comum.
   // Selo na cor do texto e traço na cor do fundo: inverte sozinho entre tema claro e escuro.
   return (
@@ -30,4 +43,5 @@ export function AgentIcon({ kind, className }: { kind: AgentKind; className?: st
   )
 }
 
-export const agentLabel = (kind: AgentKind): string => (kind === 'claude' ? 'Claude' : 'Codex')
+export const agentLabel = (kind: AgentKind): string =>
+  kind === 'claude' ? 'Claude' : kind === 'codex' ? 'Codex' : 'OpenCode'

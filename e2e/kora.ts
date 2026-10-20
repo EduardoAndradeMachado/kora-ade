@@ -75,14 +75,14 @@ function isolatedPath(bin: string): string {
   const original = Object.entries(process.env).find(([k]) => k.toLowerCase() === 'path')?.[1] ?? ''
   const kept = original.split(delimiter).filter((dir) => {
     if (!dir) return false
-    return !['claude.exe', 'claude.cmd', 'claude.ps1', 'codex.exe', 'codex.cmd', 'codex.ps1'].some((f) =>
+    return !['claude.exe', 'claude.cmd', 'claude.ps1', 'codex.exe', 'codex.cmd', 'codex.ps1', 'opencode.exe', 'opencode.cmd', 'opencode.ps1'].some((f) =>
       existsSync(join(dir, f))
     )
   })
   return [bin, ...kept].join(delimiter)
 }
 
-const STRIPPED = [/^NO_COLOR$/i, /^FORCE_COLOR$/i, /^CLAUDE_CODE_/i, /^CLAUDECODE$/i, /^CLAUDE_PID$/i, /^CODEX_/i, /^ELECTRON_/i, /^KORA_/i, /^path$/i]
+const STRIPPED = [/^NO_COLOR$/i, /^FORCE_COLOR$/i, /^CLAUDE_CODE_/i, /^CLAUDECODE$/i, /^CLAUDE_PID$/i, /^CODEX_/i, /^ELECTRON_/i, /^KORA_/i, /^OPENCODE$/i, /^OPENCODE_SESSION_ID$/i, /^OPENCODE_TERMINAL$/i, /^path$/i]
 
 export function appEnv(env: KoraEnv): Record<string, string> {
   const out: Record<string, string> = {}
@@ -114,8 +114,11 @@ export function makeEnv(opts: { project?: boolean } = {}): KoraEnv {
     stateFile: join(root, 'userdata', 'kora-state.json')
   }
   for (const dir of [env.home, env.userData, env.bin, env.project, env.pids]) mkdirSync(dir, { recursive: true })
+  // O Kora observa a pasta do OpenCode; deixá-la pronta faz o watcher pegar o banco criado pelo falso.
+  mkdirSync(join(env.home, '.local', 'share', 'opencode'), { recursive: true })
   writeFileSync(join(env.bin, 'claude.cmd'), cmdShim('fake-claude.cjs'))
   writeFileSync(join(env.bin, 'codex.cmd'), cmdShim('fake-codex.cjs'))
+  writeFileSync(join(env.bin, 'opencode.cmd'), cmdShim('fake-opencode.cjs'))
   writeFileSync(env.log, '')
   if (opts.project !== false) {
     writeState(env, {
@@ -143,7 +146,7 @@ export function readLog(env: KoraEnv): FakeEvent[] {
     .map((l) => JSON.parse(l) as FakeEvent)
 }
 
-export const starts = (env: KoraEnv, agent?: 'claude' | 'codex'): FakeEvent[] =>
+export const starts = (env: KoraEnv, agent?: 'claude' | 'codex' | 'opencode'): FakeEvent[] =>
   readLog(env).filter((e) => e.event === 'start' && (!agent || e.agent === agent))
 
 export function git(cwd: string, env: KoraEnv, ...args: string[]): string {
@@ -411,7 +414,7 @@ export const ui = {
     page.getByRole('button', { name, exact: true }).filter({ visible: true })
 }
 
-export async function newTab(page: Page, choice: 'Claude' | 'Codex' | 'Terminal' | 'Sessão existente'): Promise<void> {
+export async function newTab(page: Page, choice: 'Claude' | 'Codex' | 'OpenCode' | 'Terminal' | 'Sessão existente'): Promise<void> {
   await ui.tabBar(page).locator(tip('Nova aba')).click()
   await page.locator('body > div.fixed button').filter({ hasText: choice }).first().click()
 }

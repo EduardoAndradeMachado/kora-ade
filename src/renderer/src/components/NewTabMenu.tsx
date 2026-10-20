@@ -4,11 +4,12 @@ import { Icon } from '@/brand/icons'
 import { AgentIcon } from '@/components/AgentIcon'
 import { cn } from '@/lib/utils'
 
-export type NewTabChoice = 'shell' | 'claude' | 'codex' | 'existing'
+export type NewTabChoice = 'shell' | 'claude' | 'codex' | 'opencode' | 'existing'
 
 const OPTIONS: { choice: NewTabChoice; label: string; hint: string }[] = [
   { choice: 'claude', label: 'Claude', hint: 'sessão nova, já vinculada à aba' },
   { choice: 'codex', label: 'Codex', hint: 'sessão nova, vínculo detectado' },
+  { choice: 'opencode', label: 'OpenCode', hint: 'sessão nova, já vinculada à aba' },
   { choice: 'shell', label: 'Terminal', hint: 'PowerShell na pasta do projeto' },
   { choice: 'existing', label: 'Sessão existente', hint: 'fixar uma sessão pelo ID' }
 ]

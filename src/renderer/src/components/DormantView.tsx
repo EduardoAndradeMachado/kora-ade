@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icon } from '@/brand/icons'
 import { Button } from '@/brand/Button'
-import { SESSION_ID, type AgentKind, type AgentSession } from '@shared/agent'
+import { validSessionId, type AgentKind, type AgentSession } from '@shared/agent'
 import { AgentIcon, agentLabel } from '@/components/AgentIcon'
 import { cn } from '@/lib/utils'
 
@@ -19,7 +19,7 @@ export function DormantView(props: Props): React.JSX.Element {
   const [editing, setEditing] = useState(props.startEditing ?? false)
   const [kind, setKind] = useState<AgentKind>(agent?.kind ?? 'claude')
   const [sessionId, setSessionId] = useState(agent?.sessionId ?? '')
-  const valid = SESSION_ID.test(sessionId.trim())
+  const valid = validSessionId(kind, sessionId.trim())
   const [copied, setCopied] = useState(false)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(copiedTimer.current), [])
@@ -88,7 +88,7 @@ export function DormantView(props: Props): React.JSX.Element {
             }}
           >
             <div className="flex gap-1">
-              {(['claude', 'codex'] as const).map((k) => (
+              {(['claude', 'codex', 'opencode'] as const).map((k) => (
                 <button
                   key={k}
                   type="button"
@@ -107,10 +107,14 @@ export function DormantView(props: Props): React.JSX.Element {
               autoFocus
               value={sessionId}
               onChange={(e) => setSessionId(e.target.value)}
-              placeholder="ID da sessão (UUID)"
+              placeholder={kind === 'opencode' ? 'ID da sessão (ses_…)' : 'ID da sessão (UUID)'}
               className="w-full rounded-md border bg-card px-2 py-1.5 font-mono text-xs outline-none select-text focus:border-ring"
             />
-            {sessionId && !valid && <span className="text-[11px] text-destructive">Formato esperado: UUID.</span>}
+            {sessionId && !valid && (
+              <span className="text-[11px] text-destructive">
+                {kind === 'opencode' ? 'Formato esperado: ses_…' : 'Formato esperado: UUID.'}
+              </span>
+            )}
             <div className="flex justify-end gap-2">
               <button
                 type="button"

@@ -37,6 +37,7 @@ export type Launch =
   | { type: 'shell' }
   | { type: 'claude' }
   | { type: 'codex' }
+  | { type: 'opencode' }
   | { type: 'resume'; agent: AgentSession }
 
 export interface SessionSummary {

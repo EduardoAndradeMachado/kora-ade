@@ -2,12 +2,13 @@ import { useEffect, useRef } from 'react'
 import { Button } from '@/brand/Button'
 import { AgentIcon, agentLabel } from '@/components/AgentIcon'
 import { useWindowDim } from '@/lib/use-window-dim'
+import type { AgentKind } from '@shared/agent'
 
 export interface OrphanSurvivor {
   key: string
   title: string
   project: string
-  agent: 'claude' | 'codex' | null
+  agent: AgentKind | null
   memoryMb: number
   processCount: number
 }

@@ -3,8 +3,20 @@ import * as pty from 'node-pty'
 import { startupCommand, type Startup } from '../shared/agent'
 
 // Se o Kora for aberto de dentro de outro agente ou do electron-vite, o shell herdaria esses
-// marcadores: NO_COLOR apaga as cores e CLAUDE_CODE_CHILD_SESSION faz o Claude não salvar a sessão.
-const INHERITED_MARKERS = [/^CLAUDE_CODE_/, /^CLAUDECODE$/, /^CLAUDE_PID$/, /^CODEX_/, /^ELECTRON_/, /^NO_COLOR$/, /^FORCE_COLOR$/]
+// marcadores: NO_COLOR apaga as cores, CLAUDE_CODE_CHILD_SESSION faz o Claude não salvar a sessão
+// e os marcadores do OpenCode fazem a CLI se achar dentro de outra sessão/terminal.
+const INHERITED_MARKERS = [
+  /^CLAUDE_CODE_/,
+  /^CLAUDECODE$/,
+  /^CLAUDE_PID$/,
+  /^CODEX_/,
+  /^ELECTRON_/,
+  /^NO_COLOR$/,
+  /^FORCE_COLOR$/,
+  /^OPENCODE$/,
+  /^OPENCODE_SESSION_ID$/,
+  /^OPENCODE_TERMINAL$/
+]
 
 export function terminalEnv(parent: NodeJS.ProcessEnv): Record<string, string> {
   const env: Record<string, string> = {}

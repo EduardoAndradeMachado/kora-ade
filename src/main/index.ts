@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, release } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -12,6 +12,7 @@ import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInsi
 import { AgentDetector, UNREADABLE } from './agent-detect'
 import { createRolloutFinder, FolderWatch, isClaudeTranscript } from './agent-watch'
 import { listProjectSessions, sessionArtifacts } from './sessions'
+import { deleteOpencodeSession, newOpencodeSessionId, opencodeActivity, opencodeDbPath } from './opencode'
 import { createEntry, openInDefaultBrowser, renameEntry } from './file-actions'
 import { ProjectIcons } from './project-icons'
 import { savePastedImage } from './pasted-image'
@@ -50,7 +51,7 @@ import { KORA_FILE_PRIVILEGED_SCHEMES, registerKoraFileProtocol } from './file-p
 import { fileHolders, listProcesses, withCreationTime } from './processes'
 import { AlertsSchema, FILE_FONT, ProjectGroupSchema, TERMINAL_FONT, ThemePreferenceSchema, ZOOM, type KoraState } from '../shared/state'
 import { z } from 'zod'
-import { AgentSessionSchema, type AgentActivity, type AgentSession, type Startup } from '../shared/agent'
+import { AgentRefSchema, AgentSessionSchema, type AgentActivity, type AgentSession, type Startup } from '../shared/agent'
 import type { CloseKind, CreateResult, Launch, SaveResult, TabRef } from '../shared/ipc'
 
 // A detecção roda quando as pastas dos agentes mudam; a volta periódica só cobre o que não deixa rastro
@@ -123,7 +124,9 @@ const agentDirs = {
   claudeSessions: join(homedir(), '.claude', 'sessions'),
   codexLocks: join(homedir(), '.codex', 'thread-writer-locks'),
   codexRollouts: join(homedir(), '.codex', 'sessions'),
-  claudeProjects: join(homedir(), '.claude', 'projects')
+  claudeProjects: join(homedir(), '.claude', 'projects'),
+  // Banco do OpenCode v2: conversas e estado dos turnos. Lido só para títulos, datas e atividade.
+  opencodeDb: opencodeDbPath()
 }
 const detector = new AgentDetector({
   claudeSessionsDir: agentDirs.claudeSessions,
@@ -139,7 +142,18 @@ const agentFolders = new FolderWatch(
     { dir: agentDirs.codexLocks, recursive: false },
     { dir: agentDirs.codexRollouts, recursive: true },
     // Com subagente em segundo plano, o fim do turno só aparece no transcript; o arquivo do pid segue "busy".
-    { dir: agentDirs.claudeProjects, recursive: true, accept: isClaudeTranscript }
+    { dir: agentDirs.claudeProjects, recursive: true, accept: isClaudeTranscript },
+    // O OpenCode grava cada evento do turno no WAL do SQLite; o banco em si muda ao abrir/fechar.
+    ...(agentDirs.opencodeDb
+      ? [
+          {
+            dir: dirname(agentDirs.opencodeDb),
+            recursive: false,
+            accept: (name: string) =>
+              name === basename(agentDirs.opencodeDb) || name.startsWith(`${basename(agentDirs.opencodeDb)}-`)
+          }
+        ]
+      : [])
   ],
   () => scheduleDetect()
 )
@@ -217,15 +231,26 @@ function detectAgents(): void {
   lag?.note('detectar-sessoes')
   const pids = terminals.pids()
   if (pids.size === 0) return
+  // Aba do OpenCode já nasce vinculada ao ID que a CLI recebeu; o detector não a enxerga, e zerar a atividade
+  // dela a cada volta apagaria o "trabalhando" de que o aviso de fim de turno depende.
+  const opencodeTabs = state.tabs.flatMap((tab) =>
+    tab.agent?.kind === 'opencode' && pids.has(tab.id) ? [{ id: tab.id, sessionId: tab.agent.sessionId }] : []
+  )
+  const opencodeIds = new Set(opencodeTabs.map((tab) => tab.id))
   try {
     const found = detector.detect(pids)
     for (const [tabId, detected] of found) if (detected !== UNREADABLE) bindAgent(tabId, detected.agent)
     for (const tabId of pids.keys()) {
+      if (opencodeIds.has(tabId)) continue
       const detected = found.get(tabId)
       if (detected !== UNREADABLE) setActivity(tabId, detected?.activity ?? null)
     }
   } catch (err) {
     console.error('[kora] falha ao detectar sessões', err)
+  }
+  for (const tab of opencodeTabs) {
+    const activity = opencodeActivity(agentDirs.opencodeDb, tab.sessionId)
+    if (activity !== undefined) setActivity(tab.id, activity)
   }
 }
 
@@ -691,14 +716,27 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('sessions:list', async (_e, projectId: string) =>
-    namedSessions(state, await listProjectSessions(join(homedir(), '.claude'), join(homedir(), '.codex'), projectRoot(projectId)))
+    namedSessions(
+      state,
+      await listProjectSessions(
+        join(homedir(), '.claude'),
+        join(homedir(), '.codex'),
+        projectRoot(projectId),
+        agentDirs.opencodeDb
+      )
+    )
   )
 
   // Conversa ligada a uma aba (rodando ou adormecida) não é apagada: o "Continuar" dela passaria a falhar.
   ipcMain.handle('sessions:delete', async (_e, projectId: string, session: unknown) => {
-    const { kind, sessionId } = AgentSessionSchema.pick({ kind: true, sessionId: true }).parse(session)
+    const { kind, sessionId } = AgentRefSchema.parse(session)
     const bound = state.tabs.find((t) => t.agent?.sessionId === sessionId)
     if (bound) throw new Error(`Essa conversa está na aba "${bound.title}". Feche a aba antes de apagar.`)
+    if (kind === 'opencode') {
+      await deleteOpencodeSession(sessionId, projectRoot(projectId))
+      commit(forgetSessionName(state, { kind, sessionId }))
+      return
+    }
     const files = await sessionArtifacts(kind, sessionId, projectRoot(projectId), {
       claudeRoot: join(homedir(), '.claude'),
       codexRoot: join(homedir(), '.codex')
@@ -748,6 +786,11 @@ function registerIpc(): void {
         bindAgent(tab.id, { kind: 'claude', sessionId })
       } else if (launch.type === 'codex') {
         startup = { kind: 'codex', mode: 'new' }
+      } else if (launch.type === 'opencode') {
+        // A CLI cria a conversa no primeiro pedido com este mesmo ID; a aba já fica vinculada.
+        const sessionId = newOpencodeSessionId()
+        startup = { kind: 'opencode', mode: 'new', sessionId }
+        bindAgent(tab.id, { kind: 'opencode', sessionId })
       } else if (launch.type === 'resume') {
         const agent = AgentSessionSchema.parse(launch.agent)
         startup = { kind: agent.kind, mode: 'resume', sessionId: agent.sessionId }

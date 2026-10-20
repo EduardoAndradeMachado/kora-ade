@@ -311,7 +311,7 @@ test('R39 clique no nome do projeto: com abas recolhe e expande como a setinha; 
   await name('vazio').click()
   const main = page.locator('main')
   await expect(main.getByText('vazio', { exact: true })).toBeVisible()
-  for (const label of ['Claude', 'Codex', 'Terminal']) await expect(main.getByRole('button', { name: label, exact: true })).toBeVisible()
+  for (const label of ['Claude', 'Codex', 'OpenCode', 'Terminal']) await expect(main.getByRole('button', { name: label, exact: true })).toBeVisible()
   await main.getByRole('button', { name: 'Claude', exact: true }).click()
   await waitFor(() => starts(env, 'claude')[0], 'claude aberto pela tela do projeto vazio')
   await waitFor(() => readState(env).tabs.some((t) => t.projectId === 'p2'), 'aba do projeto vazio salva')
@@ -575,6 +575,7 @@ test('R15 clique direito no projeto: itens, copiar caminho, Explorer, remover co
   expect(items).toEqual([
     'Nova aba Claude',
     'Nova aba Codex',
+    'Nova aba OpenCode',
     'Novo terminal',
     'Renomear',
     'Atualizar ícone',

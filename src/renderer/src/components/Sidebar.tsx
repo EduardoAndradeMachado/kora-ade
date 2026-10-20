@@ -206,6 +206,7 @@ export function Sidebar(props: Props): React.JSX.Element {
       : [
           { label: 'Nova aba Claude', icon: <AgentIcon kind="claude" />, onSelect: () => props.onNewTab(project, 'claude') },
           { label: 'Nova aba Codex', icon: <AgentIcon kind="codex" />, onSelect: () => props.onNewTab(project, 'codex') },
+          { label: 'Nova aba OpenCode', icon: <AgentIcon kind="opencode" />, onSelect: () => props.onNewTab(project, 'opencode') },
           { label: 'Novo terminal', icon: <Icon name="terminal" />, onSelect: () => props.onNewTab(project, 'shell') },
           'separator',
           rename,

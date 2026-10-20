@@ -31,11 +31,11 @@ async function openClaude(run: { page: import('@playwright/test').Page }, env: K
   return { start, sessionId }
 }
 
-test('R3 botão + oferece Claude, Codex, Terminal e Sessão existente', async ({ kora }) => {
+test('R3 botão + oferece Claude, Codex, OpenCode, Terminal e Sessão existente', async ({ kora }) => {
   const run = await kora.launch(kora.env())
   await ui.tabBar(run.page).locator(tip('Nova aba')).click()
   const labels = await run.page.locator('body > div.fixed button span.font-medium').allTextContents()
-  expect(labels).toEqual(['Claude', 'Codex', 'Terminal', 'Sessão existente'])
+  expect(labels).toEqual(['Claude', 'Codex', 'OpenCode', 'Terminal', 'Sessão existente'])
   await run.page.keyboard.press('Escape')
 
   // O + da linha do projeto na lateral (aparece no hover) abre o mesmo menu.
@@ -43,7 +43,7 @@ test('R3 botão + oferece Claude, Codex, Terminal e Sessão existente', async ({
   await row.hover()
   await row.locator(tip('Nova aba')).click()
   const sideLabels = await run.page.locator('body > div.fixed button span.font-medium').allTextContents()
-  expect(sideLabels).toEqual(['Claude', 'Codex', 'Terminal', 'Sessão existente'])
+  expect(sideLabels).toEqual(['Claude', 'Codex', 'OpenCode', 'Terminal', 'Sessão existente'])
 })
 
 test('R4 aba Claude nova lança claude --session-id <uuid> e o estado salvo guarda esse uuid', async ({ kora }) => {
@@ -477,6 +477,32 @@ test('R57 aviso de sessão parada também no Codex: símbolo e sino na aba e som
 
   await ui.sideTab(page, /Codex/).click()
   await expect(codexAlert).toHaveCount(0)
+})
+
+test('R85 aviso de sessão parada também no OpenCode: símbolo e sino na aba e som da corda; abrir a aba limpa', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  const { spy } = await installAlertSpies(page)
+  const opencodeAlert = ui.barTab(page, /OpenCode/).locator('[data-alert]')
+
+  await newTab(page, 'OpenCode')
+  await waitFor(() => starts(env, 'opencode')[0], 'opencode falso subiu')
+  await newTab(page, 'Terminal')
+  await ui.sideTab(page, /OpenCode/).click()
+  await typeLine(page, 'trabalhe 5')
+  await expect(ui.barTab(page, /OpenCode/).locator('[data-activity]')).toHaveAttribute('data-activity', 'working', {
+    timeout: 5000
+  })
+  await ui.sideTab(page, 'Terminal').click()
+
+  await expect(opencodeAlert).toHaveCount(1, { timeout: 15_000 })
+  await expect(ui.barTab(page, /OpenCode/).locator('[data-icon="sino"]')).toHaveCount(1)
+  await expect(ui.sideTab(page, /OpenCode/).locator('[data-alert]')).toHaveCount(1)
+  expect(await spy()).toEqual({ chimes: 1, notifications: [] })
+
+  await ui.sideTab(page, /OpenCode/).click()
+  await expect(opencodeAlert).toHaveCount(0)
 })
 
 test('R58 easter egg: sino tocando em outra sessão faz o símbolo da tela vazia balançar', async ({ kora }) => {

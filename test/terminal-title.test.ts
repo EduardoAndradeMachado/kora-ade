@@ -11,4 +11,10 @@ describe('título da aba', () => {
   it('mantém títulos definidos pelo programa, como o do Claude', () => {
     expect(meaningfulTitle('✳ Refatorar login')).toBe('✳ Refatorar login')
   })
+
+  it('tira o prefixo que o OpenCode publica e ignora o título genérico dele', () => {
+    expect(meaningfulTitle('OC | Histórico do terminal')).toBe('Histórico do terminal')
+    expect(meaningfulTitle('oc |Integração com OpenCode')).toBe('Integração com OpenCode')
+    expect(meaningfulTitle('OpenCode')).toBeNull()
+  })
 })

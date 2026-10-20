@@ -3,6 +3,7 @@ import { open, readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { SESSION_ID } from '../shared/agent'
 import type { SessionSummary } from '../shared/ipc'
+import { listOpencodeSessions, opencodeDbPath } from './opencode'
 
 const HEAD_BYTES = 64 * 1024
 const TAIL_BYTES = 64 * 1024
@@ -192,13 +193,15 @@ export async function listCodexSessions(codexRoot: string, projectPath: string):
 export async function listProjectSessions(
   claudeRoot: string,
   codexRoot: string,
-  projectPath: string
+  projectPath: string,
+  opencodeDbFile = opencodeDbPath()
 ): Promise<SessionSummary[]> {
-  const [claude, codex] = await Promise.all([
+  const [claude, codex, opencode] = await Promise.all([
     listClaudeSessions(claudeRoot, projectPath),
-    listCodexSessions(codexRoot, projectPath)
+    listCodexSessions(codexRoot, projectPath),
+    listOpencodeSessions(opencodeDbFile, projectPath)
   ])
-  return [...claude, ...codex].sort((a, b) => b.updatedAt - a.updatedAt)
+  return [...claude, ...codex, ...opencode].sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 async function realpathOrNull(path: string): Promise<string | null> {

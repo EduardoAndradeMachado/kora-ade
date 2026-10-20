@@ -69,14 +69,19 @@ describe('Terminals (PowerShell real via node-pty)', () => {
   it('o shell não herda marcadores que tiram cor e desligam o salvamento de sessão do Claude', async () => {
     process.env['NO_COLOR'] = '1'
     process.env['CLAUDE_CODE_CHILD_SESSION'] = '1'
+    process.env['OPENCODE_SESSION_ID'] = 'ses_do_pai'
     try {
       const id = randomUUID()
       terminals.spawn(id, tmpdir(), 200, 30)
-      terminals.write(id, "Write-Output ('ENV=[' + $env:NO_COLOR + '|' + $env:CLAUDE_CODE_CHILD_SESSION + '|' + $env:COLORTERM + ']')\r")
-      await waitFor(() => plainOutput(id).includes('ENV=[||truecolor]'))
+      terminals.write(
+        id,
+        "Write-Output ('ENV=[' + $env:NO_COLOR + '|' + $env:CLAUDE_CODE_CHILD_SESSION + '|' + $env:OPENCODE_SESSION_ID + '|' + $env:COLORTERM + ']')\r"
+      )
+      await waitFor(() => plainOutput(id).includes('ENV=[|||truecolor]'))
     } finally {
       delete process.env['NO_COLOR']
       delete process.env['CLAUDE_CODE_CHILD_SESSION']
+      delete process.env['OPENCODE_SESSION_ID']
     }
   })
 
