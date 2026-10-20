@@ -617,3 +617,39 @@ test('R83 limites de uso: o Codex aparece pelo último uso gravado e o painel di
   await expect(panel).toContainText('42% usado')
   await expect(panel.locator('[data-next-check]')).toContainText(/próxima consulta (hoje|amanhã) às \d{2}:\d{2}/)
 })
+
+test('R84 histórico do terminal vira arquivo ao esconder na bandeja e é apagado quando a aba fecha de verdade', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  await newTab(page, 'Terminal')
+  await expect.poll(() => shells(run).length, { timeout: 30_000 }).toBe(1)
+  const tab = await waitFor(() => readState(env).tabs[0], 'aba de terminal no estado')
+  const file = join(env.userData, 'scrollback', `${tab.id}.txt`)
+  const saved = (): string | null => {
+    try {
+      return readFileSync(file, 'utf8')
+    } catch {
+      return null
+    }
+  }
+  const marker = `KORA_HISTORICO_${tab.id.slice(0, 8)}`
+  await typeLine(page, `Write-Output '${marker}'`)
+  await page.waitForTimeout(1000)
+  expect(saved(), 'terminal vivo ainda não tem arquivo de histórico').toBeNull()
+
+  await closeX(run)
+  await expect.poll(() => shells(run).length, { timeout: 15_000 }).toBe(0)
+  await waitFor(() => saved()?.includes(marker), 'histórico gravado ao esconder na bandeja')
+
+  await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.show())
+  await expect(ui.visibleButton(page, 'Abrir terminal')).toBeVisible()
+  await ui.visibleButton(page, 'Abrir terminal').click()
+  await expect(ui.terminal(page)).toBeVisible()
+
+  await ui.terminal(page).click()
+  await page.keyboard.press('Control+W')
+  await page.keyboard.press('Enter')
+  await waitFor(() => readState(env).tabs.length === 0, 'aba fechada')
+  await waitFor(() => saved() === null, 'arquivo do histórico apagado junto com a aba')
+})

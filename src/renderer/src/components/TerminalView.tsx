@@ -6,6 +6,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { meaningfulTitle } from '@shared/terminal-title'
 import { terminalBus } from '@/lib/terminal-bus'
+import { registerScrollback } from '@/lib/scrollback'
+import { screenText } from '@shared/scrollback'
 import { currentTerminalLook, onThemeChange } from '@/lib/terminal-theme'
 import { TERMINAL_FONT } from '@shared/state'
 import { cn } from '@/lib/utils'
@@ -40,6 +42,10 @@ const WEBGL_RELEASE_MS = 10_000
 // Arquivo pode surgir enquanto o terminal roda (o agente acabou de criar): a resposta "não existe" não dura muito.
 const LINK_CACHE_MS = 5_000
 const READY_FALLBACK_MS = 500
+// Histórico salvo é leitura local: se demorar mais que isto, a aba abre vazia em vez de esperar.
+const RESTORE_TIMEOUT_MS = 800
+// O que veio antes é uma foto de um processo que não existe mais; o divisor evita ler como se fosse ao vivo.
+const RESTORED_DIVIDER = '\x1b[2m── conteúdo anterior (processo encerrado) ──\x1b[22m\r\n'
 
 interface Props {
   id: string
@@ -102,6 +108,9 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
     termRef.current = term
     fitRef.current = fit
     if (import.meta.env.DEV) devTerminals.set(id, term)
+
+    // Foto do buffer no momento de suspender/esconder.
+    const unregisterScrollback = registerScrollback(id, () => screenText(term.buffer.active))
 
     term.attachCustomKeyEventHandler((event) => {
       const key = event.key.toLowerCase()
@@ -183,11 +192,23 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
     })
 
     let ready = false
+    let restored = false
+    let disposed = false
     const markReady = (): void => {
-      if (ready) return
+      if (ready || !restored) return
       ready = true
       onReadyRef.current(term.cols, term.rows)
     }
+    const finishRestore = (saved: string | null): void => {
+      if (restored || disposed) return
+      clearTimeout(restoreTimer)
+      restored = true
+      if (saved) term.write(`${saved.replace(/\r?\n/g, '\r\n')}\r\n${RESTORED_DIVIDER}`)
+      markReady()
+    }
+    // O spawn espera o histórico: assim o shell novo imprime depois do divisor, não no meio dele.
+    const restoreTimer = setTimeout(() => finishRestore(null), RESTORE_TIMEOUT_MS)
+    void window.kora.loadScrollback(id).then(finishRestore, () => finishRestore(null))
     const observer = new ResizeObserver(() => {
       if (container.offsetWidth === 0 || container.offsetHeight === 0) return
       fit.fit()
@@ -200,6 +221,9 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
 
     return () => {
       clearTimeout(fallback)
+      clearTimeout(restoreTimer)
+      disposed = true
+      unregisterScrollback()
       offTheme()
       container.removeEventListener('paste', onPaste, true)
       pathLinks.dispose()

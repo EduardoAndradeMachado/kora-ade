@@ -7,6 +7,7 @@ import { is } from '@electron-toolkit/utils'
 import { loadState, saveState } from './store'
 import { addProject, applyLayout, forgetSessionName, mergeTabs, missingProjectIds, namedSessions, relocateProject, removeProject, renameProject, setProjectCollapsed, setTabAgent } from './projects'
 import { Terminals } from './terminals'
+import { Scrollbacks } from './scrollback'
 import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from './files'
 import { AgentDetector, UNREADABLE } from './agent-detect'
 import { createRolloutFinder, FolderWatch, isClaudeTranscript } from './agent-watch'
@@ -77,6 +78,7 @@ const CLAUDE_ACCOUNTS_SYNC_MS = 60_000
 let mainWindow: BrowserWindow | null = null
 let state: KoraState
 let stateFile: string
+let scrollbacks: Scrollbacks | undefined
 
 // Job Object: se o Kora morrer à força, o Windows encerra os shells (e o Claude/Codex dentro deles).
 // Registro: rede de segurança para o que escapar do job; os sobreviventes são mostrados ao abrir.
@@ -146,6 +148,12 @@ function commit(next: KoraState): KoraState {
   saveState(stateFile, next)
   state = next
   return state
+}
+
+// Histórico de terminal é um arquivo por aba: quando a aba sai do estado (fechou de verdade, projeto
+// removido), o arquivo sai junto. Roda depois de gravar as abas, nunca antes.
+function pruneScrollbacks(): void {
+  scrollbacks?.prune(state.tabs.map((t) => t.id))
 }
 
 const sameAgent = (a: AgentSession | null, b: AgentSession | null): boolean =>
@@ -326,10 +334,39 @@ function createWindow(): void {
   }
 }
 
+// Antes de encerrar os processos (esconder, sair, instalar), a interface grava o buffer das abas vivas.
+// Interface travada não segura o fechamento para sempre: depois do prazo o caminho segue sem o histórico.
+const FLUSH_TIMEOUT_MS = 1500
+let flushScrollbackDone: (() => void) | null = null
+let flushScrollbackTimer: NodeJS.Timeout | undefined
+let afterFlushScrollback: (() => void)[] = []
+
+function requestScrollbackFlush(next: () => void): void {
+  const contents = mainWindow?.webContents
+  if (!contents || contents.isDestroyed()) {
+    next()
+    return
+  }
+  afterFlushScrollback.push(next)
+  if (flushScrollbackDone) return
+  flushScrollbackDone = () => {
+    clearTimeout(flushScrollbackTimer)
+    flushScrollbackTimer = undefined
+    flushScrollbackDone = null
+    const callbacks = afterFlushScrollback
+    afterFlushScrollback = []
+    for (const callback of callbacks) callback()
+  }
+  flushScrollbackTimer = setTimeout(flushScrollbackDone, FLUSH_TIMEOUT_MS)
+  contents.send('terminal:flush-scrollback')
+}
+
 function hideToTray(): void {
-  terminals.killAll()
-  mainWindow?.hide()
-  mainWindow?.webContents.send('app:hidden')
+  requestScrollbackFlush(() => {
+    terminals.killAll()
+    mainWindow?.hide()
+    mainWindow?.webContents.send('app:hidden')
+  })
 }
 
 // Arquivo com alteração não salva: o fechamento espera a interface perguntar (salvar, descartar ou cancelar).
@@ -419,7 +456,9 @@ function registerIpc(): void {
   ipcMain.handle('project:remove', (_e, id: string) => {
     for (const tab of state.tabs.filter((t) => t.projectId === id)) terminals.kill(tab.id)
     watchers.unwatch(id)
-    return commit(removeProject(state, id))
+    const next = commit(removeProject(state, id))
+    pruneScrollbacks()
+    return next
   })
 
   ipcMain.handle('project:missing', () => missingProjectIds(state, isDirectory))
@@ -679,10 +718,12 @@ function registerIpc(): void {
 
   ipcMain.on('tabs:save-sync', (event, tabs: TabRef[]) => {
     commit(mergeTabs(state, tabs))
+    pruneScrollbacks()
     event.returnValue = true
   })
   ipcMain.handle('tabs:save', (_e, tabs: TabRef[]) => {
     commit(mergeTabs(state, tabs))
+    pruneScrollbacks()
   })
   // O vínculo manual pode chegar antes do save debounced do renderer; a aba entra no estado aqui.
   const ensureTab = (tab: TabRef): void => {
@@ -724,6 +765,14 @@ function registerIpc(): void {
     terminals.resize(id, cols, rows)
   )
   ipcMain.on('terminal:kill', (_e, id: string) => terminals.kill(id))
+  ipcMain.handle('terminal:scrollback-save', (_e, id: unknown, text: unknown) => {
+    const key = String(id)
+    // Save atrasado de aba já removida não pode ressuscitar o arquivo que o prune acabou de apagar.
+    if (!state.tabs.some((t) => t.id === key)) return
+    scrollbacks?.save(key, String(text))
+  })
+  ipcMain.handle('terminal:scrollback-load', (_e, id: unknown) => scrollbacks?.load(String(id)) ?? null)
+  ipcMain.on('terminal:scrollback-flushed', () => flushScrollbackDone?.())
 }
 
 protocol.registerSchemesAsPrivileged(KORA_FILE_PRIVILEGED_SCHEMES)
@@ -760,11 +809,22 @@ app.on('child-process-gone', (_e, details) => {
 if (!app.requestSingleInstanceLock()) app.quit()
 
 let quitting = false
+let flushedOnQuit = false
 let tray: Tray | null = null
 app.on('before-quit', (event) => {
   if (unsaved && !quitConfirmed && mainWindow) {
     event.preventDefault()
     askRenderer('quit')
+    return
+  }
+  // Sair também passa pelo mesmo flush do esconder: o que estava na tela vira o histórico da próxima abertura.
+  // Instalação de atualização já gravou antes de matar os processos e não pode ser segurada aqui.
+  if (!flushedOnQuit && !quitting && mainWindow && !mainWindow.isDestroyed()) {
+    event.preventDefault()
+    requestScrollbackFlush(() => {
+      flushedOnQuit = true
+      app.quit()
+    })
     return
   }
   quitting = true
@@ -802,6 +862,8 @@ nativeTheme.on('updated', () => mainWindow?.setTitleBarOverlay(titleBarOverlay()
 void app.whenReady().then(() => {
   stateFile = join(app.getPath('userData'), 'kora-state.json')
   state = loadState(stateFile)
+  scrollbacks = new Scrollbacks(join(app.getPath('userData'), 'scrollback'))
+  pruneScrollbacks()
   job = new KillOnCloseJob()
   registry = new ProcessRegistry(join(app.getPath('userData'), 'processes.json'))
   survivors = new Map(registry.findSurvivors().map((s) => [s.key, s]))

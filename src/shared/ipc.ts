@@ -197,6 +197,11 @@ export interface KoraApi {
   writeTerminal(id: string, data: string): void
   resizeTerminal(id: string, cols: number, rows: number): void
   killTerminal(id: string): void
+  // Histórico do terminal: um arquivo por aba, apagado quando a aba fecha de verdade.
+  saveScrollback(id: string, text: string): Promise<void>
+  loadScrollback(id: string): Promise<string | null>
+  // O main pede antes de encerrar os processos (esconder, sair, instalar); a resposta sai depois de gravar.
+  onFlushScrollback(listener: () => void | Promise<void>): () => void
   onTerminalData(listener: (id: string, data: string) => void): () => void
   onTerminalExit(listener: (id: string, exitCode: number) => void): () => void
 }

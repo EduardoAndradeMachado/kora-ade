@@ -115,6 +115,12 @@ const api: KoraApi = {
   writeTerminal: (id, data) => ipcRenderer.send('terminal:write', id, data),
   resizeTerminal: (id, cols, rows) => ipcRenderer.send('terminal:resize', id, cols, rows),
   killTerminal: (id) => ipcRenderer.send('terminal:kill', id),
+  saveScrollback: (id, text) => ipcRenderer.invoke('terminal:scrollback-save', id, text),
+  loadScrollback: (id) => ipcRenderer.invoke('terminal:scrollback-load', id),
+  onFlushScrollback: (listener) =>
+    subscribe<[]>('terminal:flush-scrollback', () => {
+      void Promise.resolve(listener()).finally(() => ipcRenderer.send('terminal:scrollback-flushed'))
+    }),
   onTerminalData: (listener) => subscribe<[string, string]>('terminal:data', listener),
   onTerminalExit: (listener) => subscribe<[string, number]>('terminal:exit', listener)
 }

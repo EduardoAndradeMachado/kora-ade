@@ -41,6 +41,7 @@ import { Icon } from '@/brand/icons'
 import type { RenameRequest, TabPlace } from '@/components/TabBar'
 import type { NewTabChoice } from '@/components/NewTabMenu'
 import { terminalBus } from '@/lib/terminal-bus'
+import { saveAllScrollbacks, saveScrollbackNow } from '@/lib/scrollback'
 
 type TabsByProject = Record<string, Tab[]>
 
@@ -216,6 +217,8 @@ export function App(): React.JSX.Element {
       setSelectedId(s.projects[0]?.id ?? null)
     })
     const offExit = window.kora.onTerminalExit((id) => {
+      // O processo saiu (inclusive quando o Kora encerra ao esconder): guarda a tela antes de adormecer a aba.
+      saveScrollbackNow(id)
       terminalBus.forget(id)
       patchTerminal(id, { live: false, activity: null, alert: false })
     })
@@ -316,6 +319,8 @@ export function App(): React.JSX.Element {
     [choose]
   )
 
+  useEffect(() => window.kora.onFlushScrollback(saveAllScrollbacks), [])
+
   useEffect(() => {
     const offRequest = window.kora.onCloseRequested((kind) => {
       void resolveUnsaved(kind).then((proceed) => {
@@ -337,6 +342,7 @@ export function App(): React.JSX.Element {
   const installUpdate = async (): Promise<boolean> => {
     if (!(await resolveUnsaved('quit'))) return false
     window.kora.setUnsaved(false)
+    await saveAllScrollbacks()
     setInstalling(true)
     const installed = await window.kora.installUpdate().catch(() => false)
     if (!installed) setInstalling(false)
@@ -773,6 +779,7 @@ export function App(): React.JSX.Element {
   // Suspender encerra o processo (Claude/Codex e o shell) e libera a memória, mas a aba fica com o
   // vínculo da sessão e o "Continuar chat" — é parar o trabalho sem fechar a aba nem o app.
   const suspendTab = (tabId: string): void => {
+    saveScrollbackNow(tabId)
     window.kora.killTerminal(tabId)
     terminalBus.forget(tabId)
     patchTerminal(tabId, { live: false })
