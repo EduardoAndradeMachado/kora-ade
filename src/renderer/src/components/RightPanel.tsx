@@ -13,6 +13,19 @@ import { cn } from '@/lib/utils'
 
 type View = 'files' | 'git' | 'sessions' | 'metrics'
 
+// O painel é recriado a cada troca de projeto; a aba escolhida fica guardada para não voltar a Arquivos.
+const VIEW_KEY = 'kora.painelDireito.aba'
+const isView = (value: unknown): value is View => value === 'files' || value === 'git' || value === 'sessions' || value === 'metrics'
+
+function readView(): View {
+  try {
+    const saved = localStorage.getItem(VIEW_KEY)
+    return isView(saved) ? saved : 'files'
+  } catch {
+    return 'files'
+  }
+}
+
 // Métricas fica só com o ícone: quatro rótulos não cabem na largura do painel.
 const VIEWS: { view: View; title: string; icon: IconName; iconOnly?: boolean }[] = [
   { view: 'files', title: 'Arquivos', icon: 'arquivo' },
@@ -43,7 +56,15 @@ interface Props {
 }
 
 export function RightPanel(props: Props): React.JSX.Element {
-  const [view, setView] = useState<View>('files')
+  const [view, setViewState] = useState<View>(readView)
+  const setView = (next: View): void => {
+    setViewState(next)
+    try {
+      localStorage.setItem(VIEW_KEY, next)
+    } catch {
+      // Sem armazenamento o painel só volta para Arquivos na próxima troca de projeto.
+    }
+  }
   const [reloadKey, setReloadKey] = useState(0)
   const git = useGit(props.project.id, reloadKey, view === 'git')
   const id = props.project.id
