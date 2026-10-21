@@ -12,6 +12,7 @@ import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInsi
 import { AgentDetector, UNREADABLE } from './agent-detect'
 import { createRolloutFinder, FolderWatch, isClaudeTranscript } from './agent-watch'
 import { listProjectSessions, sessionArtifacts } from './sessions'
+import { dayMetrics, sessionMetrics, type MetricsSources } from './metrics'
 import { deleteOpencodeSession, newOpencodeSessionId, opencodeActivity, opencodeDbPath } from './opencode'
 import { createEntry, openInDefaultBrowser, renameEntry } from './file-actions'
 import { ProjectIcons } from './project-icons'
@@ -128,14 +129,21 @@ const agentDirs = {
   // Banco do OpenCode v2: conversas e estado dos turnos. Lido só para títulos, datas e atividade.
   opencodeDb: opencodeDbPath()
 }
+const codexRollout = createRolloutFinder(agentDirs.codexRollouts)
 const detector = new AgentDetector({
   claudeSessionsDir: agentDirs.claudeSessions,
   codexLocksDir: agentDirs.codexLocks,
   listProcesses,
   creationTime: (p) => withCreationTime(p).createdMs,
   lockHolders: fileHolders,
-  codexRollout: createRolloutFinder(agentDirs.codexRollouts)
+  codexRollout
 })
+const metricsSources: MetricsSources = {
+  claudeRoot: join(homedir(), '.claude'),
+  codexSessions: agentDirs.codexRollouts,
+  codexRollout,
+  opencodeDb: agentDirs.opencodeDb
+}
 const agentFolders = new FolderWatch(
   [
     { dir: agentDirs.claudeSessions, recursive: false },
@@ -726,6 +734,11 @@ function registerIpc(): void {
       )
     )
   )
+
+  ipcMain.handle('metrics:session', (_e, projectId: string, agent: unknown) =>
+    sessionMetrics(metricsSources, AgentRefSchema.parse(agent), projectRoot(projectId))
+  )
+  ipcMain.handle('metrics:day', (_e, since: unknown) => dayMetrics(metricsSources, z.number().finite().parse(since)))
 
   // Conversa ligada a uma aba (rodando ou adormecida) não é apagada: o "Continuar" dela passaria a falhar.
   ipcMain.handle('sessions:delete', async (_e, projectId: string, session: unknown) => {

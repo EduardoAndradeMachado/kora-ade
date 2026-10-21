@@ -3,6 +3,7 @@ import type { AgentActivity, AgentSession } from './agent'
 import type { GitBranch, GitCommitResult, GitDiff, GitStatus, GitWorktree } from './git-types'
 import type { AgentUsage } from './usage-types'
 import type { ClaudeAccountsView } from './claude-accounts'
+import type { DayPoint, SessionMetrics } from './metrics'
 import type { UpdateStatus } from './update'
 
 export interface FileEntry {
@@ -137,6 +138,9 @@ export interface KoraApi {
   // Manda os arquivos da conversa para a Lixeira; recusa se ela estiver ligada a uma aba.
   deleteSession(projectId: string, session: Pick<SessionSummary, 'kind' | 'sessionId'>): Promise<void>
   readUsage(): Promise<AgentUsage[]>
+  sessionMetrics(projectId: string, agent: Pick<AgentSession, 'kind' | 'sessionId'>): Promise<SessionMetrics>
+  // Respostas de todos os agentes desde `since` (ms), para a linha de TPS do dia.
+  dayMetrics(since: number): Promise<DayPoint[]>
   // Contas do Claude guardadas no Kora; trocar muda o login do Claude Code no computador todo.
   claudeAccounts(): Promise<ClaudeAccountsView>
   switchClaudeAccount(id: string): Promise<ClaudeAccountsView>

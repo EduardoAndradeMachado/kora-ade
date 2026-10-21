@@ -86,6 +86,13 @@ function hasTable(db: DatabaseSync, name: string): boolean {
   return (found ?? []).some((row) => row.name === name)
 }
 
+// Consulta só-leitura pela mesma conexão. null = sem banco, tabela ausente ou leitura falhou agora.
+export function queryOpencode<T>(dbFile: string, table: string, sql: string, params: SQLInputValue[] = []): T[] | null {
+  const db = connect(dbFile)
+  if (!db || !hasTable(db, table)) return null
+  return rows<T>(db, sql, params)
+}
+
 const normalize = (path: string): string => resolve(path).replace(/[\\/]+$/, '').toLowerCase()
 
 const clip = (text: string): string => {
