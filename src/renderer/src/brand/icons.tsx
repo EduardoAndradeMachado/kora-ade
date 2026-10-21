@@ -289,6 +289,14 @@ const BRAND = {
       <circle cx="15" cy="18" r=".9" fill="currentColor" />
     </>
   ),
+  metricas: (a) => (
+    <>
+      <path d="M4.5 17a7.5 7.5 0 1 1 15 0" />
+      <path d="M6.6 11.6l1 .7M12 8.5v1.2M17.4 11.6l-1 .7" />
+      <path d="M12 17l3.6-4.4" stroke={a} />
+      <circle cx="12" cy="17" r="1.3" fill={a} stroke={a} />
+    </>
+  ),
   engrenagem: (a) => (
     <>
       <path d={GEAR} />

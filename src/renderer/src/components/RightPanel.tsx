@@ -3,18 +3,22 @@ import { Icon, type IconName } from '@/brand/icons'
 import type { Project } from '@shared/state'
 import type { SessionSummary } from '@shared/ipc'
 import type { GitCommitResult } from '@shared/git-types'
+import type { AgentActivity, AgentSession } from '@shared/agent'
 import { FileTree } from '@/components/FileTree'
 import { SessionsPanel } from '@/components/SessionsPanel'
 import { GitPanel } from '@/components/GitPanel'
+import { MetricsPanel } from '@/components/MetricsPanel'
 import { useGit } from '@/lib/use-git'
 import { cn } from '@/lib/utils'
 
-type View = 'files' | 'git' | 'sessions'
+type View = 'files' | 'git' | 'sessions' | 'metrics'
 
-const VIEWS: { view: View; title: string; icon: IconName }[] = [
+// Métricas fica só com o ícone: quatro rótulos não cabem na largura do painel.
+const VIEWS: { view: View; title: string; icon: IconName; iconOnly?: boolean }[] = [
   { view: 'files', title: 'Arquivos', icon: 'arquivo' },
   { view: 'git', title: 'Git', icon: 'git' },
-  { view: 'sessions', title: 'Sessões', icon: 'sessoes' }
+  { view: 'sessions', title: 'Sessões', icon: 'sessoes' },
+  { view: 'metrics', title: 'Métricas da sessão', icon: 'metricas', iconOnly: true }
 ]
 
 interface Props {
@@ -33,6 +37,9 @@ interface Props {
   onPathMoved(from: string, to: string): void
   hasUnsavedUnder(rel: string): boolean
   reveal: { path: string; n: number } | null
+  // Agente e estado da aba ativa, para as métricas.
+  activeAgent: AgentSession | null
+  activeActivity: AgentActivity | null
 }
 
 export function RightPanel(props: Props): React.JSX.Element {
@@ -65,18 +72,21 @@ export function RightPanel(props: Props): React.JSX.Element {
       ) : (
         <>
           <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
-            {VIEWS.map(({ view: v, title, icon }) => (
+            {VIEWS.map(({ view: v, title, icon, iconOnly }) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => setView(v)}
+                data-tip={iconOnly ? title : undefined}
+                aria-label={iconOnly ? title : undefined}
                 className={cn(
-                  'flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-secondary',
+                  'flex items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-secondary',
+                  iconOnly ? 'flex-none' : 'flex-1',
                   view === v ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
                 )}
               >
                 <Icon name={icon} active={view === v} className="size-3.5" />
-                {title}
+                {!iconOnly && title}
               </button>
             ))}
           </div>
@@ -134,6 +144,9 @@ export function RightPanel(props: Props): React.JSX.Element {
                 onFetch={() => void git.run(() => window.kora.gitFetch(id), 'Buscando do remoto…')}
               />
             </div>
+          )}
+          {view === 'metrics' && (
+            <MetricsPanel projectId={props.project.id} agent={props.activeAgent} activity={props.activeActivity} />
           )}
           {view === 'sessions' && (
             <SessionsPanel

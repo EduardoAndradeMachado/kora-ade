@@ -829,6 +829,8 @@ export function App(): React.JSX.Element {
   const menuTab = tabMenu ? (tabs[tabMenu.projectId] ?? []).find((t) => t.id === tabMenu.tabId) : undefined
 
   const projectTabs = selected ? (tabs[selected.id] ?? []) : []
+  const shownTab = selected ? projectTabs.find((t) => t.id === activeTab[selected.id]) : undefined
+  const activeTerminal = shownTab?.kind === 'terminal' ? shownTab : undefined
 
   return (
     <div className="flex h-full">
@@ -1065,6 +1067,8 @@ export function App(): React.JSX.Element {
           onPathMoved={(from, to) => movePathInTabs(selected.id, from, to)}
           hasUnsavedUnder={(rel) => hasUnsavedUnder(selected.id, rel)}
           reveal={reveal}
+          activeAgent={activeTerminal?.agent ?? null}
+          activeActivity={activeTerminal?.live ? (activeTerminal.activity ?? null) : null}
         />
       )}
 
