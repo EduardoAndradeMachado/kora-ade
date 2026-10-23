@@ -36,17 +36,46 @@ interface Props {
 
 const shortRemote = (url: string): string => url.replace(/^(https:\/\/github\.com\/|git@github\.com:)/, '').replace(/\.git$/, '')
 
+// Remoto SSH (git@host:dono/repo.git) também tem página web: a mesma URL em https.
+function remoteWebUrl(remote: string): string | null {
+  const ssh = /^git@([^:/]+):(.+)$/.exec(remote) ?? /^ssh:\/\/git@([^/:]+)(?::\d+)?\/(.+)$/.exec(remote)
+  try {
+    const url = new URL(ssh ? `https://${ssh[1]}/${ssh[2]}` : remote)
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+    url.username = ''
+    url.password = ''
+    url.pathname = url.pathname.replace(/\.git$/, '')
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
 function RemoteRow({ remote, onSave }: { remote: string | null; onSave(url: string): void }): React.JSX.Element {
   const [draft, setDraft] = useState<string | null>(null)
   if (draft === null) {
+    const webUrl = remote ? remoteWebUrl(remote) : null
     return (
       <div className="flex h-7 shrink-0 items-center gap-1.5 border-b px-3 text-[11px] text-muted-foreground">
         <Icon name="externo" className="size-3 shrink-0" />
         {remote ? (
           <>
-            <span className="min-w-0 flex-1 truncate" data-tip={remote}>
-              origin · {shortRemote(remote)}
-            </span>
+            {webUrl ? (
+              <a
+                href={webUrl}
+                target="_blank"
+                rel="noreferrer"
+                data-tip="Abrir no navegador"
+                data-tip-detail={webUrl}
+                className="min-w-0 flex-1 truncate hover:text-foreground hover:underline"
+              >
+                origin · {shortRemote(remote)}
+              </a>
+            ) : (
+              <span className="min-w-0 flex-1 truncate" data-tip={remote}>
+                origin · {shortRemote(remote)}
+              </span>
+            )}
             <button type="button" onClick={() => setDraft(remote)} className="rounded px-1 hover:bg-secondary hover:text-foreground">
               Trocar
             </button>
