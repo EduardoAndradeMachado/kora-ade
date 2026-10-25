@@ -95,9 +95,7 @@ export function MobileApp(): React.JSX.Element {
     system.addEventListener('change', apply)
     return () => system.removeEventListener('change', apply)
   }, [state?.theme, phoneTheme])
-  const theme = THEMES.find((option) => option.theme === (phoneTheme ?? state?.theme)) ?? THEMES[0]!
-  const nextTheme = (): void => {
-    const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]!.theme
+  const chooseTheme = (next: ThemePreference): void => {
     setPhoneTheme(next)
     try { localStorage.setItem(THEME_KEY, next) } catch { /* sem armazenamento, o tema vale até fechar o app */ }
   }
@@ -205,14 +203,12 @@ export function MobileApp(): React.JSX.Element {
       <label className="project-search"><Icon name="buscar" /><input aria-label="Buscar projetos e abas" placeholder="Buscar projetos e abas" value={search} onChange={(event) => setSearch(event.target.value)} autoComplete="off" /></label>
       {state.projects.length === 0 ? <div className="empty-state"><SymbolMark size={56} /><h2>Seu espaço de trabalho</h2><p>Adicione uma pasta do PC para começar uma conversa.</p><button className="primary" onClick={() => picker(null)} disabled={busy || !connected}><Icon name="novoProjeto" active />Adicionar projeto</button></div> : <ProjectTree state={state} search={search} onProject={openProject} onFiles={(id) => navigate({ projectId: id, tabId: null, picker: null, files: '' })} onNewTab={newTab} onTab={(tab: MobileTab) => open(tab.id, tab.projectId)} onTabActions={tabActions} onRelocate={picker} />}
     </main>
+    {/* Uma linha só: os limites ocupam o espaço e a engrenagem fica ao lado; o tema mora nas configurações. */}
     <footer className="mobile-footer">
       {usage.length > 0 && <button className="usage-footer" aria-label="Limites de uso e conta" onClick={() => navigate({ ...route, pc: 'usage' })}>
         {usage.map((agent) => <CompactAgent key={agent.agent} usage={agent} now={Date.now()} />)}
       </button>}
-      <div className="footer-actions">
-        <button className="icon-button" aria-label="Configurações" onClick={() => navigate({ ...route, pc: 'settings' })}><Icon name="engrenagem" /></button>
-        <button className="theme-button" aria-label={`Tema: ${theme.label}`} onClick={nextTheme}><Icon name={theme.icon} />{theme.label}</button>
-      </div>
+      <button className="icon-button footer-settings" aria-label="Configurações" onClick={() => navigate({ ...route, pc: 'settings' })}><Icon name="engrenagem" /></button>
     </footer></> : route.file !== undefined ? <FileViewer key={route.file} projectId={projectId} path={route.file} dark={document.documentElement.classList.contains('dark')} onBack={back} onOpenFile={(file) => navigate({ ...route, file })} />
     : !tabId ? <main className="session-list page-enter" key={projectId}>
       <div className="project-heading"><button className="icon-button back-button" aria-label="Voltar" onClick={back}><Icon name="expandir" className="back-icon" /></button><MobileProjectAvatar id={projectId} path={project?.path ?? ''} open /><div><h1>{project?.name ?? 'Projeto removido'}</h1><p className="project-path">{project?.path}</p></div></div>
@@ -244,7 +240,7 @@ export function MobileApp(): React.JSX.Element {
         replace(route.picker!.projectId ? { ...route, picker: null } : { projectId: result.projectId ?? null, tabId: null, picker: null })
       } finally { setBusy(false) }
     }} />}
-    {route.pc && <PcSheet view={route.pc} alerts={state.alerts} connected={connected} onClose={back} onError={showError} onSwitchAccount={async (accountId) => { await command({ type: 'switch-account', accountId }) }} onAlerts={async (alerts) => { await command({ type: 'alerts', alerts }) }} />}
+    {route.pc && <PcSheet view={route.pc} themes={THEMES} theme={phoneTheme ?? state.theme} onTheme={chooseTheme} alerts={state.alerts} connected={connected} onClose={back} onError={showError} onSwitchAccount={async (accountId) => { await command({ type: 'switch-account', accountId }) }} onAlerts={async (alerts) => { await command({ type: 'alerts', alerts }) }} />}
     {route.newTab && <NewTabSheet projectName={state.projects.find((project) => project.id === route.newTab)?.name ?? ''} busy={busy} onClose={back} onChoose={(kind) => create(route.newTab!, kind)} />}
     {actionTab && <SessionActions tab={actionTab} busy={busy} onClose={back} onRename={async (title) => run(async () => { await command({ type: 'rename', tabId: actionTab.id, title }); await refresh(); back() })} onSuspend={async () => run(async () => { await command(actionTab.live ? { type: 'suspend', tabId: actionTab.id } : { type: 'resume', tabId: actionTab.id, ...START_SIZE }); await refresh(); back() })} onDelete={async () => run(async () => { await command({ type: 'close', tabId: actionTab.id }); await refresh(); if (tabId === actionTab.id) replace({ projectId, tabId: null, picker: null }); else back() })} />}
   </div>

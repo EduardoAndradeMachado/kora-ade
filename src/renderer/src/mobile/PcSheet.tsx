@@ -4,15 +4,19 @@ import { AgentIcon, agentLabel } from '@/components/AgentIcon'
 import { expiryText, weeklyText } from '@/components/ClaudeAccounts'
 import { Bar, claudeWeekly } from '@/components/UsageMeter'
 import { formatResetAt, formatResetIn, isCritical } from '@shared/usage-format'
-import type { Alerts } from '@shared/state'
+import type { Alerts, ThemePreference } from '@shared/state'
+import type { IconName } from '@/brand/icons'
 import type { MobileUsage } from '@shared/mobile'
 import { api, koraApp } from './api'
 import { Loading } from './Loading'
 
 export type PcView = 'usage' | 'settings'
 
-export function PcSheet({ view, alerts, connected, onClose, onSwitchAccount, onAlerts, onError }: {
+export function PcSheet({ view, themes, theme, onTheme, alerts, connected, onClose, onSwitchAccount, onAlerts, onError }: {
   view: PcView
+  themes: { theme: ThemePreference; label: string; icon: IconName }[]
+  theme: ThemePreference
+  onTheme(theme: ThemePreference): void
   alerts: Alerts
   connected: boolean
   onClose(): void
@@ -31,7 +35,7 @@ export function PcSheet({ view, alerts, connected, onClose, onSwitchAccount, onA
   useEffect(() => {
     if (view !== 'settings') return
     void api<{ id: string; name: string }>('device').then(setDevice, (error: Error) => onError(error.message))
-    void fetch('/health').then((response) => response.json()).then((health: { name?: string }) => setPcName(health.name ?? null), () => {})
+    void fetch('/health').then((response) => response.json()).then((health: { name?: string; edition?: string }) => setPcName(health.name ? `${health.name}${health.edition === 'dev' ? ' (Dev)' : ''}` : null), () => {})
   }, [view, onError])
   useEffect(() => {
     const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
@@ -74,6 +78,19 @@ export function PcSheet({ view, alerts, connected, onClose, onSwitchAccount, onA
         {data?.activeUnknown && <p className="pc-note">O login atual do Claude Code não foi identificado. Abra o Claude uma vez para renovar.</p>}
       </section>
       </> : <>
+      {/* A lista de PCs, renomear e esquecer ficam numa tela do app, igual em qualquer Kora: aqui só o PC desta página. */}
+      <section aria-labelledby="pc-connected-title">
+        <div className="pc-heading"><h2 id="pc-connected-title">PC conectado</h2></div>
+        <div className="pc-connected"><span className={`connection-dot ${connected ? 'online' : ''}`} aria-hidden="true" /><span><strong>{pcName ?? 'Seu PC'}</strong><small>{connected ? 'Conectado' : 'Reconectando…'}</small></span></div>
+        {koraApp() && <button className="action-row" onClick={() => koraApp()!.escolherPc()}><Icon name="buscar" />Trocar de PC<Icon name="expandir" /></button>}
+      </section>
+      <section aria-labelledby="theme-title">
+        <div className="pc-heading"><h2 id="theme-title">Aparência</h2></div>
+        <p className="pc-note">Vale só para este celular; em Sistema, segue o tema do celular.</p>
+        <div className="theme-choice" role="group" aria-label="Tema do celular">
+          {themes.map((option) => <button key={option.theme} aria-pressed={theme === option.theme} onClick={() => onTheme(option.theme)}><Icon name={option.icon} />{option.label}</button>)}
+        </div>
+      </section>
       <section aria-labelledby="alerts-title">
         <div className="pc-heading"><h2 id="alerts-title">Avisos no PC</h2></div>
         <p className="pc-note">Quando uma sessão para e fica esperando você.</p>
@@ -94,11 +111,6 @@ export function PcSheet({ view, alerts, connected, onClose, onSwitchAccount, onA
           <button type="button" onClick={() => setDraft(null)}>Cancelar</button>
           <button className="primary" disabled={busy !== null || !draft.trim()}>Salvar</button>
         </form> : <button className="action-row" disabled={!device || busy !== null} onClick={() => setDraft(device?.name ?? '')}><Icon name="editar" /><span className="device-name">{device?.name ?? 'Carregando…'}</span><small>Renomear</small></button>}
-      </section>
-      <section aria-labelledby="pc-connected-title">
-        <div className="pc-heading"><h2 id="pc-connected-title">PC conectado</h2></div>
-        <div className="pc-connected"><span className={`connection-dot ${connected ? 'online' : ''}`} aria-hidden="true" /><span><strong>{pcName ?? 'Seu PC'}</strong><small>{connected ? 'Conectado' : 'Reconectando…'}</small></span></div>
-        {koraApp() && <button className="action-row" onClick={() => koraApp()!.escolherPc()}><Icon name="buscar" />Procurar outro PC<Icon name="expandir" /></button>}
       </section>
       {koraApp()?.buscarAtualizacao && <section aria-labelledby="app-title">
         <div className="pc-heading"><h2 id="app-title">App do celular</h2></div>

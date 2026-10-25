@@ -116,8 +116,6 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .error-banner svg { width: 15px; height: 15px; }
 .pair-screen { height: var(--mobile-height); overflow: auto; padding: 24px; display: grid; place-items: center; }
 .splash { height: var(--mobile-height); display: grid; place-items: center; animation: fade-in .3s ease both; }
-.usage-footer { width: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 4px; border: 0; border-radius: 0; background: transparent; padding: 10px 16px 4px; font-size: 12px; color: var(--muted-foreground); text-align: left; min-height: 0; }
-.usage-footer > span { width: 100%; }
 .pair-card { width: min(100%, 420px); border: 1px solid var(--border); border-radius: 10px; padding: 28px; background: var(--card); }
 .pair-card h1 { margin-top: 28px; }
 .pair-card p { font-size: 13px; color: var(--muted-foreground); margin: 14px 0; }
@@ -213,13 +211,9 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
   button:active, .tree-project-row:active, .tree-tab:active { background: var(--secondary); }
   .primary:active { background: #e69c48; }
 }
-.mobile-footer { flex-shrink: 0; border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); background: var(--background); }
-.footer-actions { display: flex; align-items: center; gap: 2px; padding: 0 8px 4px; }
-.footer-actions .icon-button { width: 40px; height: 40px; min-height: 40px; color: var(--muted-foreground); }
-.theme-button { border: 0; background: transparent; min-height: 40px; padding: 0 10px; color: var(--muted-foreground); font-size: 12px; gap: 6px; }
-.theme-button svg { width: 15px; height: 15px; }
 .pc-connected { display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-bottom: 1px solid var(--border); }
-.pc-connected > span:last-child { display: flex; flex-direction: column; }
+.pc-connected > span:nth-child(2) { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pc-connected strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-connected .connection-dot { margin: 0; }
 
 .composer { display: flex; align-items: flex-end; gap: 8px; padding: 6px 12px max(10px, env(safe-area-inset-bottom)); flex-shrink: 0; }
@@ -317,3 +311,13 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .loading { flex: 1; min-height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; color: var(--muted-foreground); font-size: 13px; }
 
 .file-retry { flex: 1; display: grid; place-items: center; padding: 24px; }
+
+.mobile-footer { flex-shrink: 0; display: flex; align-items: center; gap: 4px; padding: 6px 8px max(6px, env(safe-area-inset-bottom)) 4px; border-top: 1px solid var(--border); background: var(--background); }
+.usage-footer { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 4px; border: 0; border-radius: 8px; background: transparent; padding: 6px 8px 6px 12px; font-size: 12px; color: var(--muted-foreground); text-align: left; min-height: 0; }
+.usage-footer > span { width: 100%; }
+.footer-settings { margin-left: auto; color: var(--muted-foreground); }
+.theme-choice { display: flex; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; }
+/* Sem transição: a troca de tema muda as cores de tudo junto, e a animação do fundo ficava presa no meio. */
+.theme-choice button { flex: 1; min-height: 40px; gap: 6px; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); font-size: 13px; transition: none; }
+.theme-choice button svg { width: 16px; height: 16px; }
+.theme-choice button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); font-weight: 600; }
