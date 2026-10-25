@@ -7,3 +7,5 @@ out.txt
 # Identidade visual e backlog ficam só na máquina, fora do repositório público
 docs/
 dist-update/
+# APK gerado por scripts/android-apk.ts para ir no instalador
+resources/android/

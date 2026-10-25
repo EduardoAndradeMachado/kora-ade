@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- O mesmo logotipo de Wordmark em src/renderer/src/brand/Logo.tsx, nas cores do tema escuro. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="90dp"
+    android:height="50dp"
+    android:viewportWidth="180"
+    android:viewportHeight="100">
+    <path
+        android:pathData="M16,12 L16,86 M44,42 L18,64 M27,57 L46,86 M104,86 L104,46 M104,64 C104,51 112,45 124,45 M128,65 a20,20 0 1,0 40,0 a20,20 0 1,0 -40,0 M168,45 L168,86 M52,65 a20,20 0 1,0 40,0 a20,20 0 1,0 -40,0"
+        android:strokeColor="#F3E6D0"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M72,8 L72,80"
+        android:strokeColor="#D98E3A"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M66,50 L66,79 M78,50 L78,79"
+        android:strokeColor="#D98E3A"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+</vector>

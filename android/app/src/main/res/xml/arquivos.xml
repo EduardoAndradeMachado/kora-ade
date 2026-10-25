@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- O APK novo baixado do PC, à espera do instalador do Android, e as imagens escolhidas, à espera da página. -->
+<paths>
+    <cache-path name="atualizacao" path="atualizacao/" />
+    <cache-path name="imagens" path="imagens/" />
+</paths>

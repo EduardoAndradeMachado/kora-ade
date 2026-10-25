@@ -14,7 +14,8 @@
     "check": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && oxlint src test && vitest run",
     "e2e": "playwright test",
     "e2e:mutantes": "node e2e/mutantes.mjs",
-    "dist": "electron-vite build && electron-builder --win --publish never"
+    "android": "node scripts/android-apk.ts",
+    "dist": "node scripts/android-apk.ts && electron-vite build && electron-builder --win --publish never"
   },
   "dependencies": {
     "@electron-toolkit/utils": "4.0.0",
