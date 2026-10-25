@@ -95,6 +95,8 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.getByRole('button', { name: 'Enviar', exact: true }).click()
     // Com o PowerShell ainda lendo a linha, o ^C vira tecla e não interrompe; espera o comando rodar.
     await expect.poll(() => desktop, { timeout: 15000 }).toContain('DORMINDO_AGORA')
+    // Ctrl+C fica no ⋯, que abre a segunda linha de teclas.
+    await page.getByRole('button', { name: 'Mais teclas', exact: true }).click()
     await page.getByRole('button', { name: 'Ctrl+C', exact: true }).click()
     // O Windows descarta a entrada pendente no ^C: o próximo comando só depois do prompt voltar.
     await expect.poll(() => desktop.split('DORMINDO_AGORA').at(-1), { timeout: 15000 }).toMatch(/PS [^\r\n]*>/)
@@ -144,7 +146,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
       const dimensions = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }))
       expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.width)
       await browserExpect(page.getByRole('button', { name: 'Enviar', exact: true })).toBeVisible()
-      await browserExpect(page.getByRole('button', { name: 'Ctrl+C', exact: true })).toBeVisible()
+      await browserExpect(page.getByRole('button', { name: 'Mais teclas', exact: true })).toBeVisible()
       await page.screenshot({ path: join(artifacts, `sessao-${width}.png`) })
     }
 

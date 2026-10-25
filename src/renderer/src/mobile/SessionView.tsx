@@ -19,14 +19,21 @@ export interface SessionFeed {
 // manda quando o programa não pediu outro modo de teclado.
 const KEYS: [string, string][] = [
   ['Esc', '\x1b'],
-  ['Ctrl+C', '\x03'],
-  // No Claude Code, troca o modo: normal, aceitar edições e planejar.
-  ['Shift+Tab', '\x1b[Z'],
   ['↑', '\x1b[A'],
   ['↓', '\x1b[B'],
   ['←', '\x1b[D'],
   ['→', '\x1b[C'],
   ['Enter', '\r']
+]
+// Úteis, mas não de toda hora: ficam no ⋯ para a barra não crescer.
+const MORE_KEYS: [string, string][] = [
+  ['Ctrl+C', '\x03'],
+  ['Ctrl+B', '\x02'],
+  ['Ctrl+S', '\x13'],
+  ['Ctrl+X', '\x18'],
+  // No Claude Code, troca o modo: normal, aceitar edições e planejar.
+  ['Shift+Tab', '\x1b[Z'],
+  ['Tab', '\t']
 ]
 
 const MIN_COLS = 20
@@ -50,6 +57,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   const [uploading, setUploading] = useState(0)
   // Erro de imagem ou de envio aparece no campo, onde a pessoa agiu, e não no aviso do topo.
   const [composerError, setComposerError] = useState<string | null>(null)
+  const [moreKeys, setMoreKeys] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
   const mount = useRef<HTMLDivElement>(null)
@@ -258,8 +266,12 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     <div className="terminal-area">
       <div className="terminal-mount" ref={mount} />
     </div>
+    {moreKeys && <nav className="terminal-keys more-keys" aria-label="Mais teclas do terminal">
+      {MORE_KEYS.map(([label, data]) => <button disabled={!connected} key={label} onClick={() => keys(data)}>{label}</button>)}
+    </nav>}
     <nav className="terminal-keys" aria-label="Teclas do terminal">
       {KEYS.map(([label, data]) => <button disabled={!connected} key={label} onClick={() => keys(data)}>{label}</button>)}
+      <button className="more-keys-toggle" aria-label="Mais teclas" aria-expanded={moreKeys} onClick={() => setMoreKeys((open) => !open)}>⋯</button>
     </nav>
     {(() => {
       const ready = !sending && uploading === 0 && connected && (draft.trim() !== '' || images.length > 0)
