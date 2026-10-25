@@ -1,0 +1,25 @@
+diff --git a/lib/windowsPtyAgent.js b/lib/windowsPtyAgent.js
+index a358ffb177357e177661033c1b092f9c9d0e5f5a..2be2f4979059d492a708acdc0023e5bbc1eef465 100644
+--- a/lib/windowsPtyAgent.js
++++ b/lib/windowsPtyAgent.js
+@@ -186,10 +186,18 @@ var WindowsPtyAgent = /** @class */ (function () {
+                 clearTimeout(timeout);
+                 resolve(message.consoleProcessList);
+             });
++            // Kora: o agente cai com "AttachConsole failed" quando o shell já morreu (o kill() fecha o pseudoconsole
++            // logo depois de criar o agente). Devolver o PID do shell aqui era matar, 5 s depois, um PID que o
++            // Windows pode ter dado a outro programa. Quem encerra o shell é o ClosePseudoConsole do kill().
++            agent.on('exit', function (code) {
++                if (code !== 0) {
++                    clearTimeout(timeout);
++                    resolve([]);
++                }
++            });
+             var timeout = setTimeout(function () {
+-                // Something went wrong, just send back the shell PID
+                 agent.kill();
+-                resolve([_this._innerPid]);
++                resolve([]);
+             }, 5000);
+         });
+     };

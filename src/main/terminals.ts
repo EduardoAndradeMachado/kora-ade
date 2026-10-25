@@ -5,6 +5,7 @@ import { SerializeAddon } from '@xterm/addon-serialize'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { startupCommand, type AgentKind, type Startup } from '../shared/agent'
 import type { TerminalSnapshot } from '../shared/mobile'
+import { terminateIfStillRunning } from './processes'
 
 // Se o Kora for aberto de dentro de outro agente ou do electron-vite, o shell herdaria esses
 // marcadores: NO_COLOR apaga as cores, CLAUDE_CODE_CHILD_SESSION faz o Claude não salvar a sessão
@@ -62,6 +63,7 @@ const SUBMIT_DELAY_MS = 60
 const CODEX_SUBMIT_DELAY_MS = 400
 // Tempo para o agente ler o arquivo colado e trocar o caminho por [Image #n] antes da próxima colagem.
 const IMAGE_PASTE_GAP_MS = 250
+const SHELL_EXIT_GRACE_MS = 3000
 
 export class Terminals {
   private readonly sessions = new Map<string, pty.IPty>()
@@ -185,7 +187,11 @@ export class Terminals {
   }
 
   kill(id: string): void {
-    this.sessions.get(id)?.kill()
+    const proc = this.sessions.get(id)
+    proc?.kill()
+    // O kill do node-pty só fecha o pseudoconsole: o shell sai com o aviso de fechamento, mas um PowerShell ainda
+    // subindo, com a máquina carregada, pode passar do prazo e ficar órfão.
+    if (proc) terminateIfStillRunning(proc.pid, SHELL_EXIT_GRACE_MS)
     this.sessions.delete(id)
     this.dropMirror(id)
   }

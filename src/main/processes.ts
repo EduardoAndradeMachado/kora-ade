@@ -143,3 +143,18 @@ export function fileHolders(file: string): number[] {
 export function withCreationTime(p: ProcInfo): ProcInfo {
   return { ...p, createdMs: creationTimeMs(p.pid) }
 }
+
+// Encerra o processo se, passado o prazo, ele ainda estiver vivo. Só o mesmo processo (PID e horário de criação):
+// o Windows reaproveita PID em segundos, e o PID sozinho pode já ser de outro programa.
+export function terminateIfStillRunning(pid: number, afterMs: number): void {
+  const createdMs = creationTimeMs(pid)
+  if (createdMs === null) return
+  setTimeout(() => {
+    if (creationTimeMs(pid) !== createdMs) return
+    try {
+      process.kill(pid)
+    } catch {
+      // Saiu entre a conferência e o kill: era o que se queria.
+    }
+  }, afterMs).unref()
+}

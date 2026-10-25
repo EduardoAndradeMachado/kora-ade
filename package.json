@@ -71,7 +71,10 @@
       "esbuild",
       "koffi",
       "node-pty"
-    ]
+    ],
+    "patchedDependencies": {
+      "node-pty@1.1.0": "patches/node-pty@1.1.0.patch"
+    }
   },
   "description": "Ambiente de desenvolvimento com agentes (Claude Code, Codex e OpenCode) por projeto",
   "author": "Eduardo Andrade Machado",

@@ -142,6 +142,32 @@ describe('Terminals (PowerShell real via node-pty)', () => {
     await waitFor(() => pids.every((pid) => !alive(pid)), 8000)
   })
 
+  // O Windows reaproveita PID em segundos: um kill atrasado no PID do shell já encerrado pode acertar outro programa.
+  // Foi o que derrubava o processo do teste de job-object rodando em paralelo no CI.
+  it('fechar a aba não manda kill atrasado no PID que era do shell', async () => {
+    const { withCreationTime } = await import('../src/main/processes')
+    const createdMs = (pid: number): number | null => withCreationTime({ pid, ppid: 0, name: '', createdMs: null }).createdMs
+    const id = randomUUID()
+    terminals.spawn(id, tmpdir(), 80, 24)
+    const shellPid = terminals.pids().get(id)!
+    const shellCreated = createdMs(shellPid)
+    // Encerrar o shell que ainda está vivo é certo; o defeito é o kill num PID que já não é o do shell.
+    const stale: number[] = []
+    const original = process.kill
+    process.kill = ((pid: number) => {
+      if (pid === shellPid && createdMs(pid) !== shellCreated) stale.push(pid)
+      return true
+    }) as typeof process.kill
+    try {
+      terminals.kill(id)
+      // O node-pty desiste de listar os processos do console depois de 5 s e cai no PID do shell.
+      await new Promise((r) => setTimeout(r, 6000))
+    } finally {
+      process.kill = original
+    }
+    expect(stale).toEqual([])
+  }, 15000)
+
   it('recusa pasta que não existe em vez de abrir em outro lugar', () => {
     expect(() => terminals.spawn(randomUUID(), join(tmpdir(), 'kora-nao-existe-xyz'), 80, 24)).toThrow(/não existe/)
   })

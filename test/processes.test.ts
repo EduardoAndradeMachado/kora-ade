@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
-import { descendants, listProcesses, withCreationTime, type ProcInfo } from '../src/main/processes'
+import { descendants, listProcesses, terminateIfStillRunning, withCreationTime, type ProcInfo } from '../src/main/processes'
 
 const children: ReturnType<typeof spawn>[] = []
 afterEach(() => {
@@ -43,6 +43,36 @@ describe('listProcesses (Toolhelp real do Windows)', () => {
 
     expect(created).not.toBeNull()
     expect(Math.abs(created! - before)).toBeLessThan(2000)
+  })
+})
+
+describe('terminateIfStillRunning', () => {
+  it('encerra o processo que ainda está vivo depois do prazo', async () => {
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'])
+    children.push(child)
+    await new Promise((r) => setTimeout(r, 300))
+    const exited = new Promise<void>((r) => child.once('exit', () => r()))
+
+    terminateIfStillRunning(child.pid!, 100)
+
+    await expect(Promise.race([exited.then(() => 'saiu'), new Promise((r) => setTimeout(() => r('vivo'), 3000))])).resolves.toBe('saiu')
+  })
+
+  it('não manda kill quando o PID já não é daquele processo', async () => {
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'])
+    children.push(child)
+    await new Promise((r) => setTimeout(r, 300))
+    const killed: number[] = []
+    const original = process.kill
+    process.kill = ((pid: number) => (killed.push(pid), true)) as typeof process.kill
+    try {
+      terminateIfStillRunning(child.pid!, 400)
+      original.call(process, child.pid!)
+      await new Promise((r) => setTimeout(r, 800))
+    } finally {
+      process.kill = original
+    }
+    expect(killed).toEqual([])
   })
 })
 
