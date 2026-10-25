@@ -56,9 +56,37 @@ na lateral; um clique fecha o app, instala e abre de novo. Projetos, categorias 
   e no PATH. O Kora abre os agentes que você já usa — ele não traz nenhum agente próprio.
 - Git, se quiser o painel Git.
 
+## Usar pelo celular (experimental)
+
+Em **Configurações → Celular**, ligue a conexão e clique em **Nova conexão**. Leia o QR code com o app Kora do celular
+(ou com a câmera, para usar no navegador), na mesma rede Wi-Fi. O celular fica vinculado até você desvinculá-lo ali,
+onde também dá para renomeá-lo e ver quais estão conectados agora.
+
+O app Android é o [Kora-Celular.apk](https://github.com/EduardoAndradeMachado/kora-ade/releases/latest/download/Kora-Celular.apk)
+da última Release. Ao abrir, ele procura o Kora na rede e entra sozinho. Depois da primeira instalação, ele se
+atualiza pelo Kora do PC: o instalador do PC já traz a versão nova do app.
+
+O celular mostra o mesmo terminal da aba no PC, ao vivo. O que você escreve em um aparece no outro, e nenhum dos dois
+trava: o terminal só tem um tamanho, e ele segue a tela onde você interagiu por último. Abrir a aba no celular ajusta o
+terminal ao celular; digitar no PC traz de volta ao tamanho da janela; sair da aba no celular também devolve ao PC.
+
+No celular, a mensagem vai pelo campo de texto (com o ditado e o colar do próprio celular), e o **+** anexa prints e
+fotos, que chegam ao Claude e ao Codex como imagem, igual ao Ctrl+V com print no PC. A barra acima do campo tem
+Esc, Ctrl+C, Shift+Tab, setas e Enter. Também dá para abrir, retomar, renomear, suspender e fechar abas (segure a
+aba na lista para ver as opções) e adicionar projetos. O rodapé da tela inicial mostra os limites do Claude e do Codex
+(tocar abre a troca de conta do Claude no PC), o tema do celular e as configurações: avisos do PC, nome do celular e
+PC conectado.
+
+O código do app Android fica em `android/`. Para gerar o APK com o Android Studio instalado: `pnpm android` (precisa
+da chave de assinatura).
+
+A conexão usa HTTP na rede local, na porta 43127, e vem desligada. O Kora precisa estar aberto no PC: fechar a janela
+para a bandeja encerra os terminais, como sempre. Se o firewall do Windows perguntar, permita só em redes privadas.
+
 ## Privacidade
 
-- Sem telemetria e sem servidor próprio: o Kora não coleta nem envia dados de uso. Ele só acessa a rede para o limite de uso do Claude, o ícone do projeto e as atualizações, descritos abaixo.
+- Sem telemetria e sem servidor na nuvem: o Kora não coleta nem envia dados de uso. Ele só acessa a rede para o limite de uso do Claude, o ícone do projeto e as atualizações, descritos abaixo.
+- A conexão com o celular, quando ligada, abre um servidor HTTP no próprio PC e só responde a endereços da rede local e a navegadores pareados. O QR vale por 2 minutos e uma vez só; o PC guarda apenas o hash da credencial de cada celular. O tráfego não é criptografado: qualquer um na mesma rede consegue ler o que passa, então use em uma rede de confiança.
 - Para achar sessões e títulos de conversas, lê as pastas `~/.claude` e `~/.codex` do seu usuário.
 - Para mostrar o limite de uso do Claude, lê o login do Claude Code (`~/.claude/.credentials.json`) e envia o token
   **somente** para `api.anthropic.com` — o mesmo endereço que o `/usage` do Claude Code consulta —, no máximo uma vez
