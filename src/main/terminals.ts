@@ -154,12 +154,17 @@ export class Terminals {
     const proc = this.sessions.get(id)
     if (!proc) throw new Error('A sessão está suspensa.')
     const bracketed = this.mirrors.get(id)?.terminal.modes.bracketedPasteMode ?? false
-    const pastes = bracketed
-      ? [...images, text].filter(Boolean).map((part) => `\x1b[200~${part}\x1b[201~`)
-      : [[...images, text].filter(Boolean).join(' ').replace(/\r?\n/g, '\r')]
+    const message = text.trim() === '' ? '' : text
+    // O texto vem primeiro, como quem digita e depois dá Ctrl+V no print: a linha nunca começa pelo caminho, que o
+    // shell executaria (o PowerShell abria o app de Fotos). No agente, cada caminho numa colagem vira anexo.
+    const pastes = bracketed && agent
+      ? [message, ...images].filter(Boolean).map((part) => `\x1b[200~${part}\x1b[201~`)
+      : [[message, ...images].filter(Boolean).join(' ')].map((line) => (bracketed ? `\x1b[200~${line}\x1b[201~` : line.replace(/\r?\n/g, '\r')))
     pastes.forEach((paste, index) => setTimeout(() => {
       if (this.sessions.get(id) === proc) proc.write(paste)
     }, index * IMAGE_PASTE_GAP_MS))
+    // Só imagem num terminal comum: cola o caminho e não aperta Enter, para não executar o arquivo.
+    if (!agent && message === '') return
     setTimeout(() => {
       if (this.sessions.get(id) === proc) proc.write('\r')
     }, (pastes.length - 1) * IMAGE_PASTE_GAP_MS + (agent === 'codex' ? CODEX_SUBMIT_DELAY_MS : SUBMIT_DELAY_MS))
