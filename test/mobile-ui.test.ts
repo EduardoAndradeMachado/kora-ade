@@ -140,6 +140,29 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await expect.poll(() => runtime.sizes.holder(tab.id)).toBe(device)
     await browserExpect(page.getByRole('button', { name: /Em uso no PC/ })).toHaveCount(0)
 
+    // Teclado e a fileira do ⋯ são passageiros: o terminal compartilhado (e a janela do PC) fica do mesmo tamanho, e
+    // o celular esconde as linhas de cima, não a de baixo, onde está o cursor.
+    const steady = runtime.sizes.current(tab.id)
+    const lastRowVisible = (): Promise<boolean> => page.evaluate(() => {
+      const area = document.querySelector('.terminal-area')!.getBoundingClientRect()
+      const rows = document.querySelectorAll('.xterm-rows > div')
+      const last = rows[rows.length - 1]!.getBoundingClientRect()
+      return last.top >= area.top && last.bottom <= area.bottom + 1
+    })
+    await page.setViewportSize({ width: 350, height: 420 })
+    await page.getByRole('button', { name: 'Mais teclas', exact: true }).click()
+    await page.waitForTimeout(600)
+    expect(runtime.sizes.current(tab.id)).toEqual(steady)
+    expect(await lastRowVisible()).toBe(true)
+    await page.getByRole('button', { name: 'Mais teclas', exact: true }).click()
+    await page.setViewportSize({ width: 350, height: 700 })
+    await page.waitForTimeout(600)
+    expect(runtime.sizes.current(tab.id)).toEqual(steady)
+    // Girar o celular muda a largura: aí o terminal acompanha.
+    await page.setViewportSize({ width: 700, height: 350 })
+    await expect.poll(() => runtime.sizes.current(tab.id)?.cols).toBeGreaterThan(steady!.cols)
+    await page.setViewportSize({ width: 350, height: 700 })
+
     for (const [width, height] of SIZES) {
       await page.setViewportSize({ width, height })
       await page.waitForTimeout(250)

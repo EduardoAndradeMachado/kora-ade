@@ -134,15 +134,31 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     feed.current.terminal = receive
     feed.current.size = applySize
 
+    // O terminal é o mesmo no PC: mudar de tamanho redesenha o agente e mexe na janela do PC. Teclado e a fileira do
+    // ⋯ só encolhem a altura por um tempo, então o tamanho fica o da maior altura nesta largura e a área mostra a
+    // parte de baixo (cursor e campo do agente) recortando as linhas de cima. Largura nova (girar) redimensiona.
+    const area = element.parentElement!
+    let steady = { width: 0, height: 0, mount: 0 }
     let resizeTimer: ReturnType<typeof setTimeout> | undefined
     const observer = new ResizeObserver(() => {
+      const width = area.clientWidth
+      const height = area.clientHeight
+      if (width === steady.width && height < steady.height) {
+        element.style.top = 'auto'
+        element.style.height = `${steady.mount}px`
+        return
+      }
+      element.style.top = ''
+      element.style.height = ''
+      if (width === steady.width && height === steady.height) return
+      steady = { width, height, mount: element.clientHeight }
       clearTimeout(resizeTimer)
       resizeTimer = setTimeout(() => {
         if (disposed || !hydrated) return
         void send({ type: 'resize', tabId: tab.id, ...wanted.current() }).catch((error: Error) => onError(error.message))
       }, 150)
     })
-    observer.observe(element)
+    observer.observe(area)
 
     // O Codex abre na tela alternativa e rola o histórico ele mesmo, pela roda do mouse: ali o terminal não tem o
     // que rolar. Arrastar o dedo vira a roda (SGR, como o xterm do PC manda), uma volta por linha arrastada.
