@@ -203,7 +203,6 @@ export function MobileApp(): React.JSX.Element {
       <div className="section-heading"><div><span className="eyebrow">SEU COMPUTADOR</span><h1>Seus projetos</h1></div><span className="section-count">{state.projects.length}</span></div>
       <label className="project-search"><Icon name="buscar" /><input aria-label="Buscar projetos e abas" placeholder="Buscar projetos e abas" value={search} onChange={(event) => setSearch(event.target.value)} autoComplete="off" /></label>
       {state.projects.length === 0 ? <div className="empty-state"><SymbolMark size={56} /><h2>Seu espaço de trabalho</h2><p>Adicione uma pasta do PC para começar uma conversa.</p><button className="primary" onClick={() => picker(null)} disabled={busy || !connected}><Icon name="novoProjeto" active />Adicionar projeto</button></div> : <ProjectTree state={state} search={search} onProject={openProject} onFiles={(id) => navigate({ projectId: id, tabId: null, picker: null, files: '' })} onNewTab={newTab} onTab={(tab: MobileTab) => open(tab.id, tab.projectId)} onTabActions={tabActions} onRelocate={picker} />}
-      <button className="add-project-row" onClick={() => picker(null)} disabled={busy || !connected}><Icon name="novaAba" />Novo projeto</button>
     </main>
     <footer className="mobile-footer">
       {usage.length > 0 && <button className="usage-footer" aria-label="Limites de uso e conta" onClick={() => navigate({ ...route, pc: 'usage' })}>
