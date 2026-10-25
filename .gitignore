@@ -9,3 +9,5 @@ docs/
 dist-update/
 # APK gerado por scripts/android-apk.ts para ir no instalador
 resources/android/
+# Pastas do pdf.js do celular, copiadas por scripts/pdfjs-assets.ts para ir no instalador
+resources/pdfjs/

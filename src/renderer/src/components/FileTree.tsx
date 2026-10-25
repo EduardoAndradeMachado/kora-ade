@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon, type IconName } from '@/brand/icons'
 import type { FileEntry } from '@shared/ipc'
-import type { GitFile, GitFileStatus } from '@shared/git-types'
+import type { GitFile } from '@shared/git-types'
+import { GIT_STYLE, gitMaps, gitPathKey } from '@/lib/git-decorations'
 import { ContextMenu, type MenuItem } from '@/components/ContextMenu'
 import { useConfirm } from '@/components/ConfirmDialog'
 import { ipcErrorMessage, isNotFound } from '@/lib/ipc-error'
@@ -22,17 +23,7 @@ interface Props {
   reveal?: { path: string; n: number } | null
 }
 
-// Mesmas cores do VS Code: claras no tema escuro, escuras no claro para manter contraste.
-const GIT_STYLE: Record<GitFileStatus, { letter: string; className: string }> = {
-  modified: { letter: 'M', className: 'text-[#895503] dark:text-[#e2c08d]' },
-  added: { letter: 'A', className: 'text-[#587c0c] dark:text-[#73c991]' },
-  untracked: { letter: 'U', className: 'text-[#587c0c] dark:text-[#73c991]' },
-  renamed: { letter: 'R', className: 'text-[#007acc] dark:text-[#73c991]' },
-  deleted: { letter: 'D', className: 'text-[#ad0707] dark:text-[#f48771]' },
-  conflicted: { letter: '!', className: 'text-[#ad0707] dark:text-[#e06c75]' }
-}
-
-const key = (path: string): string => path.replace(/\\/g, '/').toLowerCase()
+const key = gitPathKey
 
 type Target = { path: string; isDir: boolean } | null
 type Creating = { parent: string; kind: 'file' | 'dir' }
@@ -54,23 +45,7 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
   const [renaming, setRenaming] = useState<string | null>(null)
   const [dropDir, setDropDir] = useState<string | null>(null)
 
-  const gitByPath = useMemo(() => {
-    const files = new Map<string, GitFileStatus>()
-    const dirs = new Map<string, GitFileStatus>()
-    for (const f of gitFiles) {
-      files.set(key(f.path), f.status)
-      const parts = key(f.path).split('/')
-      for (let i = 1; i < parts.length; i++) {
-        const dir = parts.slice(0, i).join('/')
-        // Conflito vence qualquer outro status na pasta; depois, modificado.
-        const current = dirs.get(dir)
-        if (current !== 'conflicted' && (f.status === 'conflicted' || !current || current === 'untracked')) {
-          dirs.set(dir, f.status === 'untracked' || f.status === 'added' ? (current ?? f.status) : f.status)
-        }
-      }
-    }
-    return { files, dirs }
-  }, [gitFiles])
+  const gitByPath = useMemo(() => gitMaps(gitFiles), [gitFiles])
 
   const loadedRef = useRef(new Set<string>())
 

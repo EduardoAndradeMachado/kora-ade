@@ -8,6 +8,9 @@ export interface MobileRoute {
   newTab?: string
   actions?: string
   pc?: 'usage' | 'settings'
+  // Arquivos do projeto: files é a pasta aberta ('' é a raiz); file, o arquivo aberto por cima dela.
+  files?: string
+  file?: string
 }
 const home: MobileRoute = { projectId: null, tabId: null, picker: null }
 

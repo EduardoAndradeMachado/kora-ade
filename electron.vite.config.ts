@@ -19,7 +19,8 @@ export default defineConfig({
     },
     plugins: [react(), tailwindcss()],
     // Sem isso o Vite descobre o Monaco (import lazy) no meio da sessão, reempacota as dependências e a página
-    // passa a carregar duas cópias do React (hashes diferentes) — tela preta com "Invalid hook call".
+    // passa a carregar duas cópias do React (hashes diferentes) — tela preta com "Invalid hook call". O CodeMirror
+    // e o pdf.js são da página do celular: descobertos ao abrir um arquivo, o Vite a recarregaria no meio do uso.
     optimizeDeps: {
       include: [
         'react',
@@ -33,7 +34,14 @@ export default defineConfig({
         '@xterm/addon-fit',
         '@xterm/addon-unicode11',
         '@xterm/addon-web-links',
-        '@xterm/addon-webgl'
+        '@xterm/addon-webgl',
+        'codemirror',
+        '@codemirror/state',
+        '@codemirror/view',
+        '@codemirror/language',
+        '@codemirror/language-data',
+        '@codemirror/theme-one-dark',
+        'pdfjs-dist'
       ]
     }
   }

@@ -1,13 +1,16 @@
 import { createServer, type Server, type ServerResponse, type IncomingMessage } from 'node:http'
+import { randomBytes } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { createSocket } from 'node:dgram'
 import { hostname, networkInterfaces } from 'node:os'
 import { readFile } from 'node:fs/promises'
-import { resolve, sep, extname } from 'node:path'
+import { extname, join, resolve, sep } from 'node:path'
 import QRCode from 'qrcode'
 import { z } from 'zod'
-import { DeviceNameSchema, MobileCommandSchema, type MobilePairing, type MobileStatus, type TerminalSizeEvent } from '../shared/mobile'
+import { DeviceNameSchema, FileSaveSchema, MobileCommandSchema, type MobilePairing, type MobileStatus, type TerminalSizeEvent } from '../shared/mobile'
 import { MobilePairingStore } from './mobile-pairing'
 import { MAX_PASTED_IMAGE_BYTES, savePastedImage } from './pasted-image'
+import { ConflictError } from './files'
 import type { MobileRuntime } from './mobile-runtime'
 
 export function isLocalAddress(address: string): boolean {
@@ -42,7 +45,17 @@ export async function preferredAddress(): Promise<string | null> {
   return routed && local.includes(routed) ? routed : local[0] ?? null
 }
 
-const contentTypes: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png', '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json' }
+const contentTypes: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.png': 'image/png',
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif', '.bmp': 'image/bmp', '.ico': 'image/x-icon',
+  '.pdf': 'application/pdf', '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/plain; charset=utf-8', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wasm': 'application/wasm'
+}
+const PDFJS_DIRS = new Set(['wasm', 'cmaps', 'standard_fonts', 'iccs'])
+// Link de leitura dos arquivos de um projeto, para o HTML aberto no celular carregar o CSS e as imagens dele por
+// caminho relativo. Vale por pouco tempo e só lê: a página roda isolada (sandbox) e não recebe o pareamento.
+const RAW_LINK_MS = 30 * 60_000
 const PairSchema = z.object({ code: z.string().min(1).max(100), name: z.string().max(60) })
 const json = (response: ServerResponse, status: number, body: unknown): void => {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
@@ -61,6 +74,8 @@ export class MobileServer {
   private readonly clients = new Set<{ device: string; response: ServerResponse }>()
   private heartbeat: ReturnType<typeof setInterval> | null = null
   private readonly disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  // base: a pasta do arquivo aberto. O link só lê dali para baixo, e de quem pediu (some ao desvincular o celular).
+  private readonly rawLinks = new Map<string, { projectId: string; base: string; device: string; until: number }>()
 
   constructor(private readonly options: {
     configFile: string
@@ -71,6 +86,8 @@ export class MobileServer {
     androidDir?: string
     // Onde o print mandado pelo celular vira arquivo: a mesma pasta do Ctrl+V com imagem no PC.
     imageDir?: string
+    // Decodificadores, fontes e mapas que o pdf.js do celular busca por URL (scripts/pdfjs-assets.ts).
+    pdfjsDir?: string
     runtime: MobileRuntime
     changed(): void
     // Pareou, renomeou, desvinculou, abriu ou fechou o Kora no celular: a tela do PC atualiza na hora.
@@ -158,6 +175,7 @@ export class MobileServer {
   revoke(id: string): MobileStatus {
     this.pairing.revoke(id)
     this.options.runtime.leave(id)
+    for (const [token, link] of this.rawLinks) if (link.device === id) this.rawLinks.delete(token)
     clearTimeout(this.disconnectTimers.get(id))
     this.disconnectTimers.delete(id)
     for (const client of this.clients) if (client.device === id) {
@@ -187,6 +205,55 @@ export class MobileServer {
     for (const client of this.clients) sendEvent(client.response, 'size', event)
   }
 
+  private rawLink(projectId: string, rel: string, device: string): string {
+    const now = Date.now()
+    for (const [token, link] of this.rawLinks) if (link.until < now) this.rawLinks.delete(token)
+    const token = randomBytes(18).toString('base64url')
+    const parts = rel.split(/[\\/]/).filter(Boolean)
+    this.rawLinks.set(token, { projectId, base: parts.slice(0, -1).join('/'), device, until: now + RAW_LINK_MS })
+    return `/raw/${token}/${parts.map(encodeURIComponent).join('/')}`
+  }
+
+  private raw(pathname: string, response: ServerResponse): void {
+    const [, , token = '', ...encoded] = pathname.split('/')
+    const link = this.rawLinks.get(token)
+    if (!link || link.until < Date.now()) return json(response, 403, { error: 'Link vencido. Abra o arquivo de novo.' })
+    let parts: string[]
+    try {
+      parts = encoded.map(decodeURIComponent).flatMap((part) => part.split(/[\\/]/)).filter(Boolean)
+    } catch {
+      return json(response, 400, { error: 'Endereço inválido.' })
+    }
+    // Um HTML do projeto roda com scripts: não lê nada fora da pasta dele nem arquivo oculto (.env, .git).
+    const inside = link.base === '' || parts.join('/').startsWith(`${link.base}/`)
+    if (!inside || parts.some((part) => part.startsWith('.'))) return json(response, 403, { error: 'Fora da pasta deste arquivo.' })
+    let file: string
+    try {
+      file = this.options.runtime.filePath(link.projectId, parts.join('/'))
+    } catch {
+      return json(response, 404, { error: 'Arquivo não encontrado.' })
+    }
+    // sandbox: o HTML do projeto roda sem a origem do Kora, então não alcança a API com o cookie do celular.
+    response.setHeader('content-security-policy', "sandbox allow-scripts allow-popups allow-forms allow-modals; frame-ancestors 'self'")
+    // Isolada, a página não tem origem: módulo de script, fonte e fetch dos arquivos dela só carregam com CORS aberto.
+    // O link já é a chave; o CORS não dá acesso a mais nada.
+    response.setHeader('access-control-allow-origin', '*')
+    response.writeHead(200, { 'content-type': contentTypes[extname(file).toLowerCase()] ?? 'application/octet-stream' })
+    createReadStream(file).on('error', () => response.destroy()).pipe(response)
+  }
+
+  // Arquivos da própria biblioteca, iguais para todos: sem pareamento, mas só um nome de arquivo dentro das pastas dela.
+  private async pdfjs(pathname: string, response: ServerResponse): Promise<void> {
+    const [, , dir = '', name = '', ...rest] = pathname.split('/')
+    if (!this.options.pdfjsDir || !PDFJS_DIRS.has(dir) || rest.length > 0 || !/^[\w.-]+$/.test(name) || name.startsWith('.')) {
+      return json(response, 404, { error: 'Arquivo não encontrado.' })
+    }
+    const content = await readFile(join(this.options.pdfjsDir, dir, name)).catch(() => null)
+    if (!content) return json(response, 404, { error: 'Arquivo não encontrado.' })
+    response.writeHead(200, { 'content-type': contentTypes[extname(name).toLowerCase()] ?? 'application/octet-stream' })
+    response.end(content)
+  }
+
   // Imagem chega crua (o corpo é o arquivo), sem passar pelo limite de 64 KB do JSON.
   private async image(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const mime = request.headers['content-type']?.split(';')[0]?.trim() ?? ''
@@ -205,13 +272,13 @@ export class MobileServer {
     json(response, 200, { path: savePastedImage(this.options.imageDir, Buffer.concat(chunks), mime) })
   }
 
-  private async body(request: IncomingMessage): Promise<unknown> {
+  private async body(request: IncomingMessage, limit = 65536): Promise<unknown> {
     if (!request.headers['content-type']?.startsWith('application/json')) throw new Error('Envie JSON.')
     request.setEncoding('utf8')
     let body = ''
     for await (const chunk of request) {
       body += String(chunk)
-      if (Buffer.byteLength(body) > 65536) throw new Error('Pedido muito grande.')
+      if (Buffer.byteLength(body) > limit) throw new Error('Pedido muito grande.')
     }
     return JSON.parse(body)
   }
@@ -220,14 +287,17 @@ export class MobileServer {
     response.setHeader('cache-control', 'no-store')
     response.setHeader('x-content-type-options', 'nosniff')
     response.setHeader('referrer-policy', 'no-referrer')
-    response.setHeader('content-security-policy', `default-src 'self'; script-src 'self'${this.options.devUrl ? " 'unsafe-inline'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'${this.options.devUrl ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`)
+    response.setHeader('content-security-policy', `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${this.options.devUrl ? " 'unsafe-inline'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'${this.options.devUrl ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`)
     try {
       const hosts = [...localAddresses(), '127.0.0.1', 'localhost'].map((host) => `${host}:${this.port}`)
       const host = request.headers.host ?? ''
       if (!isLocalAddress(request.socket.remoteAddress ?? '') || !hosts.includes(host)) return json(response, 403, { error: 'Conexão permitida somente pela rede local.' })
+      const url = new URL(request.url ?? '/', `http://${host}`)
+      // Antes da checagem de origem: o HTML do projeto roda isolado (sandbox), sem origem, e pede o CSS e as imagens
+      // dele daqui. O link só lê arquivos e é a chave dele que autoriza, não o cookie do celular.
+      if (url.pathname.startsWith('/raw/') && request.method === 'GET') return this.raw(url.pathname, response)
       const origin = request.headers.origin
       if ((origin && origin !== `http://${host}`) || request.headers['sec-fetch-site'] === 'cross-site') return json(response, 403, { error: 'Origem não autorizada.' })
-      const url = new URL(request.url ?? '/', `http://${host}`)
       if (url.pathname === '/health' && request.method === 'GET') {
         const uptime = Math.floor((Date.now() - this.started) / 1000)
         const hours = Math.floor(uptime / 3600)
@@ -245,6 +315,7 @@ export class MobileServer {
         response.end(content)
         return
       }
+      if (url.pathname.startsWith('/pdfjs/') && request.method === 'GET') return await this.pdfjs(url.pathname, response)
       if (url.pathname === '/api/pair' && request.method === 'POST') {
         const { code, name } = PairSchema.parse(await this.body(request))
         const token = this.pairing.pair(code, name)
@@ -265,6 +336,31 @@ export class MobileServer {
         if (url.pathname === '/api/project-icon' && request.method === 'GET') return json(response, 200, { icon: await this.options.runtime.projectIcon(url.searchParams.get('project') ?? '') })
         if (url.pathname === '/api/usage' && request.method === 'GET') return json(response, 200, await this.options.runtime.usage())
         if (url.pathname === '/api/image' && request.method === 'POST') return await this.image(request, response)
+        if (url.pathname === '/api/files' && request.method === 'GET') {
+          return json(response, 200, this.options.runtime.files(url.searchParams.get('project') ?? '', url.searchParams.get('path') ?? ''))
+        }
+        if (url.pathname === '/api/git' && request.method === 'GET') return json(response, 200, await this.options.runtime.git(url.searchParams.get('project') ?? ''))
+        if (url.pathname === '/api/file' && request.method === 'GET') {
+          const project = url.searchParams.get('project') ?? ''
+          const path = url.searchParams.get('path') ?? ''
+          return json(response, 200, { ...this.options.runtime.readFile(project, path), raw: this.rawLink(project, path, device) })
+        }
+        if (url.pathname === '/api/file-link' && request.method === 'GET') {
+          const project = url.searchParams.get('project') ?? ''
+          const path = url.searchParams.get('path') ?? ''
+          this.options.runtime.filePath(project, path)
+          return json(response, 200, { raw: this.rawLink(project, path, device) })
+        }
+        if (url.pathname === '/api/file' && request.method === 'POST') {
+          // O JSON pode dobrar o tamanho do texto (aspas, barras e quebras de linha escapadas).
+          const save = FileSaveSchema.parse(await this.body(request, 14 * 1024 * 1024))
+          try {
+            return json(response, 200, { mtimeMs: this.options.runtime.writeFile(save.projectId, save.path, save.content, save.mtimeMs) })
+          } catch (error) {
+            if (error instanceof ConflictError) return json(response, 409, { error: 'O arquivo mudou no PC depois que você abriu.', conflict: true })
+            throw error
+          }
+        }
         if (url.pathname === '/api/device') {
           if (request.method === 'POST') this.rename(device, z.object({ name: DeviceNameSchema }).parse(await this.body(request)).name)
           else if (request.method !== 'GET') return json(response, 405, { error: 'Método não permitido.' })
@@ -308,8 +404,11 @@ export class MobileServer {
       if (request.method !== 'GET') return json(response, 405, { error: 'Método não permitido.' })
       await this.asset(url.pathname === '/' ? '/mobile.html' : url.pathname + url.search, response)
     } catch (error) {
-      if (!response.headersSent) json(response, 400, { error: error instanceof z.ZodError ? 'Pedido inválido.' : error instanceof Error ? error.message : 'Falha na operação.' })
-      else response.end()
+      if (response.headersSent) response.end()
+      // Arquivo ou pasta apagados (o agente pode ter mexido): aviso claro, sem o erro do Node com o caminho do PC.
+      else if ((error as NodeJS.ErrnoException).code === 'ENOENT') json(response, 404, { error: 'Esse arquivo ou pasta não existe mais no PC: pode ter sido apagado ou renomeado.' })
+      else if (error instanceof z.ZodError && error.issues.some((issue) => issue.code === 'too_big' && issue.path[0] === 'content')) json(response, 413, { error: 'Arquivo grande demais para salvar pelo celular.' })
+      else json(response, 400, { error: error instanceof z.ZodError ? 'Pedido inválido.' : error instanceof Error ? error.message : 'Falha na operação.' })
     }
   }
 

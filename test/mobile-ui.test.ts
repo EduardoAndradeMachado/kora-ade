@@ -17,7 +17,9 @@ const SIZES = [[350, 700], [768, 1024], [1280, 800]] as const
 
 it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, tablet e desktop', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'kora-mobile-ui-'))
-  const vite = await createServer({ configFile: false, root: resolve('src/renderer'), cacheDir: join(dir, 'vite-cache'), plugins: [react(), tailwindcss()], server: { host: '127.0.0.1', port: 0, hmr: false }, resolve: { alias: { '@': resolve('src/renderer/src'), '@shared': resolve('src/shared') } } })
+  // Mesmas dependências preparadas de antemão do electron.vite.config: descobertas no meio, o Vite recarregaria a página.
+  const optimizeDeps = { include: ['react', 'react-dom', 'react-dom/client', 'marked', 'dompurify', '@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-unicode11', 'codemirror', '@codemirror/state', '@codemirror/view', '@codemirror/language', '@codemirror/language-data', '@codemirror/theme-one-dark', 'pdfjs-dist'] }
+  const vite = await createServer({ configFile: false, root: resolve('src/renderer'), cacheDir: join(dir, 'vite-cache'), optimizeDeps, plugins: [react(), tailwindcss()], server: { host: '127.0.0.1', port: 0, hmr: false }, resolve: { alias: { '@': resolve('src/renderer/src'), '@shared': resolve('src/shared') } } })
   await vite.listen()
   const devUrl = vite.resolvedUrls!.local[0]!
   let state = { ...emptyState(), projects: [{ id: 'p', name: 'Projeto de validação', path: dir }] }
@@ -61,7 +63,8 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     const errors: string[] = []
     page.on('pageerror', (error) => errors.push(error.message))
     await page.goto(`http://127.0.0.1:${port}/#pair=${invitation.code}`)
-    await browserExpect(page.getByRole('button', { name: 'Vincular celular' })).toBeVisible({ timeout: 15000 })
+    // Primeira carga: o Vite prepara as dependências (CodeMirror, pdf.js) antes de servir a página, mais lento no CI.
+    await browserExpect(page.getByRole('button', { name: 'Vincular celular' })).toBeVisible({ timeout: 45000 })
     await page.getByRole('button', { name: 'Vincular celular' }).click()
     await browserExpect(page.getByRole('heading', { name: 'Seus projetos' })).toBeVisible()
     const { deviceId: device } = await page.evaluate(async () => (await fetch('/api/state')).json())
@@ -311,6 +314,116 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     expect(wheel(65)).toBe(false)
     await drag(area.y + 200, area.y + 40)
     await expect.poll(() => wheel(65), { timeout: 10000 }).toBe(true)
+
+    // Arquivos do projeto: ver e editar Markdown, ver HTML com o CSS dele, PDF e imagem, como no explorador do PC.
+    mkdirSync(join(dir, 'docs'))
+    const note = join(dir, 'docs', 'nota.md')
+    writeFileSync(note, '# Título da nota\r\nlinha do PC\r\n')
+    writeFileSync(join(dir, 'docs', 'pagina.html'), '<link rel="stylesheet" href="estilo.css"><h1>Página de teste</h1>')
+    writeFileSync(join(dir, 'docs', 'estilo.css'), 'h1 { color: rgb(255, 0, 0) }')
+    writeFileSync(join(dir, 'docs', 'foto.png'), png)
+    writeFileSync(join(dir, 'docs', 'doc.pdf'), [
+      '%PDF-1.4', '1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj', '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj',
+      '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<<>>>>endobj',
+      '4 0 obj<</Length 11>>stream', '0 0 m 9 9 l', 'endstream endobj', 'trailer<</Root 1 0 R>>', '%%EOF'
+    ].join('\n'))
+    // Do chat, os arquivos do projeto estão na barra da sessão, ao lado dos ajustes da aba.
+    await page.locator('.session-strip').getByRole('button', { name: 'Arquivos do projeto', exact: true }).click()
+    await page.locator('.file-row').filter({ hasText: /^docs$/ }).click()
+    await page.locator('.file-row').filter({ hasText: 'nota.md' }).click()
+    await browserExpect(page.locator('.markdown-view h1')).toHaveText('Título da nota')
+    await page.screenshot({ path: join(artifacts, 'arquivo-md-350.png') })
+    await page.getByRole('button', { name: 'Editar', exact: true }).click()
+    await page.locator('.cm-content').click()
+    await page.keyboard.press('Control+End')
+    await page.keyboard.type('linha do celular')
+    await page.getByRole('button', { name: 'Salvar', exact: true }).click()
+    await browserExpect(page.locator('.file-notice[role="status"]')).toContainText('Salvo no PC.')
+    expect(readFileSync(note, 'utf8')).toBe('# Título da nota\r\nlinha do PC\r\nlinha do celular')
+    // O agente muda o arquivo com ele aberto no celular: salvar avisa em vez de apagar o que o agente escreveu.
+    writeFileSync(note, 'o agente escreveu isto')
+    await page.locator('.cm-content').click()
+    await page.keyboard.press('Control+End')
+    await page.keyboard.type('!')
+    await page.getByRole('button', { name: 'Salvar', exact: true }).click()
+    await browserExpect(page.locator('.file-notice[role="alert"]')).toContainText('mudou no PC depois que você abriu')
+    expect(readFileSync(note, 'utf8')).toBe('o agente escreveu isto')
+    await page.screenshot({ path: join(artifacts, 'arquivo-conflito-350.png') })
+    await page.getByRole('button', { name: 'Salvar por cima', exact: true }).click()
+    await browserExpect(page.locator('.file-notice[role="status"]')).toContainText('Salvo no PC.')
+    expect(readFileSync(note, 'utf8')).toBe('# Título da nota\r\nlinha do PC\r\nlinha do celular!')
+    // Sai sem salvar, o agente muda o arquivo, e ao voltar o rascunho volta avisando do conflito antes de salvar.
+    await page.locator('.cm-content').click()
+    await page.keyboard.press('Control+End')
+    await page.keyboard.type(' rascunho')
+    await page.goBack()
+    writeFileSync(note, 'o agente mudou de novo')
+    await page.locator('.file-row').filter({ hasText: 'nota.md' }).click()
+    await browserExpect(page.locator('.file-notice[role="alert"]')).toContainText('mudou no PC depois delas')
+    await page.getByRole('button', { name: 'Recarregar do PC', exact: true }).click()
+    await browserExpect(page.locator('.markdown-view, .cm-content').first()).toContainText('o agente mudou de novo')
+    expect(readFileSync(note, 'utf8')).toBe('o agente mudou de novo')
+    // Editar → Ver → Editar continua com o que foi digitado, em vez de voltar ao texto de quando abriu.
+    await page.getByRole('button', { name: 'Editar', exact: true }).click()
+    await page.locator('.cm-content').click()
+    await page.keyboard.press('Control+End')
+    await page.keyboard.type(' A')
+    await page.getByRole('button', { name: 'Ver', exact: true }).click()
+    await page.getByRole('button', { name: 'Editar', exact: true }).click()
+    await browserExpect(page.locator('.cm-content')).toContainText('o agente mudou de novo A')
+    // Digitar enquanto o PC responde ao salvar: o que veio depois continua sem salvar, e não some.
+    await page.route('**/api/file', async (route) => {
+      if (route.request().method() === 'POST') await new Promise((resolve) => setTimeout(resolve, 800))
+      await route.continue()
+    })
+    await page.getByRole('button', { name: 'Salvar', exact: true }).click()
+    await page.locator('.cm-content').click()
+    await page.keyboard.press('Control+End')
+    await page.keyboard.type(' B')
+    await browserExpect(page.locator('.file-notice[role="status"]')).toContainText('Salvo no PC.')
+    await page.unroute('**/api/file')
+    expect(readFileSync(note, 'utf8')).toBe('o agente mudou de novo A')
+    await browserExpect(page.getByRole('button', { name: 'Salvar', exact: true })).toBeVisible()
+    await browserExpect(page.locator('.cm-content')).toContainText('o agente mudou de novo A B')
+    await page.getByRole('button', { name: 'Salvar', exact: true }).click()
+    await expect.poll(() => readFileSync(note, 'utf8')).toBe('o agente mudou de novo A B')
+    await page.goBack()
+    await page.locator('.file-row').filter({ hasText: 'pagina.html' }).click()
+    const frame = page.frameLocator('iframe.html-view')
+    await browserExpect(frame.locator('h1')).toHaveText('Página de teste')
+    await browserExpect(frame.locator('h1')).toHaveCSS('color', 'rgb(255, 0, 0)')
+    await page.goBack()
+    await page.locator('.file-row').filter({ hasText: 'doc.pdf' }).click()
+    // A página é desenhada de verdade (o canvas ganha pixels) e o zoom dos botões muda o tamanho dela.
+    const pdfPage = page.getByLabel('Página 1', { exact: true })
+    await expect.poll(() => pdfPage.evaluate((canvas: HTMLCanvasElement) => canvas.width), { timeout: 15000 }).toBeGreaterThan(0)
+    const fitWidth = (await pdfPage.boundingBox())!.width
+    const percent = page.getByRole('button', { name: 'Ajustar à tela', exact: true })
+    const fitPercent = await percent.textContent()
+    await page.getByRole('button', { name: 'Ampliar', exact: true }).click()
+    await expect.poll(async () => (await pdfPage.boundingBox())!.width).toBeGreaterThan(fitWidth * 1.2)
+    await browserExpect(percent).not.toHaveText(fitPercent ?? '')
+    await percent.click()
+    await expect.poll(async () => Math.round((await pdfPage.boundingBox())!.width)).toBe(Math.round(fitWidth))
+    await page.screenshot({ path: join(artifacts, 'arquivo-pdf-350.png') })
+    await page.goBack()
+    // Link de um Markdown para outro arquivo do projeto abre o arquivo no Kora.
+    writeFileSync(join(dir, 'docs', 'indice.md'), '# Índice\n\nVeja a [outra nota](outra.md).\n')
+    writeFileSync(join(dir, 'docs', 'outra.md'), '# Outra nota\n')
+    await page.getByRole('button', { name: 'Atualizar arquivos', exact: true }).click()
+    await page.locator('.file-row').filter({ hasText: 'indice.md' }).click()
+    await page.getByRole('link', { name: 'outra nota', exact: true }).click()
+    await browserExpect(page.locator('.markdown-view h1')).toHaveText('Outra nota')
+    await page.goBack()
+    await page.goBack()
+    await page.locator('.file-row').filter({ hasText: 'foto.png' }).click()
+    await expect.poll(() => page.locator('.image-view img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1)
+    const fileSize = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }))
+    expect(fileSize.scroll).toBeLessThanOrEqual(fileSize.width)
+    // Da lista inicial, os arquivos do projeto estão a um toque, sem passar pela página de conversas.
+    await page.getByRole('button', { name: 'Início', exact: true }).click()
+    await page.getByRole('button', { name: 'Arquivos de Projeto de validação', exact: true }).click()
+    await browserExpect(page.locator('.file-row').filter({ hasText: /^docs$/ })).toBeVisible()
     expect(errors).toEqual([])
   } finally {
     process.env['PATH'] = originalPath

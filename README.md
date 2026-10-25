@@ -73,7 +73,9 @@ terminal ao celular; digitar no PC traz de volta ao tamanho da janela; sair da a
 No celular, a mensagem vai pelo campo de texto (com o ditado e o colar do próprio celular), e o **+** anexa prints e
 fotos, que chegam ao Claude e ao Codex como imagem, igual ao Ctrl+V com print no PC. A barra acima do campo tem
 Esc, Ctrl+C, Shift+Tab, setas e Enter. Também dá para abrir, retomar, renomear, suspender e fechar abas (segure a
-aba na lista para ver as opções) e adicionar projetos. O rodapé da tela inicial mostra os limites do Claude e do Codex
+aba na lista para ver as opções) e adicionar projetos. Em **Arquivos**, dentro do projeto, dá para navegar pelas pastas
+com as cores do git, ler e editar código e Markdown, ver HTML, PDF e imagens. Salvar pelo celular recusa sobrescrever
+um arquivo que mudou no PC depois de aberto (o agente pode estar editando) e pergunta o que fazer. O rodapé da tela inicial mostra os limites do Claude e do Codex
 (tocar abre a troca de conta do Claude no PC), o tema do celular e as configurações: avisos do PC, nome do celular e
 PC conectado.
 

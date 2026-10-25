@@ -114,7 +114,6 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .error-banner svg { width: 15px; height: 15px; }
 .pair-screen { height: var(--mobile-height); overflow: auto; padding: 24px; display: grid; place-items: center; }
 .splash { height: var(--mobile-height); display: grid; place-items: center; animation: fade-in .3s ease both; }
-.splash svg { animation: status-pulse 1.4s ease-in-out infinite; }
 .usage-footer { width: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 4px; border: 0; border-radius: 0; background: transparent; padding: 10px 16px 4px; font-size: 12px; color: var(--muted-foreground); text-align: left; min-height: 0; }
 .usage-footer > span { width: 100%; }
 .pair-card { width: min(100%, 420px); border: 1px solid var(--border); border-radius: 10px; padding: 28px; background: var(--card); }
@@ -247,3 +246,72 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .composer-images .remove-image svg { width: 11px; height: 11px; }
 .composer-images .uploading span { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--brand-amber); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Arquivos do projeto */
+.files-panel.refreshing .file-row { opacity: .45; transition: opacity .12s .08s; }
+.project-panels { display: flex; gap: 4px; padding: 3px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.project-panels button { flex: 1; min-height: 38px; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); font-size: 13px; }
+.project-panels button svg { width: 16px; height: 16px; }
+.project-panels button[aria-selected="true"] { background: var(--secondary); color: var(--foreground); font-weight: 600; }
+.files-path { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin-bottom: 8px; color: var(--muted-foreground); font-size: 12px; }
+.files-path button { min-height: 32px; padding: 0 6px; border: 0; background: transparent; color: var(--foreground); font-size: 12px; }
+.files-path .icon-button { margin-left: auto; width: 36px; height: 36px; min-height: 36px; color: var(--muted-foreground); }
+.file-row { width: 100%; justify-content: flex-start; gap: 10px; min-height: 46px; padding: 8px 6px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; text-align: left; }
+.file-row > svg:first-child { width: 17px; height: 17px; color: var(--muted-foreground); }
+.file-row .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.file-row small { font-family: var(--terminal-font-family, monospace); font-size: 11px; font-weight: 600; }
+.file-row > svg:last-child { width: 14px; height: 14px; color: var(--muted-foreground); }
+.file-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.file-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; min-height: 52px; }
+.file-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.file-title strong, .file-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-title strong { font-size: 14px; font-weight: 600; }
+.file-title small { font-size: 11px; }
+.file-mode { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; flex-shrink: 0; }
+.file-mode button { min-height: 32px; padding: 0 8px; gap: 4px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font-size: 12px; }
+.file-mode button svg { width: 14px; height: 14px; }
+.file-mode button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); }
+.save-button { min-height: 36px; padding: 0 12px; font-size: 13px; flex-shrink: 0; }
+.file-notice { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; line-height: 1.4; flex-shrink: 0; flex-wrap: wrap; }
+.file-notice > span:first-child { flex: 1; min-width: 160px; }
+.file-notice.info { background: var(--secondary); color: var(--foreground); }
+.file-notice.error, .file-notice.conflict { background: color-mix(in oklab, var(--destructive) 14%, transparent); color: var(--destructive); }
+.file-notice .icon-button { width: 28px; height: 28px; min-height: 28px; color: inherit; }
+.file-notice .icon-button svg { width: 12px; height: 12px; }
+.file-notice-actions { display: flex; gap: 6px; }
+.file-notice-actions button { min-height: 32px; padding: 0 10px; font-size: 12px; }
+.file-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.file-hint { display: flex; align-items: center; gap: 8px; margin: 0; padding: 6px 12px; font-size: 11px; color: var(--muted-foreground); border-bottom: 1px solid var(--border); }
+.file-hint > span { flex: 1; min-width: 0; }
+.open-full { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; min-height: 34px; padding: 0 10px; border: 1px solid var(--input); border-radius: 8px; color: var(--foreground); font-size: 12px; text-decoration: none; }
+.open-full svg { width: 14px; height: 14px; }
+.code-editor { flex: 1; min-height: 0; }
+.code-editor .cm-editor { height: 100%; }
+.markdown-view { padding: 16px; font-size: 14px; line-height: 1.6; -webkit-user-select: text; user-select: text; overflow-wrap: anywhere; }
+.markdown-view h1 { font-size: 21px; margin: 4px 0 12px; } .markdown-view h2 { font-size: 17px; margin: 22px 0 8px; } .markdown-view h3 { font-size: 15px; margin: 18px 0 6px; }
+.markdown-view p, .markdown-view ul, .markdown-view ol { margin: 0 0 12px; } .markdown-view ul, .markdown-view ol { padding-left: 22px; }
+.markdown-view a { color: var(--brand-amber); }
+.markdown-view code { font-family: var(--terminal-font-family, monospace); font-size: 12.5px; background: var(--secondary); padding: 1px 4px; border-radius: 4px; }
+.markdown-view pre { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; }
+.markdown-view pre code { background: transparent; padding: 0; }
+.markdown-view blockquote { margin: 0 0 12px; padding-left: 12px; border-left: 3px solid var(--border); color: var(--muted-foreground); }
+.markdown-view table { border-collapse: collapse; display: block; overflow-x: auto; margin-bottom: 12px; font-size: 13px; }
+.markdown-view th, .markdown-view td { border: 1px solid var(--border); padding: 4px 8px; }
+.markdown-view img { max-width: 100%; }
+.html-view { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
+.image-view { flex: 1; display: grid; place-items: center; padding: 12px; }
+.image-view img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.pdf-view { position: relative; flex: 1; min-height: 0; }
+.pdf-scroller { position: absolute; inset: 0; overflow: auto; touch-action: pan-x pan-y; background: var(--secondary); }
+.pdf-pages { display: flex; flex-direction: column; align-items: center; min-width: 100%; width: max-content; }
+.pdf-page { flex-shrink: 0; overflow: hidden; border-radius: 2px; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / .35); }
+.pdf-page canvas { display: block; }
+.pdf-zoom { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: 0 4px 16px rgb(0 0 0 / .3); }
+.pdf-zoom button { min-height: 36px; min-width: 40px; padding: 0 8px; border: 0; background: transparent; font-size: 12px; font-variant-numeric: tabular-nums; }
+.pdf-zoom button svg { width: 16px; height: 16px; }
+.pdf-count { display: flex; align-items: center; padding: 0 8px 0 6px; margin-right: 2px; border-right: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pdf-error { margin: 16px; }
+
+.loading { flex: 1; min-height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; color: var(--muted-foreground); font-size: 13px; }
+
+.file-retry { flex: 1; display: grid; place-items: center; padding: 24px; }

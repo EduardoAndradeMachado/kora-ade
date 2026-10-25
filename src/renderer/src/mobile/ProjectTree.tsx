@@ -10,10 +10,11 @@ import { useLongPress } from './longPress'
 
 export const tabStatus = (tab: MobileTab): string => !tab.live ? 'Suspensa' : tab.activity === 'working' ? 'Trabalhando' : 'Aberta'
 
-export function ProjectTree({ state, search, onProject, onNewTab, onTab, onTabActions, onRelocate }: {
+export function ProjectTree({ state, search, onProject, onFiles, onNewTab, onTab, onTabActions, onRelocate }: {
   state: MobileState
   search: string
   onProject(id: string): void
+  onFiles(id: string): void
   onNewTab(projectId: string): void
   onTab(tab: MobileTab): void
   onTabActions(tab: MobileTab): void
@@ -34,6 +35,7 @@ export function ProjectTree({ state, search, onProject, onNewTab, onTab, onTabAc
         <button className={`tree-toggle ${open ? 'expanded' : ''}`} aria-label={`${open ? 'Recolher' : 'Expandir'} ${project.name}`} aria-expanded={open} onClick={toggle}><Icon name="expandir" /></button>
         <button className="tree-project-name" onClick={() => tabs.length ? toggle() : onProject(project.id)}><MobileProjectAvatar id={project.id} path={project.path} open={open} /><strong>{project.name}</strong>{missing && <Icon name="alerta" active />}</button>
         {!open && tabs.length > 0 && <span className="tree-count">{tabs.length}</span>}
+        {!missing && <button className="icon-button tree-new" aria-label={`Arquivos de ${project.name}`} onClick={() => onFiles(project.id)}><Icon name="projeto" /></button>}
         <button className="icon-button tree-new" aria-label={`Nova conversa em ${project.name}`} disabled={missing} onClick={() => onNewTab(project.id)}><Icon name="novaAba" /></button>
       </div>
       {missing && <div className="tree-missing"><span>Pasta não encontrada</span><button onClick={() => onRelocate(project.id)}>Revincular<Icon name="mover" active /></button></div>}
@@ -43,6 +45,7 @@ export function ProjectTree({ state, search, onProject, onNewTab, onTab, onTabAc
           <span className={`activity-dot ${tab.live ? tab.activity === 'working' ? 'working' : 'live' : ''}`} aria-label={tabStatus(tab)} />
         </button>)}
         <button className="tree-project-link" onClick={() => onProject(project.id)}><Icon name="sessoes" />Conversas e novas abas<Icon name="expandir" /></button>
+        {!missing && <button className="tree-project-link" onClick={() => onFiles(project.id)}><Icon name="arquivo" />Arquivos do projeto<Icon name="expandir" /></button>}
       </div>}
     </div>
   }

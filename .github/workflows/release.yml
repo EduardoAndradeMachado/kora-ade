@@ -50,6 +50,7 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       - run: pnpm android
+      - run: node scripts/pdfjs-assets.ts
       - run: pnpm exec electron-vite build
       - name: Notas da Release pelos commits desde a tag anterior
         shell: bash

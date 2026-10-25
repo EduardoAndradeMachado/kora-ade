@@ -3,6 +3,8 @@ import { AgentSessionSchema, type AgentActivity } from './agent'
 import type { Alerts, KoraState, SavedTab } from './state'
 import type { AgentUsage } from './usage-types'
 import type { ClaudeAccountsView } from './claude-accounts'
+import type { FileEntry } from './ipc'
+import type { GitFile } from './git-types'
 
 const id = z.string().min(1).max(100)
 const size = { cols: z.number().int().min(20).max(500), rows: z.number().int().min(5).max(200) }
@@ -41,6 +43,12 @@ export interface MobileState {
 }
 // Login e remoção de conta ficam no PC: os dois abrem o navegador de lá.
 export interface MobileUsage { usage: AgentUsage[]; accounts: ClaudeAccountsView['accounts']; activeUnknown: boolean }
+// Uma pasta do projeto, como o explorador do PC mostra. O status do git vem à parte (MobileGit), uma vez por visita:
+// o git status do projeto inteiro leva centenas de ms, e a pasta não precisa esperar por ele.
+export interface MobileDirectory { path: string; entries: FileEntry[] }
+export interface MobileGit { files: GitFile[] }
+// Um pouco acima do limite de leitura (5 MB), para um arquivo no limite ainda poder crescer ao ser editado.
+export const FileSaveSchema = z.object({ projectId: id, path: z.string().max(4096), content: z.string().max(6 * 1024 * 1024), mtimeMs: z.number() })
 export interface MobileFolders {
   path: string
   parent: string | null

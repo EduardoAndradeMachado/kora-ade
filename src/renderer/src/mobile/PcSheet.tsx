@@ -7,6 +7,7 @@ import { formatResetAt, formatResetIn, isCritical } from '@shared/usage-format'
 import type { Alerts } from '@shared/state'
 import type { MobileUsage } from '@shared/mobile'
 import { api, koraApp } from './api'
+import { Loading } from './Loading'
 
 export type PcView = 'usage' | 'settings'
 
@@ -48,7 +49,7 @@ export function PcSheet({ view, alerts, connected, onClose, onSwitchAccount, onA
       {view === 'usage' ? <>
       <section aria-labelledby="usage-title">
         <div className="pc-heading"><h2 id="usage-title">Limites de uso</h2><button className="icon-button" aria-label="Atualizar limites" disabled={busy !== null} onClick={() => void run('usage', load)}><Icon name="atualizar" /></button></div>
-        {!data ? <p className="empty-copy">Carregando…</p> : data.usage.length === 0 ? <p className="empty-copy">Nenhum dado de uso do Claude Code nem do Codex no PC.</p> : data.usage.map((usage) => <div className="usage-agent" key={usage.agent}>
+        {!data ? <Loading size={40} /> : data.usage.length === 0 ? <p className="empty-copy">Nenhum dado de uso do Claude Code nem do Codex no PC.</p> : data.usage.map((usage) => <div className="usage-agent" key={usage.agent}>
           <div className="usage-agent-name"><AgentIcon kind={usage.agent} /><strong>{agentLabel(usage.agent)}</strong>{usage.account && <small>{usage.account}</small>}</div>
           {usage.error && <p className="error">{usage.error}</p>}
           {usage.windows.map((limit) => <div className="usage-window" key={limit.label}>

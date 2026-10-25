@@ -5,11 +5,15 @@ import type { Terminals } from './terminals'
 import { addProject, relocateProject, missingProjectIds, namedSessions, mergeTabs } from './projects'
 import { browseMobileFolders, isMobileDirectory, mobileDirectory } from './mobile-folders'
 import { listProjectSessions } from './sessions'
+import { listDir, readText, resolveInside, writeText } from './files'
+import { gitStatus } from './git'
+import { statSync } from 'node:fs'
 import { DESKTOP, TerminalSizes, type SizeChange, type TerminalSize } from './terminal-sizes'
 import type { AgentActivity } from '../shared/agent'
 import type { KoraState } from '../shared/state'
 import type { Launch, TabRef } from '../shared/ipc'
-import type { MobileCommand, MobileState, MobileUsage } from '../shared/mobile'
+import type { MobileCommand, MobileDirectory, MobileGit, MobileState, MobileUsage } from '../shared/mobile'
+import type { TextFile } from '../shared/ipc'
 import type { AgentUsage } from '../shared/usage-types'
 import type { ClaudeAccountsView } from '../shared/claude-accounts'
 
@@ -52,6 +56,45 @@ export class MobileRuntime {
     if (!project) throw new Error('Projeto desconhecido.')
     return listProjectSessions(join(homedir(), '.claude'), join(homedir(), '.codex'), project.path)
       .then((sessions) => namedSessions(this.host.state(), sessions))
+  }
+
+  // Arquivos do projeto pelas mesmas funções do explorador do PC: caminho relativo e nada fora da pasta.
+  private projectRoot(projectId: string): string {
+    const project = this.host.state().projects.find((p) => p.id === projectId)
+    if (!project) throw new Error('Projeto desconhecido.')
+    if (!isMobileDirectory(project.path)) throw new Error('A pasta deste projeto não foi encontrada. Revincule a pasta para continuar.')
+    return project.path
+  }
+
+  files(projectId: string, rel: string): MobileDirectory {
+    return { path: rel, entries: listDir(this.projectRoot(projectId), rel) }
+  }
+
+  // Pasta que não é repositório (ou git ausente no PC) volta sem status, como no explorador do PC.
+  async git(projectId: string): Promise<MobileGit> {
+    const status = await gitStatus(this.projectRoot(projectId)).catch(() => null)
+    return { files: status?.files ?? [] }
+  }
+
+  readFile(projectId: string, rel: string): TextFile {
+    try {
+      return readText(this.projectRoot(projectId), rel)
+    } catch (error) {
+      // O aviso do PC manda abrir no programa padrão, o que não existe no celular.
+      if (error instanceof Error && error.message.startsWith('Arquivo binário')) throw new Error('Este arquivo não é texto e não abre no celular.')
+      throw error
+    }
+  }
+
+  // Lança ConflictError se o arquivo mudou no disco depois de aberto (o agente pode estar editando).
+  writeFile(projectId: string, rel: string, content: string, mtimeMs: number): number {
+    return writeText(this.projectRoot(projectId), rel, content, mtimeMs)
+  }
+
+  filePath(projectId: string, rel: string): string {
+    const file = resolveInside(this.projectRoot(projectId), rel)
+    if (!statSync(file).isFile()) throw new Error('Não é um arquivo.')
+    return file
   }
 
   async usage(): Promise<MobileUsage> {

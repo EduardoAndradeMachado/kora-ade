@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, renameSync, writeFileSync, readFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { request } from 'node:http'
+import { execFileSync } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MobileServer } from '../src/main/mobile-server'
 import { MobileRuntime } from '../src/main/mobile-runtime'
@@ -77,7 +78,7 @@ async function setup(): Promise<Setup> {
     accounts: async () => ({ activeUnknown: false, login: null, accounts: ['a1', 'a2'].map((id) => ({ id, email: `${id}@exemplo.com`, organizationName: null, subscriptionType: 'max', refreshTokenExpiresAt: null, weekly: null, active: id === active })) }),
     switchAccount: async (id) => { switched.push(id); active = id }
   })
-  server = new MobileServer({ configFile: config, rendererDir: dir, androidDir: join(dir, 'android'), imageDir: join(dir, 'imagens'), runtime, changed: () => {}, statusChanged: (status) => statuses.push(status), port: 0 })
+  server = new MobileServer({ configFile: config, rendererDir: dir, androidDir: join(dir, 'android'), imageDir: join(dir, 'imagens'), pdfjsDir: resolve('node_modules', 'pdfjs-dist'), runtime, changed: () => {}, statusChanged: (status) => statuses.push(status), port: 0 })
   servers.push(server)
   await server.start()
   const url = `http://127.0.0.1:${(server as unknown as { port: number }).port}`
@@ -358,6 +359,98 @@ describe('acesso ao servidor do celular', () => {
     expect(snapshot.tabs.find((tab) => tab.id === tabId)?.projectId).toBe(projectId)
   })
 
+})
+
+describe('arquivos do projeto pelo celular', () => {
+  it('lista, lê e salva só dentro do projeto e não salva por cima do que mudou no disco', async () => {
+    const s = await setup()
+    mkdirSync(join(s.dir, 'docs'))
+    writeFileSync(join(s.dir, 'docs', 'nota.md'), '# Título\r\nlinha do PC\r\n')
+    writeFileSync(join(s.dir, 'fora.txt'), 'segredo')
+    const get = (path: string, cookie = s.cookie): Promise<Response> => fetch(`${s.url}${path}`, { headers: { cookie } })
+    const save = (body: unknown): Promise<Response> => fetch(`${s.url}/api/file`, { method: 'POST', headers: { cookie: s.cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    expect((await get('/api/files?project=p&path=', '')).status).toBe(401)
+    expect((await get('/api/file?project=p&path=docs%2Fnota.md', '')).status).toBe(401)
+
+    const root = await (await get('/api/files?project=p&path=')).json()
+    expect(root.entries.find((entry: { name: string }) => entry.name === 'docs')).toMatchObject({ isDir: true })
+    const docs = await (await get(`/api/files?project=p&path=docs`)).json()
+    expect(docs.entries.map((entry: { name: string }) => entry.name)).toEqual(['nota.md'])
+    expect((await get(`/api/files?project=p&path=${encodeURIComponent('..')}`)).status).toBe(400)
+    expect((await get(`/api/file?project=p&path=${encodeURIComponent('..\\mobile.json')}`)).status).toBe(400)
+
+    const file = await (await get('/api/file?project=p&path=docs%2Fnota.md')).json()
+    expect(file.content).toBe('# Título\r\nlinha do PC\r\n')
+    const edited = '# Título\r\nlinha do celular\r\n'
+    const saved = await save({ projectId: 'p', path: join('docs', 'nota.md'), content: edited, mtimeMs: file.mtimeMs })
+    expect(saved.status).toBe(200)
+    expect(readFileSync(join(s.dir, 'docs', 'nota.md'), 'utf8')).toBe(edited)
+
+    // O agente mudou o arquivo enquanto ele estava aberto no celular: salvar com a versão antiga é recusado.
+    writeFileSync(join(s.dir, 'docs', 'nota.md'), 'o agente escreveu isto')
+    const stale = await save({ projectId: 'p', path: join('docs', 'nota.md'), content: 'por cima', mtimeMs: (await saved.json()).mtimeMs - 1000 })
+    expect(stale.status).toBe(409)
+    expect((await stale.json()).conflict).toBe(true)
+    expect(readFileSync(join(s.dir, 'docs', 'nota.md'), 'utf8')).toBe('o agente escreveu isto')
+    expect((await save({ projectId: 'p', path: '..\\fora.md', content: 'x', mtimeMs: 0 })).status).toBe(400)
+    // Apagado pelo agente com o arquivo aberto: aviso claro, sem o erro do Node com o caminho do PC.
+    const gone = await save({ projectId: 'p', path: join('docs', 'sumiu.md'), content: 'x', mtimeMs: 0 })
+    expect(gone.status).toBe(404)
+    expect((await gone.json()).error).toMatch(/não existe mais no PC/)
+    const goneDir = await get('/api/files?project=p&path=pasta-que-sumiu')
+    expect(goneDir.status).toBe(404)
+    expect(JSON.stringify(await goneDir.json())).not.toContain(s.dir)
+  })
+
+  it('entrega o status do git à parte da pasta, e projeto sem git volta sem status', async () => {
+    const s = await setup()
+    const status = async (): Promise<{ files: { path: string; status: string }[] }> => (await fetch(`${s.url}/api/git?project=p`, { headers: { cookie: s.cookie } })).json()
+    expect((await fetch(`${s.url}/api/git?project=p`)).status).toBe(401)
+    expect(await status()).toEqual({ files: [] })
+    execFileSync('git', ['init', '-q'], { cwd: s.dir })
+    writeFileSync(join(s.dir, 'novo.txt'), 'oi')
+    expect((await status()).files).toContainEqual(expect.objectContaining({ path: 'novo.txt', status: 'untracked' }))
+    // A pasta não traz o status: ela não espera o git status do projeto inteiro.
+    expect(Object.keys(await (await fetch(`${s.url}/api/files?project=p&path=`, { headers: { cookie: s.cookie } })).json())).toEqual(['path', 'entries'])
+  })
+
+  it('serve ao pdf.js do celular os decodificadores e fontes dele, e nada além dessas pastas', async () => {
+    const s = await setup()
+    const wasm = await fetch(`${s.url}/pdfjs/wasm/openjpeg.wasm`)
+    expect(wasm.status).toBe(200)
+    expect(wasm.headers.get('content-type')).toBe('application/wasm')
+    expect((await fetch(`${s.url}/pdfjs/standard_fonts/FoxitFixed.pfb`)).status).toBe(200)
+    expect((await fetch(`${s.url}/pdfjs/build/pdf.mjs`)).status).toBe(404)
+    expect((await fetch(`${s.url}/pdfjs/wasm/..%2F..%2Fpackage.json`)).status).toBe(404)
+    expect((await fetch(`${s.url}/pdfjs/wasm/%2E%2E/package.json`)).status).toBe(404)
+  })
+
+  it('abre o arquivo cru por um link temporário, isolado e preso ao projeto', async () => {
+    const s = await setup()
+    mkdirSync(join(s.dir, 'site'))
+    writeFileSync(join(s.dir, 'site', 'index.html'), '<link rel="stylesheet" href="estilo.css"><h1>Oi</h1>')
+    writeFileSync(join(s.dir, 'site', 'estilo.css'), 'h1 { color: red }')
+    const { raw } = await (await fetch(`${s.url}/api/file-link?project=p&path=${encodeURIComponent(join('site', 'index.html'))}`, { headers: { cookie: s.cookie } })).json()
+    const page = await fetch(`${s.url}${raw}`)
+    expect(page.status).toBe(200)
+    expect(page.headers.get('content-type')).toContain('text/html')
+    expect(page.headers.get('content-security-policy')).toMatch(/^sandbox /)
+    expect(await page.text()).toContain('<h1>Oi</h1>')
+    // O CSS da página vem pelo mesmo link, por caminho relativo, sem o cookie e de origem isolada (sandbox).
+    const css = await fetch(`${s.url}${raw.replace(/index\.html$/, 'estilo.css')}`, { headers: { 'sec-fetch-site': 'cross-site' } })
+    expect(css.status).toBe(200)
+    expect(css.headers.get('content-type')).toContain('text/css')
+    expect((await fetch(`${s.url}${raw.replace(/site\/index\.html$/, '..%5Cmobile.json')}`)).status).not.toBe(200)
+    // O HTML roda com scripts: o link não lê fora da pasta dele nem arquivo oculto do projeto.
+    writeFileSync(join(s.dir, 'segredo.txt'), 'fora da pasta')
+    writeFileSync(join(s.dir, 'site', '.env'), 'TOKEN=123')
+    expect((await fetch(`${s.url}${raw.replace(/site\/index\.html$/, 'segredo.txt')}`)).status).toBe(403)
+    expect((await fetch(`${s.url}${raw.replace(/index\.html$/, '.env')}`)).status).toBe(403)
+    // Desvincular o celular derruba os links que ele abriu.
+    s.server.revoke(s.device)
+    expect((await fetch(`${s.url}${raw}`)).status).toBe(403)
+    expect((await fetch(`${s.url}${raw.replace(/^\/raw\/[^/]+/, '/raw/inventado')}`)).status).toBe(403)
+  })
 })
 
 describe('uso, conta e avisos do PC pelo celular', () => {
