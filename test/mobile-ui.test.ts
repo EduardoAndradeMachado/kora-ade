@@ -148,11 +148,27 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     // O microfone só existe dentro do app Android: o navegador não abre o microfone em HTTP.
     await browserExpect(page.getByRole('button', { name: 'Gravar áudio' })).toHaveCount(0)
     // A ponte simulada responde como a MainActivity: gravando no primeiro toque, o áudio em base64 no segundo.
-    await page.evaluate(() => Object.assign(window, { KoraApp: {
-      lerQr() {}, escolherPc() {}, pronto() {},
-      gravarAudio() { (window as unknown as { koraAudio(event: unknown): void }).koraAudio({ tipo: 'gravando' }) },
-      pararAudio(enviar: boolean) { (window as unknown as { koraAudio(event: unknown): void }).koraAudio(enviar ? { tipo: 'audio', mime: 'audio/ogg', base64: btoa('OggS-fala') } : { tipo: 'cancelado' }) }
-    } }))
+    // Como no app, a ponte só obedece a quem tem a chave que ele põe na página, e numera cada gravação.
+    await page.evaluate(() => {
+      const page = window as unknown as { koraAudio(event: unknown): void; koraChaveAudio: string; atrasoDoAudio?: number }
+      page.koraChaveAudio = 'chave-da-pagina'
+      let numero = 0
+      Object.assign(window, { KoraApp: {
+        lerQr() {}, escolherPc() {}, pronto() {},
+        gravarAudio(chave: string) {
+          if (chave !== 'chave-da-pagina') return
+          numero++
+          page.koraAudio({ tipo: 'gravando', gravacao: numero })
+        },
+        pararAudio(enviar: boolean, chave: string) {
+          if (chave !== 'chave-da-pagina') return
+          const gravacao = numero
+          if (!enviar) return page.koraAudio({ tipo: 'cancelado', gravacao })
+          // O app lê e codifica o arquivo numa thread: o áudio chega depois do toque.
+          setTimeout(() => page.koraAudio({ tipo: 'audio', gravacao, mime: 'audio/ogg', base64: btoa('OggS-fala') }), page.atrasoDoAudio ?? 0)
+        }
+      } })
+    })
     await page.getByRole('button', { name: 'Voltar', exact: true }).click()
     await page.goForward()
     const field = page.getByRole('textbox', { name: 'Mensagem para a sessão' })
@@ -163,7 +179,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await browserExpect(page.getByRole('button', { name: 'Anexar imagem' })).toHaveCount(0)
     // O app manda o nível do microfone enquanto grava; a barra mais nova, à direita, mostra a última leitura.
     const meter = page.getByRole('meter', { name: 'Nível do microfone' })
-    await page.evaluate(() => { for (const valor of [0.2, 0.5, 0.9, 0.4, 0.75]) (window as unknown as { koraAudio(event: unknown): void }).koraAudio({ tipo: 'nivel', valor }) })
+    await page.evaluate(() => { for (const valor of [0.2, 0.5, 0.9, 0.4, 0.75]) (window as unknown as { koraAudio(event: unknown): void }).koraAudio({ tipo: 'nivel', gravacao: 1, valor }) })
     await browserExpect(meter).toHaveAttribute('aria-valuenow', '0.75')
     expect(await meter.locator('span').evaluateAll((bars) => bars.slice(-5).map((bar) => (bar as HTMLElement).style.height))).toEqual(['20%', '50%', '90%', '40%', '75%'])
     await page.waitForTimeout(300)
@@ -184,6 +200,15 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.getByRole('button', { name: 'Descartar gravação' }).click()
     await browserExpect(page.getByRole('button', { name: 'Enviar', exact: true })).toBeVisible()
     expect(heard).toHaveLength(2)
+    // ✓ e logo ✕: o áudio que o app ainda preparava chega depois e não pode virar transcrição.
+    await page.evaluate(() => Object.assign(window, { atrasoDoAudio: 400 }))
+    await page.getByRole('button', { name: 'Gravar áudio' }).click()
+    await page.getByRole('button', { name: 'Parar e transcrever' }).click()
+    await page.getByRole('button', { name: 'Cancelar transcrição' }).click()
+    await page.waitForTimeout(800)
+    expect(heard).toHaveLength(2)
+    await browserExpect(field).toHaveValue('Rode os testes do servidor do celular')
+    await page.evaluate(() => Object.assign(window, { atrasoDoAudio: 0 }))
     // Cancelar no meio da transcrição chega ao Transcritor, que para de processar, e o campo fica como estava.
     await page.getByRole('button', { name: 'Gravar áudio' }).click()
     await page.getByRole('button', { name: 'Parar e transcrever' }).click()

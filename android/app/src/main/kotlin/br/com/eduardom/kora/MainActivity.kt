@@ -7,6 +7,7 @@ import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.media.MediaRecorder
 import android.net.Uri
 import android.graphics.Typeface
@@ -57,6 +58,7 @@ import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.io.File
 import java.net.URL
+import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.log10
@@ -81,6 +83,7 @@ private const val CONECTAR_MS = 400
 private const val LER_MS = 1500
 // Se a página não avisar que está pronta (versão antiga do Kora no PC), ela aparece assim mesmo.
 private const val ESPERA_PAGINA_MS = 6000L
+private const val MICROFONE_PAROU = "O microfone parou no meio da gravação. Tente de novo."
 
 class MainActivity : ComponentActivity() {
     private lateinit var web: WebView
@@ -135,23 +138,32 @@ class MainActivity : ComponentActivity() {
     private var gravador: MediaRecorder? = null
     private var gravacao: File? = null
     private var inicioDaGravacao = 0L
+    // Os eventos levam o número da gravação: o áudio de uma gravação já descartada na página chega depois e é ignorado.
+    private var numeroDaGravacao = 0
+    // Esquecida ligada, a gravação para sozinha e vai para a transcrição, dentro do limite de envio do PC.
+    private val pararPorTempo = Runnable { pararGravacao(enviar = true) }
+    // A ponte KoraApp chega também aos iframes, como o HTML de projeto aberto no visualizador: o microfone só obedece
+    // a quem tem esta chave, que o app põe no documento principal a cada página carregada.
+    private var chaveDoAudio = UUID.randomUUID().toString()
     // Nível do microfone para as barras do campo: quem fala vê que o áudio está chegando.
     private val medirNivel = object : Runnable {
         override fun run() {
             val ativo = gravador ?: return
             // maxAmplitude é o pico desde a leitura anterior, de 0 a 32767. Em decibéis, a fala fica entre -40 e -10:
             // a escala de -50 a 0 deixa o silêncio embaixo e a voz no meio das barras.
-            val pico = ativo.maxAmplitude
+            val pico = runCatching { ativo.maxAmplitude }.getOrElse {
+                Log.w(TAG, "o gravador parou de responder", it)
+                return pararGravacao(enviar = false, erro = MICROFONE_PAROU)
+            }
             val nivel = if (pico <= 0) 0.0 else ((20 * log10(pico / 32767.0) + 50) / 50).coerceIn(0.0, 1.0)
-            avisarAudio(JSONObject().put("tipo", "nivel").put("valor", (nivel * 100).roundToInt() / 100.0))
+            avisarAudio(JSONObject().put("tipo", "nivel").put("gravacao", numeroDaGravacao).put("valor", (nivel * 100).roundToInt() / 100.0))
             principal.postDelayed(this, 80)
         }
     }
-    // Liberar o microfone não começa a gravar: a pessoa ainda nem viu que já pode falar.
+    // A pessoa tocou no microfone para gravar: liberado, a gravação começa sem pedir outro toque.
     private val pedirMicrofone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { liberado ->
-        avisarAudio(JSONObject().put("tipo", "erro").put("mensagem",
-            if (liberado) "Microfone liberado. Toque de novo para gravar."
-            else "Sem o microfone, o app não grava. Libere o microfone do Kora nas configurações do Android."))
+        if (liberado) comecarGravacao()
+        else avisarAudio(JSONObject().put("tipo", "erro").put("mensagem", "Sem o microfone, o app não grava. Libere o microfone do Kora nas configurações do Android."))
     }
 
     private val preferencias by lazy { getSharedPreferences("kora", MODE_PRIVATE) }
@@ -285,23 +297,24 @@ class MainActivity : ComponentActivity() {
         fun buscarAtualizacao() = runOnUiThread { atual?.let { conferirVersao(it, pedida = true) } }
 
         @JavascriptInterface
-        fun gravarAudio() = runOnUiThread { comecarGravacao() }
+        fun gravarAudio(chave: String) = runOnUiThread { if (chave == chaveDoAudio) comecarGravacao() }
 
         @JavascriptInterface
-        fun pararAudio(enviar: Boolean) = runOnUiThread { pararGravacao(enviar) }
+        fun pararAudio(enviar: Boolean, chave: String) = runOnUiThread { if (chave == chaveDoAudio) pararGravacao(enviar) }
     }
 
     private fun avisarAudio(evento: JSONObject) = web.evaluateJavascript("window.koraAudio && window.koraAudio($evento)", null)
 
     private fun comecarGravacao() {
-        if (gravador != null) return
+        // Gravação que a página perdeu de vista (recarregou no meio) não trava o microfone: é descartada.
+        pararGravacao(enviar = false)
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             pedirMicrofone.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
         val pasta = File(cacheDir, "audio").apply { mkdirs() }
-        // Gravação que ficou para trás (app fechado no meio do envio) sai aqui.
-        pasta.listFiles()?.forEach { it.delete() }
+        // Gravação que ficou para trás (app fechado no meio do envio) sai aqui; a recente pode estar sendo lida.
+        pasta.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 600_000 }?.forEach { it.delete() }
         val arquivo = File(pasta, "fala-${System.nanoTime()}.ogg")
         val novo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(this) else @Suppress("DEPRECATION") MediaRecorder()
         // Opus mono a 16 kHz: o Whisper do Transcritor ouve a 16 kHz, e 24 kbps basta para voz.
@@ -313,6 +326,7 @@ class MainActivity : ComponentActivity() {
             novo.setAudioSamplingRate(16_000)
             novo.setAudioEncodingBitRate(24_000)
             novo.setOutputFile(arquivo)
+            novo.setOnErrorListener { _, _, _ -> pararGravacao(enviar = false, erro = MICROFONE_PAROU) }
             novo.prepare()
             novo.start()
         }
@@ -326,23 +340,30 @@ class MainActivity : ComponentActivity() {
         gravador = novo
         gravacao = arquivo
         inicioDaGravacao = SystemClock.elapsedRealtime()
-        avisarAudio(JSONObject().put("tipo", "gravando"))
+        numeroDaGravacao++
+        avisarAudio(JSONObject().put("tipo", "gravando").put("gravacao", numeroDaGravacao))
         principal.postDelayed(medirNivel, 80)
+        principal.postDelayed(pararPorTempo, 15 * 60_000L)
     }
 
-    private fun pararGravacao(enviar: Boolean) {
+    private fun pararGravacao(enviar: Boolean, erro: String? = null) {
         val parado = gravador ?: return
         val arquivo = gravacao!!
         gravador = null
         gravacao = null
         principal.removeCallbacks(medirNivel)
+        principal.removeCallbacks(pararPorTempo)
+        val numero = numeroDaGravacao
         val curta = SystemClock.elapsedRealtime() - inicioDaGravacao < 500
         // stop() lança quando ainda não houve áudio nenhum (toque rápido): conta como gravação curta.
         val gravou = runCatching { parado.stop() }.isSuccess
         parado.release()
         if (!enviar || curta || !gravou) {
             arquivo.delete()
-            avisarAudio(JSONObject().put("tipo", if (enviar) "curto" else "cancelado"))
+            avisarAudio(
+                if (erro != null) JSONObject().put("tipo", "erro").put("gravacao", numero).put("mensagem", erro)
+                else JSONObject().put("tipo", if (enviar) "curto" else "cancelado").put("gravacao", numero)
+            )
             return
         }
         Thread {
@@ -350,14 +371,27 @@ class MainActivity : ComponentActivity() {
             arquivo.delete()
             principal.post {
                 avisarAudio(audio.fold(
-                    { JSONObject().put("tipo", "audio").put("mime", "audio/ogg").put("base64", it) },
-                    { JSONObject().put("tipo", "erro").put("mensagem", "Não deu para ler a gravação no celular.") }
+                    { JSONObject().put("tipo", "audio").put("gravacao", numero).put("mime", "audio/ogg").put("base64", it) },
+                    { JSONObject().put("tipo", "erro").put("gravacao", numero).put("mensagem", "Não deu para ler a gravação no celular.") }
                 ))
             }
         }.start()
     }
 
     private inner class Cliente : WebViewClient() {
+        // Página nova (trocar de PC, recarregar) não sabe da gravação da anterior: o microfone desliga.
+        override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+            pararGravacao(enviar = false)
+            chaveDoAudio = UUID.randomUUID().toString()
+            super.onPageStarted(view, url, favicon)
+        }
+
+        // evaluateJavascript roda só no documento principal: o iframe do visualizador não recebe a chave.
+        override fun onPageFinished(view: WebView, url: String?) {
+            view.evaluateJavascript("window.koraChaveAudio = '$chaveDoAudio'", null)
+            super.onPageFinished(view, url)
+        }
+
         // Só a página do Kora roda dentro do app (a ponte KoraApp fica exposta a ela); link de fora vai para o navegador.
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             // /raw/ é um arquivo do projeto (o Abrir página inteira do HTML): vai para o navegador, que tem zoom e

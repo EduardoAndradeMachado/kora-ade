@@ -5,9 +5,9 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { DESKTOP, type MobileCommand, type MobileTab, type TerminalSizeEvent, type TerminalSnapshot } from '@shared/mobile'
 import { Icon } from '@/brand/icons'
 import { currentTerminalLook, onThemeChange } from '@/lib/terminal-theme'
-import { api, koraApp } from './api'
+import { api } from './api'
 import { pathForPrompt, uploadImage } from './images'
-import { canRecord, onNativeAudio, transcribeAudio } from './voice'
+import { canRecord, onNativeAudio, startRecording, stopRecording, transcribeAudio } from './voice'
 import { VoiceMeter } from './VoiceMeter'
 
 export interface TerminalChunk { id: string; data: string; sequence: number }
@@ -63,6 +63,8 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   const [voice, setVoice] = useState<'idle' | 'recording' | 'transcribing'>('idle')
   const [microphone] = useState(canRecord)
   const transcription = useRef<AbortController | null>(null)
+  // A gravação que esta tela acompanha: o áudio de uma descartada chega atrasado e não pode cair no campo.
+  const take = useRef<number | null>(null)
   const level = useRef<((level: number) => void) | null>(null)
   const listenLevel = useCallback((handler: ((level: number) => void) | null) => { level.current = handler }, [])
   const picker = useRef<HTMLInputElement>(null)
@@ -250,8 +252,13 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   useEffect(() => {
     if (!microphone) return
     const off = onNativeAudio((event) => {
+      if (event.tipo === 'gravando') {
+        take.current = event.gravacao ?? null
+        return setVoice('recording')
+      }
+      if (event.gravacao !== undefined && event.gravacao !== take.current) return
       if (event.tipo === 'nivel') return level.current?.(event.valor)
-      if (event.tipo === 'gravando') return setVoice('recording')
+      take.current = null
       if (event.tipo !== 'audio') {
         setVoice('idle')
         if (event.tipo === 'curto') setComposerError('Gravação curta demais: toque no microfone, fale e toque em ✓ para transcrever.')
@@ -276,13 +283,14 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     })
     return () => {
       off()
-      koraApp()?.pararAudio?.(false)
+      stopRecording(false)
       transcription.current?.abort()
     }
   }, [microphone])
   // Cancelar na transcrição fecha o pedido; o PC percebe e apaga o trabalho no Transcritor, que para de processar.
   const cancelVoice = (): void => {
-    if (voice === 'recording') koraApp()?.pararAudio?.(false)
+    if (voice === 'recording') stopRecording(false)
+    take.current = null
     transcription.current?.abort()
     transcription.current = null
     setVoice('idle')
@@ -359,7 +367,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
             <button type="button" className="attach-button" aria-label="Anexar imagem" disabled={!connected} onClick={() => picker.current?.click()}><Icon name="novaAba" /></button>
             <div className="composer-send">
               {microphone && <button type="button" className="mic-button" aria-label="Gravar áudio" disabled={!connected}
-                onClick={() => { setComposerError(null); koraApp()?.gravarAudio?.() }}>
+                onClick={() => { setComposerError(null); startRecording() }}>
                 <Icon name="microfone" />
               </button>}
               <button className={`send-button ${ready ? 'ready' : ''}`} aria-label="Enviar" disabled={!ready}><Icon name="setaCima" /></button>
@@ -369,7 +377,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
             {voice === 'recording'
               ? <VoiceMeter listen={listenLevel} />
               : <p className="voice-status" role="status"><span className="mic-spinner" />Transcrevendo no PC…</p>}
-            {voice === 'recording' && <button type="button" className="voice-confirm" aria-label="Parar e transcrever" onClick={() => koraApp()?.pararAudio?.(true)}><Icon name="ok" /></button>}
+            {voice === 'recording' && <button type="button" className="voice-confirm" aria-label="Parar e transcrever" onClick={() => { setVoice('transcribing'); stopRecording(true) }}><Icon name="ok" /></button>}
           </div>}
         </div>
       </form>

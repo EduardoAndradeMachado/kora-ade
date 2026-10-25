@@ -2,16 +2,23 @@ import { koraApp } from './api'
 
 // O microfone da página só abre em HTTPS, e o Kora fala HTTP na rede de casa: quem grava é o app Android
 // (MainActivity.avisarAudio), que devolve o áudio por window.koraAudio.
-export type NativeAudioEvent =
+// gravacao: o número da gravação a que o evento pertence (app 0.4.2 em diante). Erro sem número aconteceu antes de
+// começar a gravar (microfone ocupado, permissão negada).
+export type NativeAudioEvent = { gravacao?: number } & (
   | { tipo: 'gravando' }
   // De 0 (silêncio) a 1, a cada 80 ms enquanto grava.
   | { tipo: 'nivel'; valor: number }
   | { tipo: 'audio'; mime: string; base64: string }
   | { tipo: 'curto' }
   | { tipo: 'cancelado' }
-  | { tipo: 'erro'; mensagem: string }
+  | { tipo: 'erro'; mensagem: string })
 
 export const canRecord = (): boolean => typeof koraApp()?.gravarAudio === 'function'
+
+// O app põe a chave só no documento principal; sem ela, um iframe com a mesma ponte não liga o microfone.
+const key = (): string => (window as unknown as { koraChaveAudio?: string }).koraChaveAudio ?? ''
+export const startRecording = (): void => koraApp()?.gravarAudio?.(key())
+export const stopRecording = (send: boolean): void => koraApp()?.pararAudio?.(send, key())
 
 export function onNativeAudio(handler: (event: NativeAudioEvent) => void): () => void {
   const target = window as unknown as { koraAudio?: (event: NativeAudioEvent) => void }
