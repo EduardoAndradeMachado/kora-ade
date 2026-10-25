@@ -1,9 +1,9 @@
 import { createServer, type Server, type ServerResponse, type IncomingMessage } from 'node:http'
 import { randomBytes } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, mkdirSync } from 'node:fs'
 import { createSocket } from 'node:dgram'
 import { hostname, networkInterfaces } from 'node:os'
-import { readFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { extname, join, resolve, sep } from 'node:path'
 import QRCode from 'qrcode'
 import { z } from 'zod'
@@ -12,6 +12,7 @@ import { MobilePairingStore } from './mobile-pairing'
 import { MAX_PASTED_IMAGE_BYTES, savePastedImage } from './pasted-image'
 import { ConflictError } from './files'
 import type { MobileRuntime } from './mobile-runtime'
+import { TranscriberUnavailableError, type Transcribe } from './transcriber'
 
 export function isLocalAddress(address: string): boolean {
   const ip = address.replace(/^::ffff:/, '')
@@ -53,6 +54,9 @@ const contentTypes: Record<string, string> = {
   '.md': 'text/plain; charset=utf-8', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wasm': 'application/wasm'
 }
 const PDFJS_DIRS = new Set(['wasm', 'cmaps', 'standard_fonts', 'iccs'])
+const AUDIO_EXTENSIONS: Record<string, string> = { 'audio/ogg': 'ogg', 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/mpeg': 'mp3', 'audio/wav': 'wav' }
+// O app grava Opus a 24 kbps: 25 MB passam de duas horas de fala.
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 // Link de leitura dos arquivos de um projeto, para o HTML aberto no celular carregar o CSS e as imagens dele por
 // caminho relativo. Vale por pouco tempo e só lê: a página roda isolada (sandbox) e não recebe o pareamento.
 const RAW_LINK_MS = 30 * 60_000
@@ -86,6 +90,9 @@ export class MobileServer {
     androidDir?: string
     // Onde o print mandado pelo celular vira arquivo: a mesma pasta do Ctrl+V com imagem no PC.
     imageDir?: string
+    // O áudio gravado no celular fica aqui só enquanto o Transcritor lê.
+    audioDir?: string
+    transcribe?: Transcribe
     // Decodificadores, fontes e mapas que o pdf.js do celular busca por URL (scripts/pdfjs-assets.ts).
     pdfjsDir?: string
     // O app do celular mostra "(Dev)" no nome: os dois Kora do mesmo PC têm o mesmo nome de computador.
@@ -287,6 +294,37 @@ export class MobileServer {
     json(response, 200, { path: savePastedImage(this.options.imageDir, Buffer.concat(chunks), mime) })
   }
 
+  private async audio(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const { audioDir, transcribe } = this.options
+    if (!audioDir || !transcribe) return json(response, 404, { error: 'Este Kora não transcreve áudio.' })
+    const extension = AUDIO_EXTENSIONS[request.headers['content-type']?.split(';')[0]?.trim() ?? '']
+    if (!extension) return json(response, 415, { error: 'Envie o áudio como OGG, WebM, M4A, AAC, MP3 ou WAV.' })
+    const chunks: Buffer[] = []
+    let size = 0
+    // Como na imagem: o excesso é lido e descartado para o aviso de tamanho chegar ao celular.
+    for await (const chunk of request) {
+      size += (chunk as Buffer).length
+      if (size <= MAX_AUDIO_BYTES) chunks.push(chunk as Buffer)
+    }
+    if (size > MAX_AUDIO_BYTES) return json(response, 413, { error: 'Áudio grande demais: o limite é 25 MB.' })
+    if (size === 0) return json(response, 400, { error: 'O áudio chegou vazio.' })
+    mkdirSync(audioDir, { recursive: true })
+    const file = join(audioDir, `fala-${Date.now()}-${randomBytes(4).toString('hex')}.${extension}`)
+    await writeFile(file, Buffer.concat(chunks))
+    // A resposta fecha antes do fim quando o celular desiste (tela apagada, rede caiu): o Transcritor para junto.
+    const gone = new AbortController()
+    response.once('close', () => gone.abort())
+    const result = await transcribe(file, gone.signal).then((text) => ({ text }), (error: unknown) => ({ error }))
+    await rm(file, { force: true })
+    if (gone.signal.aborted) return
+    if ('error' in result) {
+      const { error } = result
+      return json(response, error instanceof TranscriberUnavailableError ? 503 : 502, { error: error instanceof Error ? error.message : 'Falha ao transcrever.' })
+    }
+    console.info(`[kora] áudio do celular: ${size} bytes, ${result.text.length} caracteres`)
+    json(response, 200, { text: result.text })
+  }
+
   private async body(request: IncomingMessage, limit = 65536): Promise<unknown> {
     if (!request.headers['content-type']?.startsWith('application/json')) throw new Error('Envie JSON.')
     request.setEncoding('utf8')
@@ -351,6 +389,7 @@ export class MobileServer {
         if (url.pathname === '/api/project-icon' && request.method === 'GET') return json(response, 200, { icon: await this.options.runtime.projectIcon(url.searchParams.get('project') ?? '') })
         if (url.pathname === '/api/usage' && request.method === 'GET') return json(response, 200, await this.options.runtime.usage())
         if (url.pathname === '/api/image' && request.method === 'POST') return await this.image(request, response)
+        if (url.pathname === '/api/audio' && request.method === 'POST') return await this.audio(request, response)
         if (url.pathname === '/api/files' && request.method === 'GET') {
           return json(response, 200, this.options.runtime.files(url.searchParams.get('project') ?? '', url.searchParams.get('path') ?? ''))
         }

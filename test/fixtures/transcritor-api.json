@@ -1,0 +1,38 @@
+{
+  "_origem": "Respostas reais do Transcritor 0.9.0 (API local), capturadas em 2026-10-25 transcrevendo um ogg/opus de 16 kHz pelo perfil ditado.",
+  "post": {
+    "status": 202,
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"id\":\"20261025-192047-736ceb\",\"estado\":\"na_fila\",\"arquivo\":\"C:\\\\Temp\\\\kora-audio\\\\fala.ogg\",\"assinatura\":{\"bytes\":13225,\"mtime\":1792956028},\"cliente\":\"kora-celular\",\"perfil\":\"ditado\",\"parametros\":{\"modelo\":\"large-v3-turbo\",\"idioma\":\"pt\",\"recorte\":\"pedacos\",\"pedaco_alvo_s\":45,\"pedaco_teto_s\":120,\"pausa_corte_s\":0.4,\"vad_limiar\":0.5,\"fala_minima_ms\":150,\"pausa_minima_ms\":500,\"folga_s\":0.2,\"beam_size\":5,\"palavras\":false,\"condicionar_no_anterior\":true,\"prompt\":\"\",\"termos\":[]},\"criado_em\":\"2026-10-25T19:20:47+00:00\",\"progresso\":{\"feitos\":0,\"total\":0},\"reaproveitado\":false}"
+  },
+  "jobRunning": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"id\":\"20261025-192047-736ceb\",\"estado\":\"transcrevendo\",\"arquivo\":\"C:\\\\Temp\\\\kora-audio\\\\fala.ogg\",\"assinatura\":{\"bytes\":13225,\"mtime\":1792956028},\"cliente\":\"kora-celular\",\"perfil\":\"ditado\",\"parametros\":{\"modelo\":\"large-v3-turbo\",\"idioma\":\"pt\",\"recorte\":\"pedacos\",\"pedaco_alvo_s\":45,\"pedaco_teto_s\":120,\"pausa_corte_s\":0.4,\"vad_limiar\":0.5,\"fala_minima_ms\":150,\"pausa_minima_ms\":500,\"folga_s\":0.2,\"beam_size\":5,\"palavras\":false,\"condicionar_no_anterior\":true,\"prompt\":\"\",\"termos\":[]},\"criado_em\":\"2026-10-25T19:20:47+00:00\",\"progresso\":{\"feitos\":0,\"total\":0},\"iniciado_em\":\"2026-10-25T19:20:47+00:00\"}"
+  },
+  "job": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"id\":\"20261025-192047-736ceb\",\"estado\":\"concluido\",\"arquivo\":\"C:\\\\Temp\\\\kora-audio\\\\fala.ogg\",\"assinatura\":{\"bytes\":13225,\"mtime\":1792956028},\"cliente\":\"kora-celular\",\"perfil\":\"ditado\",\"parametros\":{\"modelo\":\"large-v3-turbo\",\"idioma\":\"pt\",\"recorte\":\"pedacos\",\"pedaco_alvo_s\":45,\"pedaco_teto_s\":120,\"pausa_corte_s\":0.4,\"vad_limiar\":0.5,\"fala_minima_ms\":150,\"pausa_minima_ms\":500,\"folga_s\":0.2,\"beam_size\":5,\"palavras\":false,\"condicionar_no_anterior\":true,\"prompt\":\"\",\"termos\":[]},\"criado_em\":\"2026-10-25T19:20:47+00:00\",\"progresso\":{\"feitos\":1,\"total\":1},\"iniciado_em\":\"2026-10-25T19:20:47+00:00\",\"terminado_em\":\"2026-10-25T19:20:50+00:00\",\"segundos_de_processamento\":2.6}"
+  },
+  "result": {
+    "status": 200,
+    "contentType": "text/plain; charset=utf-8",
+    "body": "Produz testes do servidor do celular e me diga o que falhou."
+  },
+  "delete": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"apagado\": \"20261025-192047-736ceb\"}"
+  },
+  "missing": {
+    "status": 404,
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"erro\": \"trabalho não encontrado (ou já apagado)\"}"
+  },
+  "unauthorized": {
+    "status": 401,
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"erro\": \"token ausente ou inválido (Authorization: Bearer <token>)\"}"
+  }
+}

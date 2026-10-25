@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, renameSync, writeFileSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, writeFileSync, readFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { request } from 'node:http'
+import { createServer, request, type Server } from 'node:http'
 import { execFileSync } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MobileServer } from '../src/main/mobile-server'
@@ -11,6 +11,8 @@ import { DESKTOP, type SizeChange } from '../src/main/terminal-sizes'
 import { emptyState, type KoraState } from '../src/shared/state'
 import type { MobileStatus } from '../src/shared/mobile'
 import { mergeTabs } from '../src/main/projects'
+import { createTranscriber, type Transcribe } from '../src/main/transcriber'
+import transcritor from './fixtures/transcritor-api.json'
 
 const servers: MobileServer[] = []
 const processes: Terminals[] = []
@@ -40,7 +42,7 @@ interface Setup {
   statuses: MobileStatus[]
 }
 
-async function setup(): Promise<Setup> {
+async function setup(transcribe?: Transcribe): Promise<Setup> {
   const dir = mkdtempSync(join(tmpdir(), 'kora-mobile-'))
   const config = join(dir, 'mobile.json')
   writeFileSync(join(dir, 'mobile.html'), '<html>Kora mobile</html>')
@@ -78,7 +80,7 @@ async function setup(): Promise<Setup> {
     accounts: async () => ({ activeUnknown: false, login: null, accounts: ['a1', 'a2'].map((id) => ({ id, email: `${id}@exemplo.com`, organizationName: null, subscriptionType: 'max', refreshTokenExpiresAt: null, weekly: null, active: id === active })) }),
     switchAccount: async (id) => { switched.push(id); active = id }
   })
-  server = new MobileServer({ configFile: config, rendererDir: dir, androidDir: join(dir, 'android'), imageDir: join(dir, 'imagens'), pdfjsDir: resolve('node_modules', 'pdfjs-dist'), runtime, changed: () => {}, statusChanged: (status) => statuses.push(status), port: 0 })
+  server = new MobileServer({ configFile: config, rendererDir: dir, androidDir: join(dir, 'android'), imageDir: join(dir, 'imagens'), audioDir: join(dir, 'audio'), transcribe, pdfjsDir: resolve('node_modules', 'pdfjs-dist'), runtime, changed: () => {}, statusChanged: (status) => statuses.push(status), port: 0 })
   servers.push(server)
   await server.start()
   const url = `http://127.0.0.1:${(server as unknown as { port: number }).port}`
@@ -314,6 +316,56 @@ describe('acesso ao servidor do celular', () => {
     const huge = await post({ cookie: s.cookie, 'content-type': 'image/jpeg' }, Buffer.alloc(21 * 1024 * 1024))
     expect(huge.status).toBe(413)
     expect(existsSync(join(s.dir, 'imagens'))).toBe(true)
+  })
+
+  it('transcreve o áudio do celular pelo Transcritor do PC e não deixa o arquivo para trás', async () => {
+    // Transcritor de mentira com as respostas gravadas do de verdade; lê o arquivo na hora, como o de verdade.
+    const job = JSON.parse(transcritor.post.body).id as string
+    const received: { path: string; bytes: Buffer }[] = []
+    const fake: Server = createServer(async (req, res) => {
+      let body = ''
+      for await (const chunk of req) body += String(chunk)
+      const reply = req.method === 'POST' ? transcritor.post : req.method === 'DELETE' ? transcritor.delete
+        : req.url === `/trabalhos/${job}` ? transcritor.job : transcritor.result
+      if (req.method === 'POST') {
+        const path = JSON.parse(body).arquivo as string
+        received.push({ path, bytes: readFileSync(path) })
+      }
+      res.writeHead(reply.status, { 'content-type': reply.contentType })
+      res.end(reply.body)
+    })
+    await new Promise<void>((done) => fake.listen(0, '127.0.0.1', done))
+    const fakeUrl = `http://127.0.0.1:${(fake.address() as { port: number }).port}`
+    try {
+      const s = await setup(createTranscriber({ url: fakeUrl, token: async () => 'token', pollMs: 5 }))
+      const ogg = Buffer.from('OggS-audio-de-teste')
+      const post = (headers: Record<string, string>, body: Buffer): Promise<Response> => fetch(`${s.url}/api/audio`, { method: 'POST', headers, body: new Uint8Array(body) })
+      expect((await post({ 'content-type': 'audio/ogg' }, ogg)).status).toBe(401)
+      expect((await post({ cookie: s.cookie, 'content-type': 'text/plain' }, ogg)).status).toBe(415)
+      expect((await post({ cookie: s.cookie, 'content-type': 'audio/ogg' }, Buffer.alloc(0))).status).toBe(400)
+      const sent = await post({ cookie: s.cookie, 'content-type': 'audio/ogg; codecs=opus' }, ogg)
+      expect(sent.status).toBe(200)
+      expect(await sent.json()).toEqual({ text: transcritor.result.body.trim() })
+      expect(received).toHaveLength(1)
+      expect(received[0]!.bytes).toEqual(ogg)
+      expect(received[0]!.path).toMatch(/\.ogg$/)
+      expect(dirname(received[0]!.path)).toBe(join(s.dir, 'audio'))
+      expect(readdirSync(join(s.dir, 'audio'))).toEqual([])
+
+      await new Promise((done) => fake.close(done))
+      const closed = await post({ cookie: s.cookie, 'content-type': 'audio/ogg' }, ogg)
+      expect(closed.status).toBe(503)
+      expect((await closed.json()).error).toContain('não está aberto')
+      expect(readdirSync(join(s.dir, 'audio'))).toEqual([])
+    } finally {
+      fake.close()
+    }
+  })
+
+  it('Kora sem Transcritor configurado não aceita áudio', async () => {
+    const s = await setup()
+    const sent = await fetch(`${s.url}/api/audio`, { method: 'POST', headers: { cookie: s.cookie, 'content-type': 'audio/ogg' }, body: new Uint8Array([1]) })
+    expect(sent.status).toBe(404)
   })
 
   it('dois Kora no mesmo PC ficam pareados juntos: cada um lê o cookie dele, e o cookie antigo ainda vale', async () => {
