@@ -217,7 +217,11 @@ class MainActivity : ComponentActivity() {
     private inner class Cliente : WebViewClient() {
         // Só a página do Kora roda dentro do app (a ponte KoraApp fica exposta a ela); link de fora vai para o navegador.
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-            if (request.url.host == hostAtual && request.url.port == PORTA) return false
+            // /raw/ é um arquivo do projeto (o Abrir página inteira do HTML): vai para o navegador, que tem zoom e
+            // carrega a página inteira; o resto do Kora fica dentro do app.
+            val doKora = request.url.host == hostAtual && request.url.port == PORTA
+            // Só a página principal: um link dentro da prévia do HTML (iframe) navega dentro dela.
+            if (doKora && (!request.isForMainFrame || request.url.path?.startsWith("/raw/") != true)) return false
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
             return true
         }
