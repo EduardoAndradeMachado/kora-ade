@@ -1,12 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { DESKTOP, type MobileCommand, type MobileTab, type TerminalSizeEvent, type TerminalSnapshot } from '@shared/mobile'
 import { Icon } from '@/brand/icons'
 import { currentTerminalLook, onThemeChange } from '@/lib/terminal-theme'
-import { api } from './api'
+import { api, koraApp } from './api'
 import { pathForPrompt, uploadImage } from './images'
+import { canRecord, onNativeAudio, transcribeAudio } from './voice'
+import { VoiceMeter } from './VoiceMeter'
 
 export interface TerminalChunk { id: string; data: string; sequence: number }
 
@@ -58,6 +60,11 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   // Erro de imagem ou de envio aparece no campo, onde a pessoa agiu, e não no aviso do topo.
   const [composerError, setComposerError] = useState<string | null>(null)
   const [moreKeys, setMoreKeys] = useState(false)
+  const [voice, setVoice] = useState<'idle' | 'recording' | 'transcribing'>('idle')
+  const [microphone] = useState(canRecord)
+  const transcription = useRef<AbortController | null>(null)
+  const level = useRef<((level: number) => void) | null>(null)
+  const listenLevel = useCallback((handler: ((level: number) => void) | null) => { level.current = handler }, [])
   const picker = useRef<HTMLInputElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
   const mount = useRef<HTMLDivElement>(null)
@@ -239,6 +246,48 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     element.style.height = `${element.scrollHeight}px`
   }, [draft])
 
+  // O texto cai no campo para revisar antes de enviar: uma palavra mal entendida não vai direto para o terminal.
+  useEffect(() => {
+    if (!microphone) return
+    const off = onNativeAudio((event) => {
+      if (event.tipo === 'nivel') return level.current?.(event.valor)
+      if (event.tipo === 'gravando') return setVoice('recording')
+      if (event.tipo !== 'audio') {
+        setVoice('idle')
+        if (event.tipo === 'curto') setComposerError('Gravação curta demais: toque no microfone, fale e toque em ✓ para transcrever.')
+        if (event.tipo === 'erro') setComposerError(event.mensagem)
+        return
+      }
+      const abort = new AbortController()
+      transcription.current = abort
+      setVoice('transcribing')
+      transcribeAudio(event.base64, event.mime, abort.signal)
+        .then((text) => {
+          if (abort.signal.aborted) return
+          if (!text) return setComposerError('Não deu para entender o áudio. Fale de novo, mais perto do celular.')
+          setDraft((current) => (current.trim() ? `${current.trimEnd()} ${text}` : text))
+        })
+        .catch((error: Error) => { if (!abort.signal.aborted) setComposerError(error.message) })
+        .finally(() => {
+          if (transcription.current !== abort) return
+          transcription.current = null
+          setVoice('idle')
+        })
+    })
+    return () => {
+      off()
+      koraApp()?.pararAudio?.(false)
+      transcription.current?.abort()
+    }
+  }, [microphone])
+  // Cancelar na transcrição fecha o pedido; o PC percebe e apaga o trabalho no Transcritor, que para de processar.
+  const cancelVoice = (): void => {
+    if (voice === 'recording') koraApp()?.pararAudio?.(false)
+    transcription.current?.abort()
+    transcription.current = null
+    setVoice('idle')
+  }
+
   const keys = (data: string): void => {
     void send({ type: 'keys', tabId: tab.id, data }).catch((error: Error) => onError(error.message))
   }
@@ -290,7 +339,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       <button className="more-keys-toggle" aria-label="Mais teclas" aria-expanded={moreKeys} onClick={() => setMoreKeys((open) => !open)}>⋯</button>
     </nav>
     {(() => {
-      const ready = !sending && uploading === 0 && connected && (draft.trim() !== '' || images.length > 0)
+      const ready = !sending && uploading === 0 && voice === 'idle' && connected && (draft.trim() !== '' || images.length > 0)
       const thumbs = (images.length > 0 || uploading > 0) && <div className="composer-images" aria-label="Imagens anexadas">
         {images.map((image) => <figure key={image.path}>
           {image.preview ? <img src={image.preview} alt="Imagem anexada" /> : <Icon name="imagem" />}
@@ -305,10 +354,23 @@ export function SessionView({ tab, device, connected, connection, feed, command,
           {composerError && <p role="alert" className="composer-error"><Icon name="alerta" /><span>{composerError}</span><button type="button" aria-label="Dispensar aviso" onClick={() => setComposerError(null)}><Icon name="fechar" /></button></p>}
           {thumbs}
           <textarea ref={field} aria-label="Mensagem para a sessão" placeholder="Mensagem para a sessão" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} />
-          <div className="composer-actions">
+          {/* Ditando, a linha vira descartar, ondas e transcrever: anexar e enviar saem para não mandar a mensagem no meio. */}
+          {voice === 'idle' ? <div className="composer-actions">
             <button type="button" className="attach-button" aria-label="Anexar imagem" disabled={!connected} onClick={() => picker.current?.click()}><Icon name="novaAba" /></button>
-            <button className={`send-button ${ready ? 'ready' : ''}`} aria-label="Enviar" disabled={!ready}><Icon name="setaCima" /></button>
-          </div>
+            <div className="composer-send">
+              {microphone && <button type="button" className="mic-button" aria-label="Gravar áudio" disabled={!connected}
+                onClick={() => { setComposerError(null); koraApp()?.gravarAudio?.() }}>
+                <Icon name="microfone" />
+              </button>}
+              <button className={`send-button ${ready ? 'ready' : ''}`} aria-label="Enviar" disabled={!ready}><Icon name="setaCima" /></button>
+            </div>
+          </div> : <div className="composer-actions dictating">
+            <button type="button" className="voice-cancel" aria-label={voice === 'recording' ? 'Descartar gravação' : 'Cancelar transcrição'} onClick={cancelVoice}><Icon name="fechar" /></button>
+            {voice === 'recording'
+              ? <VoiceMeter listen={listenLevel} />
+              : <p className="voice-status" role="status"><span className="mic-spinner" />Transcrevendo no PC…</p>}
+            {voice === 'recording' && <button type="button" className="voice-confirm" aria-label="Parar e transcrever" onClick={() => koraApp()?.pararAudio?.(true)}><Icon name="ok" /></button>}
+          </div>}
         </div>
       </form>
     })()}

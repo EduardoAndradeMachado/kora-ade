@@ -239,6 +239,22 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .composer-error button { width: 24px; height: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: inherit; }
 .composer-error button svg { width: 12px; height: 12px; }
 .composer-actions .attach-button { margin-left: -4px; }
+.composer-send { display: flex; align-items: center; gap: 4px; }
+.mic-button { flex-shrink: 0; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: transparent; color: var(--muted-foreground); }
+.mic-button svg { width: 20px; height: 20px; }
+.voice-cancel, .voice-confirm { flex-shrink: 0; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; }
+.voice-cancel { margin-left: -4px; background: transparent; color: var(--muted-foreground); animation: voice-pop .18s ease-out both; }
+.voice-cancel svg { width: 18px; height: 18px; }
+/* O ✓ nasce de onde estava o microfone (36 px + 4 de vão à esquerda do enviar) e desliza para o lugar do enviar. */
+.voice-confirm { background: var(--brand-amber); color: var(--brand-ink); animation: voice-slide .22s ease-out both; }
+.voice-confirm svg { width: 18px; height: 18px; }
+.voice-status { flex: 1; min-width: 0; margin: 0 10px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--muted-foreground); font-size: 13px; animation: voice-pop .18s ease-out both; }
+.voice-meter { flex: 1; min-width: 0; height: 24px; margin: 0 10px; display: flex; align-items: center; justify-content: flex-end; gap: 2px; overflow: hidden; transform-origin: right center; animation: voice-grow .22s ease-out both; }
+@keyframes voice-pop { from { opacity: 0; transform: scale(.6); } }
+@keyframes voice-slide { from { opacity: .4; transform: translateX(-40px); } }
+@keyframes voice-grow { from { opacity: 0; transform: scaleX(.3); } }
+.voice-meter span { flex: 0 0 3px; min-height: 2px; border-radius: 2px; background: var(--brand-amber); transition: height 80ms linear; }
+.mic-spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--brand-amber); animation: spin .8s linear infinite; }
 .composer-images { display: flex; gap: 8px; padding: 8px 12px 0; overflow-x: auto; flex-shrink: 0; }
 .composer-box .composer-images { padding: 6px 0 2px; }
 .composer-images figure { position: relative; margin: 0; width: 56px; height: 56px; flex-shrink: 0; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--secondary); color: var(--muted-foreground); }

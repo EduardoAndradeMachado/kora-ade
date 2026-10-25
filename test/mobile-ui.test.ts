@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { chromium, expect as browserExpect } from '@playwright/test'
@@ -12,6 +12,7 @@ import { Terminals } from '../src/main/terminals'
 import { DESKTOP } from '../src/main/terminal-sizes'
 import { emptyState } from '../src/shared/state'
 import { findProjectIcon } from '../src/main/project-icon'
+import { TranscriberUnavailableError } from '../src/main/transcriber'
 
 const SIZES = [[350, 700], [768, 1024], [1280, 800]] as const
 
@@ -52,7 +53,21 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     accounts: async () => ({ activeUnknown: false, login: null, accounts: ['pessoal', 'trabalho'].map((id) => ({ id, email: `${id}@exemplo.com`, organizationName: null, subscriptionType: 'max', refreshTokenExpiresAt: null, weekly: null, active: id === activeAccount })) }),
     switchAccount: async (id) => { activeAccount = id }
   })
-  const mobile: MobileServer = new MobileServer({ configFile: join(dir, 'mobile.json'), rendererDir: resolve('src/renderer'), imageDir: join(dir, 'imagens'), devUrl, devAssetRoots: [resolve('node_modules'), resolve('src/shared'), join(dir, 'vite-cache')], runtime, changed: () => {}, port: 0 })
+  // Transcritor: o primeiro áudio vira texto, o segundo encontra o app fechado no PC e o terceiro só termina se o
+  // celular desistir, como uma fila parada.
+  const heard: string[] = []
+  let gaveUp = false
+  const transcribe = async (file: string, signal: AbortSignal): Promise<string> => {
+    heard.push(readFileSync(file, 'utf8'))
+    if (heard.length === 2) throw new TranscriberUnavailableError('O Transcritor não está aberto no PC. Abra o app e tente de novo.')
+    if (heard.length === 3) {
+      await new Promise((resolve) => signal.addEventListener('abort', resolve))
+      gaveUp = true
+      throw signal.reason
+    }
+    return 'os testes do servidor do celular'
+  }
+  const mobile: MobileServer = new MobileServer({ configFile: join(dir, 'mobile.json'), rendererDir: resolve('src/renderer'), imageDir: join(dir, 'imagens'), audioDir: join(dir, 'audio'), transcribe, devUrl, devAssetRoots: [resolve('node_modules'), resolve('src/shared'), join(dir, 'vite-cache')], runtime, changed: () => {}, port: 0 })
   const browser = await chromium.launch({ headless: true })
   try {
     await mobile.start()
@@ -129,6 +144,59 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     expect(readFileSync(attached!)).toEqual(png)
     await browserExpect(page.getByRole('img', { name: 'Imagem anexada' })).toHaveCount(0)
     await page.screenshot({ path: join(resolve('e2e/.results/mobile-validation'), 'imagem-350.png') })
+
+    // O microfone só existe dentro do app Android: o navegador não abre o microfone em HTTP.
+    await browserExpect(page.getByRole('button', { name: 'Gravar áudio' })).toHaveCount(0)
+    // A ponte simulada responde como a MainActivity: gravando no primeiro toque, o áudio em base64 no segundo.
+    await page.evaluate(() => Object.assign(window, { KoraApp: {
+      lerQr() {}, escolherPc() {}, pronto() {},
+      gravarAudio() { (window as unknown as { koraAudio(event: unknown): void }).koraAudio({ tipo: 'gravando' }) },
+      pararAudio(enviar: boolean) { (window as unknown as { koraAudio(event: unknown): void }).koraAudio(enviar ? { tipo: 'audio', mime: 'audio/ogg', base64: btoa('OggS-fala') } : { tipo: 'cancelado' }) }
+    } }))
+    await page.getByRole('button', { name: 'Voltar', exact: true }).click()
+    await page.goForward()
+    const field = page.getByRole('textbox', { name: 'Mensagem para a sessão' })
+    await field.fill('Rode ')
+    await page.getByRole('button', { name: 'Gravar áudio' }).click()
+    // Ditando, anexar e enviar saem da linha: a mensagem não vai pela metade.
+    await browserExpect(page.getByRole('button', { name: 'Enviar', exact: true })).toHaveCount(0)
+    await browserExpect(page.getByRole('button', { name: 'Anexar imagem' })).toHaveCount(0)
+    // O app manda o nível do microfone enquanto grava; a barra mais nova, à direita, mostra a última leitura.
+    const meter = page.getByRole('meter', { name: 'Nível do microfone' })
+    await page.evaluate(() => { for (const valor of [0.2, 0.5, 0.9, 0.4, 0.75]) (window as unknown as { koraAudio(event: unknown): void }).koraAudio({ tipo: 'nivel', valor }) })
+    await browserExpect(meter).toHaveAttribute('aria-valuenow', '0.75')
+    expect(await meter.locator('span').evaluateAll((bars) => bars.slice(-5).map((bar) => (bar as HTMLElement).style.height))).toEqual(['20%', '50%', '90%', '40%', '75%'])
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: join(artifacts, 'gravando-350.png') })
+    await page.getByRole('button', { name: 'Parar e transcrever' }).click()
+    await browserExpect(meter).toHaveCount(0)
+    // O texto cai no campo, depois do que já estava escrito, e não vai sozinho para o terminal.
+    await browserExpect(field).toHaveValue('Rode os testes do servidor do celular')
+    expect(heard).toEqual(['OggS-fala'])
+    expect(readdirSync(join(dir, 'audio'))).toEqual([])
+    expect(submitted.at(-1)?.text).toBe("Write-Output 'OLHA_O_PRINT'")
+    await page.getByRole('button', { name: 'Gravar áudio' }).click()
+    await page.getByRole('button', { name: 'Parar e transcrever' }).click()
+    await browserExpect(page.locator('.composer').getByRole('alert')).toContainText('não está aberto no PC')
+    await browserExpect(field).toHaveValue('Rode os testes do servidor do celular')
+    // Descartar a gravação não manda nada ao PC.
+    await page.getByRole('button', { name: 'Gravar áudio' }).click()
+    await page.getByRole('button', { name: 'Descartar gravação' }).click()
+    await browserExpect(page.getByRole('button', { name: 'Enviar', exact: true })).toBeVisible()
+    expect(heard).toHaveLength(2)
+    // Cancelar no meio da transcrição chega ao Transcritor, que para de processar, e o campo fica como estava.
+    await page.getByRole('button', { name: 'Gravar áudio' }).click()
+    await page.getByRole('button', { name: 'Parar e transcrever' }).click()
+    await browserExpect(page.getByRole('status').filter({ hasText: 'Transcrevendo no PC' })).toBeVisible()
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: join(artifacts, 'transcrevendo-350.png') })
+    await page.getByRole('button', { name: 'Cancelar transcrição' }).click()
+    await expect.poll(() => gaveUp).toBe(true)
+    await browserExpect(page.getByRole('button', { name: 'Enviar', exact: true })).toBeVisible()
+    await browserExpect(field).toHaveValue('Rode os testes do servidor do celular')
+    await expect.poll(() => readdirSync(join(dir, 'audio'))).toEqual([])
+    await field.fill('')
+    await page.evaluate(() => { delete (window as { KoraApp?: unknown }).KoraApp })
 
     // PC digita: o tamanho vai para a janela e o celular mostra o aviso; tocar nele traz de volta.
     runtime.desktopSize(tab.id, { cols: 140, rows: 40 })
