@@ -26,12 +26,30 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --only-shell chromium
       - name: Tag e package.json com a mesma versão
         shell: bash
         run: |
           version=$(node -p "require('./package.json').version")
           [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME, package.json $version"; exit 1; }
       - run: pnpm check
+      # O APK do celular vai dentro do instalador (resources/android) e o Kora do PC o entrega ao app. A chave é
+      # sempre a mesma: com outra, o Android recusa instalar por cima do app que já está no celular.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Chave de assinatura do app Android
+        shell: bash
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/kora-celular.jks"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=kora-celular\nkeyPassword=%s\n' \
+            "$(cygpath -m "$RUNNER_TEMP/kora-celular.jks")" "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" > "$RUNNER_TEMP/keystore.properties"
+          echo "KORA_KEYSTORE_PROPERTIES=$RUNNER_TEMP/keystore.properties" >> "$GITHUB_ENV"
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      - run: pnpm android
       - run: pnpm exec electron-vite build
       - name: Notas da Release pelos commits desde a tag anterior
         shell: bash
@@ -47,6 +65,13 @@ jobs:
       - run: pnpm exec electron-builder --win --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Nome fixo: o README aponta para releases/latest/download/Kora-Celular.apk na primeira instalação do app.
+      # Depois disso o app se atualiza pelo Kora do PC, que leva o mesmo APK dentro do instalador.
+      - name: APK do celular na Release
+        shell: bash
+        run: cp resources/android/kora-celular.apk Kora-Celular.apk && gh release upload "$GITHUB_REF_NAME" Kora-Celular.apk
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Confere uma Release só, com instalador, blockmap e latest.yml, e publica
         shell: bash
         run: |
@@ -54,7 +79,7 @@ jobs:
           [ "$count" = 1 ] || { echo "esperava 1 Release para $GITHUB_REF_NAME, achei $count"; exit 1; }
           version="${GITHUB_REF_NAME#v}"
           assets=" $(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | tr '\n' ' ')"
-          for file in "Kora-ADE-Setup-$version.exe" "Kora-ADE-Setup-$version.exe.blockmap" latest.yml; do
+          for file in "Kora-ADE-Setup-$version.exe" "Kora-ADE-Setup-$version.exe.blockmap" latest.yml Kora-Celular.apk; do
             case "$assets" in *" $file "*) ;; *) echo "falta $file na Release (tem:$assets)"; exit 1 ;; esac
           done
           gh release edit "$GITHUB_REF_NAME" --draft=false --latest --notes-file release-notes.md
