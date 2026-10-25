@@ -122,6 +122,17 @@
   background-color: transparent !important;
 }
 
+/* Terminal no tamanho do celular, com a letra ampliada (TerminalView): centralizado abaixo da faixa do aviso, que tem
+   44px. Só margem no .xterm: padding no container ou no .xterm mudaria a conta do fit e o PC voltaria com colunas a
+   menos. */
+.terminal-phone {
+  overflow: hidden;
+}
+.terminal-phone > .xterm {
+  width: fit-content;
+  margin: 44px auto 0;
+}
+
 /* Barra de rolagem do app inteiro (a padrão do Windows destoa da interface).
    Sem scrollbar-width/scrollbar-color: no Chromium atual eles fazem estas regras serem ignoradas. */
 ::-webkit-scrollbar {

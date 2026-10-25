@@ -19,4 +19,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # O teste da página do celular abre um Chromium headless.
+      - run: pnpm exec playwright install --only-shell chromium
       - run: pnpm check

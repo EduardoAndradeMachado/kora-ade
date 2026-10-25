@@ -5,6 +5,7 @@ import type { AgentUsage } from './usage-types'
 import type { ClaudeAccountsView } from './claude-accounts'
 import type { DayPoint, SessionMetrics } from './metrics'
 import type { UpdateStatus } from './update'
+import type { DesktopSessionState, MobilePairing, MobileStatus, TerminalSizeEvent, TerminalSnapshot } from './mobile'
 
 export interface FileEntry {
   name: string
@@ -183,9 +184,10 @@ export interface KoraApi {
   projectIcon(projectId: string): Promise<string | null>
   refreshProjectIcon(projectId: string): Promise<string | null>
 
-  saveTabs(tabs: TabRef[]): Promise<void>
+  // baseline: a lista que a interface conhecia; o main preserva o que o celular mudou depois dela.
+  saveTabs(tabs: TabRef[], baseline?: TabRef[]): Promise<void>
   // Síncrono: usado ao descarregar a janela, quando uma chamada assíncrona não chegaria a completar.
-  saveTabsNow(tabs: TabRef[]): void
+  saveTabsNow(tabs: TabRef[], baseline?: TabRef[]): void
   // O main só segura o fechamento para perguntar quando há arquivo com alteração não salva.
   setUnsaved(unsaved: boolean): void
   onCloseRequested(listener: (kind: CloseKind) => void): () => void
@@ -207,6 +209,18 @@ export interface KoraApi {
   loadScrollback(id: string): Promise<string | null>
   // O main pede antes de encerrar os processos (esconder, sair, instalar); a resposta sai depois de gravar.
   onFlushScrollback(listener: () => void | Promise<void>): () => void
-  onTerminalData(listener: (id: string, data: string) => void): () => void
+  onTerminalData(listener: (id: string, data: string, sequence: number) => void): () => void
   onTerminalExit(listener: (id: string, exitCode: number) => void): () => void
+  // Tela atual de um terminal já rodando (aberto pelo celular) e o tamanho que ele usa agora.
+  terminalSnapshot(id: string): Promise<{ snapshot: TerminalSnapshot | null; size: TerminalSizeEvent | null }>
+  // Digitar no PC traz o tamanho do terminal de volta para a janela.
+  takeTerminal(id: string): void
+  onTerminalSize(listener: (event: TerminalSizeEvent) => void): () => void
+  onMobileState(listener: (snapshot: DesktopSessionState) => void): () => void
+  mobileStatus(): Promise<MobileStatus>
+  setMobileEnabled(enabled: boolean): Promise<MobileStatus>
+  onMobileStatus(listener: (status: MobileStatus) => void): () => void
+  pairMobile(): Promise<MobilePairing>
+  revokeMobile(id: string): Promise<MobileStatus>
+  renameMobile(id: string, name: string): Promise<MobileStatus>
 }

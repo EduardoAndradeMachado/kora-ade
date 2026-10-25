@@ -9,6 +9,8 @@ import { Lockup } from '@/brand/Logo'
 import { cn } from '@/lib/utils'
 import { ipcErrorMessage } from '@/lib/ipc-error'
 import { useWindowDim } from '@/lib/use-window-dim'
+import { MobileConnection } from './MobileConnection'
+import { Toggle } from './Toggle'
 
 const SITE_URL = 'https://kora-ade.vercel.app/'
 const REPO_URL = 'https://github.com/EduardoAndradeMachado/kora-ade'
@@ -140,36 +142,6 @@ function Support({ support }: { support: SupportActions }): React.JSX.Element {
   )
 }
 
-function Toggle(props: { checked: boolean; label: string; detail: string; onChange(checked: boolean): void; children?: React.ReactNode }): React.JSX.Element {
-  return (
-    <div className="flex items-start gap-3">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={props.checked}
-        aria-label={props.label}
-        onClick={() => props.onChange(!props.checked)}
-        className={cn(
-          'relative mt-0.5 h-4 w-7 shrink-0 rounded-full transition-colors',
-          props.checked ? 'bg-[var(--brand-amber)]' : 'bg-secondary ring-1 ring-inset ring-border'
-        )}
-      >
-        <span
-          className={cn(
-            'absolute top-0.5 size-3 rounded-full bg-white shadow transition-[left]',
-            props.checked ? 'left-[14px]' : 'left-0.5'
-          )}
-        />
-      </button>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-xs text-foreground">{props.label}</span>
-        <span className="text-[11px] leading-snug text-muted-foreground">{props.detail}</span>
-        {props.children}
-      </div>
-    </div>
-  )
-}
-
 const clock = (ms: number): string => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 
 function describe(update: UpdateStatus): string {
@@ -294,6 +266,7 @@ export function SettingsPanel(props: SettingsPanelProps): React.JSX.Element {
         />
       </section>
 
+      <MobileConnection />
       <Support support={props.support} />
 
       <section className="flex flex-wrap gap-x-4 gap-y-1 border-t px-4 py-3 text-xs">

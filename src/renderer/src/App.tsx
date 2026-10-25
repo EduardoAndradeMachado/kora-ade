@@ -41,6 +41,7 @@ import { Icon } from '@/brand/icons'
 import type { RenameRequest, TabPlace } from '@/components/TabBar'
 import type { NewTabChoice } from '@/components/NewTabMenu'
 import { terminalBus } from '@/lib/terminal-bus'
+import { reconcileTabRefs } from '@shared/tab-sync'
 import { saveAllScrollbacks, saveScrollbackNow } from '@/lib/scrollback'
 
 type TabsByProject = Record<string, Tab[]>
@@ -234,15 +235,17 @@ export function App(): React.JSX.Element {
   // Abrir/fechar aba salva na hora: com espera, fechar logo depois de abrir (ou fechar o app logo depois
   // de fechar a aba) perdia o save e a aba fechada voltava. Só a troca de título espera 300 ms.
   const pendingTabs = useRef<TabRef[] | null>(null)
+  const pendingBaseline = useRef<TabRef[] | undefined>(undefined)
   useEffect(() => {
     if (lastSavedTabs.current === null) return
     const refs = tabRefs(tabs)
     const serialized = JSON.stringify(refs)
     if (serialized === lastSavedTabs.current) return
+    const baseline = JSON.parse(lastSavedTabs.current) as TabRef[]
     const save = (): void => {
       lastSavedTabs.current = serialized
       pendingTabs.current = null
-      void window.kora.saveTabs(refs)
+      void window.kora.saveTabs(refs, baseline)
     }
     const previousIds = (JSON.parse(lastSavedTabs.current) as TabRef[]).map((t) => t.id).join()
     if (refs.map((t) => t.id).join() !== previousIds) {
@@ -250,13 +253,14 @@ export function App(): React.JSX.Element {
       return
     }
     pendingTabs.current = refs
+    pendingBaseline.current = baseline
     const timer = setTimeout(save, 300)
     return () => clearTimeout(timer)
   }, [tabs])
 
   useEffect(() => {
     const flush = (): void => {
-      if (pendingTabs.current) window.kora.saveTabsNow(pendingTabs.current)
+      if (pendingTabs.current) window.kora.saveTabsNow(pendingTabs.current, pendingBaseline.current)
     }
     window.addEventListener('beforeunload', flush)
     return () => window.removeEventListener('beforeunload', flush)
@@ -264,6 +268,67 @@ export function App(): React.JSX.Element {
 
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
+
+  // O celular abriu, fechou, renomeou, suspendeu ou retomou abas: o main manda o estado e a interface se ajusta
+  // sem perder o que mudou aqui desde o último save. Abas de arquivo ficam onde estão.
+  useEffect(
+    () =>
+      window.kora.onMobileState((snapshot) => {
+        if (lastSavedTabs.current === null) return
+        const baseline = JSON.parse(lastSavedTabs.current) as TabRef[]
+        const refs = reconcileTabRefs(snapshot.state.tabs, tabRefs(tabsRef.current), baseline)
+        lastSavedTabs.current = JSON.stringify(
+          snapshot.state.tabs.map(({ id, projectId, title, titleLocked }) => ({ id, projectId, title, titleLocked }))
+        )
+        pendingTabs.current = null
+        const remote = new Map(snapshot.tabs.map((tab) => [tab.id, tab]))
+        for (const tab of snapshot.tabs) if (tab.live) terminalBus.expect(tab.id)
+        setState(snapshot.state)
+        setTabs((previous) => {
+          const terminalsByProject: TabsByProject = {}
+          for (const ref of refs) {
+            const old = previous[ref.projectId]?.find((t) => t.id === ref.id)
+            const now = remote.get(ref.id)
+            const tab: Tab = {
+              ...(old?.kind === 'terminal' ? old : {}),
+              kind: 'terminal',
+              id: ref.id,
+              title: ref.title,
+              titleLocked: ref.titleLocked ?? false,
+              live: pendingLaunch.current.has(ref.id) || (now?.live ?? false),
+              agent: now?.agent ?? null,
+              activity: now?.activity
+            }
+            ;(terminalsByProject[ref.projectId] ??= []).push(tab)
+          }
+          const next: TabsByProject = {}
+          for (const pid of new Set([...Object.keys(previous), ...Object.keys(terminalsByProject)])) {
+            const terminals = terminalsByProject[pid] ?? []
+            let index = 0
+            const list = (previous[pid] ?? []).flatMap<Tab>((tab) =>
+              tab.kind === 'file' ? [tab] : terminals[index] ? [terminals[index++]!] : []
+            )
+            list.push(...terminals.slice(index))
+            next[pid] = list
+          }
+          return next
+        })
+        const open = new Set(refs.map((ref) => ref.id))
+        setActiveTab((prev) => {
+          let changed = false
+          const fixed = { ...prev }
+          for (const [pid, active] of Object.entries(prev)) {
+            const isTerminal = (tabsRef.current[pid] ?? []).some((t) => t.id === active && t.kind === 'terminal')
+            if (active && isTerminal && !open.has(active)) {
+              fixed[pid] = refs.filter((ref) => ref.projectId === pid).at(-1)?.id
+              changed = true
+            }
+          }
+          return changed ? fixed : prev
+        })
+      }),
+    []
+  )
   // O main segura o X e o Sair enquanto houver arquivo não salvo; avisado na hora, pelo mesmo motivo do Ctrl+W.
   const markDirty = (tabId: string, dirty: boolean): void => {
     if (dirty) dirtyFiles.current.add(tabId)

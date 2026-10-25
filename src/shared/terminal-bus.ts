@@ -1,24 +1,25 @@
-type Handler = (data: string) => void
+// sequence: a ordem do pedaço no main, para a aba que abre com a foto da tela não repetir o que já está nela.
+type Handler = (data: string, sequence?: number) => void
 
 // O shell começa a escrever (prompt, banner) antes do xterm da aba montar e se inscrever;
 // sem guardar esses chunks a aba abre em branco.
 export class TerminalBus {
   private readonly handlers = new Map<string, Handler>()
-  private readonly pending = new Map<string, string[]>()
+  private readonly pending = new Map<string, { data: string; sequence?: number }[]>()
   // Saída que chega depois de fechar/suspender a aba (o processo morrendo) não tem mais leitor;
   // guardá-la seria acumular memória para sempre.
   private readonly closed = new Set<string>()
 
-  push(id: string, data: string): void {
+  push(id: string, data: string, sequence?: number): void {
     const handler = this.handlers.get(id)
     if (handler) {
-      handler(data)
+      handler(data, sequence)
       return
     }
     if (this.closed.has(id)) return
     const queue = this.pending.get(id)
-    if (queue) queue.push(data)
-    else this.pending.set(id, [data])
+    if (queue) queue.push({ data, sequence })
+    else this.pending.set(id, [{ data, sequence }])
   }
 
   // Chamado antes de (re)abrir o processo da aba: a partir daqui a saída volta a ser guardada até a inscrição.
@@ -32,7 +33,7 @@ export class TerminalBus {
     const queued = this.pending.get(id)
     if (queued) {
       this.pending.delete(id)
-      for (const chunk of queued) handler(chunk)
+      for (const chunk of queued) handler(chunk.data, chunk.sequence)
     }
     return () => {
       if (this.handlers.get(id) === handler) this.handlers.delete(id)

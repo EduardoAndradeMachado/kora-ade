@@ -7,6 +7,10 @@ export default defineConfig({
   main: {},
   preload: {},
   renderer: {
+    // mobile.html é a página que o servidor do celular entrega; sai no mesmo build da janela.
+    build: {
+      rollupOptions: { input: { index: resolve('src/renderer/index.html'), mobile: resolve('src/renderer/mobile.html') } }
+    },
     resolve: {
       alias: {
         '@': resolve('src/renderer/src'),

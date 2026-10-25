@@ -26,7 +26,7 @@ function useNow(intervalMs = 30_000): number {
   return now
 }
 
-function Bar({ percent, className }: { percent: number; className?: string }): React.JSX.Element {
+export function Bar({ percent, className }: { percent: number; className?: string }): React.JSX.Element {
   const value = Math.round(percent)
   return (
     <div
@@ -50,7 +50,7 @@ function Bar({ percent, className }: { percent: number; className?: string }): R
 const resetIn = (w: UsageWindow, now: number): string =>
   w.resetsAt === null ? 'sem reset pendente' : `reseta ${formatResetIn(w.resetsAt - now)}`
 
-function CompactAgent({ usage, now }: { usage: AgentUsage; now: number }): React.JSX.Element {
+export function CompactAgent({ usage, now }: { usage: AgentUsage; now: number }): React.JSX.Element {
   const tight = mostConstrained(usage.windows)
   return (
     <span className="flex min-w-0 items-center gap-1.5">
@@ -74,7 +74,7 @@ function CompactAgent({ usage, now }: { usage: AgentUsage; now: number }): React
   )
 }
 
-function claudeWeekly(claude: AgentUsage): WeeklyUsage | null {
+export function claudeWeekly(claude: AgentUsage): WeeklyUsage | null {
   const weekly = claude.windows.find((w) => w.label === 'Semanal' && w.windowMinutes === 10080)
   return weekly ? { usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt, recordedAt: claude.updatedAt } : null
 }

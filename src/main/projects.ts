@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { PROJECT_NAME_MAX, type KoraState, type ProjectGroup, type SavedTab } from '../shared/state'
 import { descendantIds } from '../shared/groups'
 import type { SessionSummary } from '../shared/ipc'
+import { reconcileTabRefs } from '../shared/tab-sync'
 
 const samePath = (a: string, b: string): boolean =>
   resolve(a).toLowerCase() === resolve(b).toLowerCase()
@@ -94,11 +95,14 @@ export function applyLayout(state: KoraState, layout: SidebarLayout): KoraState 
 }
 
 // O renderer manda a ordem e os títulos das abas; a sessão detectada é do main e não pode ser
-// apagada por um save do renderer que ainda não recebeu a detecção.
+// apagada por um save do renderer que ainda não recebeu a detecção. Com baseline (a lista que o renderer
+// conhecia), só valem as mudanças feitas a partir dela: o que o celular mudou nesse meio-tempo fica.
 export function mergeTabs(
   state: KoraState,
-  incoming: { id: string; projectId: string; title: string; titleLocked?: boolean }[]
+  incoming: { id: string; projectId: string; title: string; titleLocked?: boolean }[],
+  baseline?: { id: string; projectId: string; title: string; titleLocked?: boolean }[]
 ): KoraState {
+  if (baseline) incoming = reconcileTabRefs(state.tabs, incoming, baseline)
   const known = new Map(state.tabs.map((t) => [t.id, t]))
   const projectIds = new Set(state.projects.map((p) => p.id))
   const tabs = incoming

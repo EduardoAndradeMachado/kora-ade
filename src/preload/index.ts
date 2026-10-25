@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'ele
 import type { CloseKind, FilesChange, KoraApi } from '../shared/ipc'
 import type { AgentActivity, AgentSession } from '../shared/agent'
 import type { UpdateStatus } from '../shared/update'
+import type { DesktopSessionState, MobileStatus, TerminalSizeEvent } from '../shared/mobile'
 
 function subscribe<A extends unknown[]>(channel: string, listener: (...args: A) => void): () => void {
   const handler = (_e: IpcRendererEvent, ...args: unknown[]): void => listener(...(args as A))
@@ -96,9 +97,9 @@ const api: KoraApi = {
   projectIcon: (projectId) => ipcRenderer.invoke('project:icon', projectId),
   refreshProjectIcon: (projectId) => ipcRenderer.invoke('project:icon-refresh', projectId),
 
-  saveTabs: (tabs) => ipcRenderer.invoke('tabs:save', tabs),
-  saveTabsNow: (tabs) => {
-    ipcRenderer.sendSync('tabs:save-sync', tabs)
+  saveTabs: (tabs, baseline) => ipcRenderer.invoke('tabs:save', tabs, baseline),
+  saveTabsNow: (tabs, baseline) => {
+    ipcRenderer.sendSync('tabs:save-sync', tabs, baseline)
   },
   setUnsaved: (unsaved) => ipcRenderer.send('app:unsaved', unsaved),
   onCloseRequested: (listener) =>
@@ -123,8 +124,18 @@ const api: KoraApi = {
     subscribe<[]>('terminal:flush-scrollback', () => {
       void Promise.resolve(listener()).finally(() => ipcRenderer.send('terminal:scrollback-flushed'))
     }),
-  onTerminalData: (listener) => subscribe<[string, string]>('terminal:data', listener),
-  onTerminalExit: (listener) => subscribe<[string, number]>('terminal:exit', listener)
+  onTerminalData: (listener) => subscribe<[string, string, number]>('terminal:data', listener),
+  onTerminalExit: (listener) => subscribe<[string, number]>('terminal:exit', listener),
+  terminalSnapshot: (id) => ipcRenderer.invoke('terminal:snapshot', id),
+  takeTerminal: (id) => ipcRenderer.send('terminal:take', id),
+  onTerminalSize: (listener) => subscribe<[TerminalSizeEvent]>('terminal:size', listener),
+  onMobileState: (listener) => subscribe<[DesktopSessionState]>('mobile:state', listener),
+  mobileStatus: () => ipcRenderer.invoke('mobile:status'),
+  setMobileEnabled: (enabled) => ipcRenderer.invoke('mobile:enabled', enabled),
+  onMobileStatus: (listener) => subscribe<[MobileStatus]>('mobile:status', listener),
+  pairMobile: () => ipcRenderer.invoke('mobile:pair'),
+  revokeMobile: (id) => ipcRenderer.invoke('mobile:revoke', id),
+  renameMobile: (id, name) => ipcRenderer.invoke('mobile:rename', id, name)
 }
 
 contextBridge.exposeInMainWorld('kora', api)

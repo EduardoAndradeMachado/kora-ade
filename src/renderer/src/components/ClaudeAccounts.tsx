@@ -11,7 +11,7 @@ import { AgentIcon } from './AgentIcon'
 const EXPIRY_WARNING_MS = 3 * 24 * 60 * 60_000
 
 // A validade do login só aparece quando pede ação: perto de vencer ou vencida.
-function expiryText(account: ClaudeAccount, now: number): { text: string | null; tone: 'ok' | 'warn' | 'expired' } {
+export function expiryText(account: ClaudeAccount, now: number): { text: string | null; tone: 'ok' | 'warn' | 'expired' } {
   const at = account.refreshTokenExpiresAt
   if (at === null) return { text: null, tone: 'ok' }
   if (at <= now) return { text: 'login vencido', tone: 'expired' }
@@ -19,7 +19,7 @@ function expiryText(account: ClaudeAccount, now: number): { text: string | null;
   return { text: null, tone: 'ok' }
 }
 
-function weeklyText(weekly: WeeklyUsage | null, now: number): { text: string; critical: boolean } {
+export function weeklyText(weekly: WeeklyUsage | null, now: number): { text: string; critical: boolean } {
   if (!weekly) return { text: 'Uso semanal ainda não registrado', critical: false }
   if (weekly.resetsAt === null || weekly.resetsAt <= now) return { text: 'Semanal renovado', critical: false }
   return {

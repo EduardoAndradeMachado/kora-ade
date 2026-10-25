@@ -7,6 +7,9 @@ import { is } from '@electron-toolkit/utils'
 import { loadState, saveState } from './store'
 import { addProject, applyLayout, forgetSessionName, mergeTabs, missingProjectIds, namedSessions, relocateProject, removeProject, renameProject, setProjectCollapsed, setTabAgent } from './projects'
 import { Terminals } from './terminals'
+import { MobileServer } from './mobile-server'
+import { MobileRuntime } from './mobile-runtime'
+import { DESKTOP } from './terminal-sizes'
 import { Scrollbacks } from './scrollback'
 import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from './files'
 import { AgentDetector, UNREADABLE } from './agent-detect'
@@ -27,6 +30,7 @@ import { autoUpdater } from 'electron-updater'
 import { createErrorLog, errorText } from './error-log'
 import { startUpdates, type Updates } from './updater'
 import type { UpdateStatus } from '../shared/update'
+import type { MobileStatus } from '../shared/mobile'
 import { resolveTerminalLink } from './terminal-links'
 import {
   gitBranches,
@@ -99,12 +103,25 @@ function registerLaunch(tabId: string, pid: number): void {
   })
 }
 
+let mobileServer: MobileServer | null = null
+let mobileRuntime: MobileRuntime | null = null
+
+// Só para mudanças feitas pelo celular: as do PC já estão na interface que as fez.
+function mobileChanged(): void {
+  mobileServer?.publishState()
+  if (mobileRuntime) mainWindow?.webContents.send('mobile:state', { state, tabs: mobileRuntime.snapshot().tabs })
+}
+
 const terminals = new Terminals({
-  onData: (id, data) => mainWindow?.webContents.send('terminal:data', id, data),
+  onData: (id, data, sequence) => {
+    mainWindow?.webContents.send('terminal:data', id, data, sequence)
+    mobileServer?.publishData(id, data, sequence)
+  },
   onExit: (id, exitCode, pid) => {
     registry?.remove(pid)
     activities.delete(id)
     mainWindow?.webContents.send('terminal:exit', id, exitCode)
+    mobileServer?.publishState()
   },
   onSpawn: (id, pid) => {
     job?.assign(pid)
@@ -119,6 +136,7 @@ const watchers = new ProjectWatchers((projectId, change) => {
   const gone = project !== undefined && !isDirectory(project.path)
   if (gone) watchers.unwatch(projectId)
   mainWindow?.webContents.send('fs:changed', projectId, gone ? { ...change, rescan: true } : change)
+  if (gone) mobileServer?.publishState()
 })
 
 const agentDirs = {
@@ -169,6 +187,7 @@ const agentFolders = new FolderWatch(
 function commit(next: KoraState): KoraState {
   saveState(stateFile, next)
   state = next
+  mobileServer?.publishState()
   return state
 }
 
@@ -233,6 +252,7 @@ function setActivity(tabId: string, activity: AgentActivity | null): void {
   if ((activities.get(tabId) ?? null) === activity) return
   activities.set(tabId, activity)
   mainWindow?.webContents.send('tab:activity', tabId, activity)
+  mobileServer?.publishState()
 }
 
 function detectAgents(): void {
@@ -437,6 +457,56 @@ function projectRoot(id: string): string {
   const project = state.projects.find((p) => p.id === id)
   if (!project) throw new Error(`Projeto desconhecido: ${id}`)
   return project.path
+}
+
+// O vínculo manual pode chegar antes do save debounced do renderer; a aba entra no estado aqui.
+function ensureTab(tab: TabRef): void {
+  projectRoot(tab.projectId)
+  if (!state.tabs.some((t) => t.id === tab.id)) {
+    commit({ ...state, tabs: [...state.tabs, { ...tab, titleLocked: tab.titleLocked ?? false, agent: null }] })
+  }
+}
+
+function launchTerminal(tab: TabRef, cols: number, rows: number, launch: Launch): void {
+  const cwd = projectRoot(tab.projectId)
+  ensureTab(tab)
+  let startup: Startup | undefined
+  if (launch.type === 'claude') {
+    const sessionId = randomUUID()
+    startup = { kind: 'claude', mode: 'new', sessionId }
+    bindAgent(tab.id, { kind: 'claude', sessionId })
+  } else if (launch.type === 'codex') {
+    startup = { kind: 'codex', mode: 'new' }
+  } else if (launch.type === 'opencode') {
+    // A CLI cria a conversa no primeiro pedido com este mesmo ID; a aba já fica vinculada.
+    const sessionId = newOpencodeSessionId()
+    startup = { kind: 'opencode', mode: 'new', sessionId }
+    bindAgent(tab.id, { kind: 'opencode', sessionId })
+  } else if (launch.type === 'resume') {
+    const agent = AgentSessionSchema.parse(launch.agent)
+    startup = { kind: agent.kind, mode: 'resume', sessionId: agent.sessionId }
+  }
+  // A interface pode achar que a aba está adormecida enquanto o pty antigo ainda vive
+  // (ex.: renderer recarregado); o pedido novo substitui o antigo em vez de falhar.
+  terminals.kill(tab.id)
+  terminals.spawn(tab.id, cwd, cols, rows, startup)
+}
+
+// Com a conexão ligada o main mantém a cópia das telas; desligada, o custo de interpretar a saída some.
+async function setMobileEnabled(enabled: boolean): Promise<MobileStatus> {
+  const server = mobileServer!
+  if (!enabled) {
+    const status = await server.stop()
+    terminals.setMirroring(false)
+    return status
+  }
+  terminals.setMirroring(true)
+  try {
+    return await server.start()
+  } catch (err) {
+    terminals.setMirroring(false)
+    throw err
+  }
 }
 
 function registerIpc(): void {
@@ -767,22 +837,15 @@ function registerIpc(): void {
     if ((kind === 'hide' || kind === 'quit') && answer === 'proceed') proceedClose(kind)
   })
 
-  ipcMain.on('tabs:save-sync', (event, tabs: TabRef[]) => {
-    commit(mergeTabs(state, tabs))
+  ipcMain.on('tabs:save-sync', (event, tabs: TabRef[], baseline?: TabRef[]) => {
+    commit(mergeTabs(state, tabs, baseline))
     pruneScrollbacks()
     event.returnValue = true
   })
-  ipcMain.handle('tabs:save', (_e, tabs: TabRef[]) => {
-    commit(mergeTabs(state, tabs))
+  ipcMain.handle('tabs:save', (_e, tabs: TabRef[], baseline?: TabRef[]) => {
+    commit(mergeTabs(state, tabs, baseline))
     pruneScrollbacks()
   })
-  // O vínculo manual pode chegar antes do save debounced do renderer; a aba entra no estado aqui.
-  const ensureTab = (tab: TabRef): void => {
-    projectRoot(tab.projectId)
-    if (!state.tabs.some((t) => t.id === tab.id)) {
-      commit({ ...state, tabs: [...state.tabs, { ...tab, titleLocked: tab.titleLocked ?? false, agent: null }] })
-    }
-  }
 
   ipcMain.handle('tab:set-agent', (_e, tab: TabRef, agent: unknown) => {
     ensureTab(tab)
@@ -790,37 +853,29 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('terminal:spawn', (_e, tab: TabRef, cols: number, rows: number, launch: Launch) => {
-      const cwd = projectRoot(tab.projectId)
-      ensureTab(tab)
-      let startup: Startup | undefined
-      if (launch.type === 'claude') {
-        const sessionId = randomUUID()
-        startup = { kind: 'claude', mode: 'new', sessionId }
-        bindAgent(tab.id, { kind: 'claude', sessionId })
-      } else if (launch.type === 'codex') {
-        startup = { kind: 'codex', mode: 'new' }
-      } else if (launch.type === 'opencode') {
-        // A CLI cria a conversa no primeiro pedido com este mesmo ID; a aba já fica vinculada.
-        const sessionId = newOpencodeSessionId()
-        startup = { kind: 'opencode', mode: 'new', sessionId }
-        bindAgent(tab.id, { kind: 'opencode', sessionId })
-      } else if (launch.type === 'resume') {
-        const agent = AgentSessionSchema.parse(launch.agent)
-        startup = { kind: agent.kind, mode: 'resume', sessionId: agent.sessionId }
-      }
-      // A interface pode achar que a aba está adormecida enquanto o pty antigo ainda vive
-      // (ex.: renderer recarregado); o pedido novo substitui o antigo em vez de falhar.
-      terminals.kill(tab.id)
-      terminals.spawn(tab.id, cwd, cols, rows, startup)
+    launchTerminal(tab, cols, rows, launch)
+    mobileRuntime!.launched(tab.id, DESKTOP, { cols, rows })
   })
   ipcMain.handle('clipboard:save-image', (_e, bytes: Uint8Array, mime: string) =>
     savePastedImage(join(app.getPath('temp'), 'kora-paste'), bytes, mime)
   )
   ipcMain.on('terminal:write', (_e, id: string, data: string) => terminals.write(id, data))
   ipcMain.on('terminal:resize', (_e, id: string, cols: number, rows: number) =>
-    terminals.resize(id, cols, rows)
+    mobileRuntime!.desktopSize(id, { cols, rows })
   )
+  ipcMain.on('terminal:take', (_e, id: string) => mobileRuntime!.desktopTake(id))
+  ipcMain.handle('terminal:snapshot', async (_e, id: unknown) => {
+    const key = String(id)
+    const snapshot = await terminals.snapshot(key)
+    const size = mobileRuntime!.sizes.current(key)
+    return { snapshot, size: size ? { id: key, ...size } : null }
+  })
   ipcMain.on('terminal:kill', (_e, id: string) => terminals.kill(id))
+  ipcMain.handle('mobile:status', () => mobileServer!.status())
+  ipcMain.handle('mobile:enabled', (_e, enabled: unknown) => setMobileEnabled(z.boolean().parse(enabled)))
+  ipcMain.handle('mobile:pair', () => mobileServer!.invite())
+  ipcMain.handle('mobile:revoke', (_e, id: unknown) => mobileServer!.revoke(String(id)))
+  ipcMain.handle('mobile:rename', (_e, id: unknown, name: unknown) => mobileServer!.rename(String(id), String(name)))
   ipcMain.handle('terminal:scrollback-save', (_e, id: unknown, text: unknown) => {
     const key = String(id)
     // Save atrasado de aba já removida não pode ressuscitar o arquivo que o prune acabou de apagar.
@@ -955,10 +1010,46 @@ void app.whenReady().then(() => {
   lag = createLagMonitor({ intervalMs: 100, thresholdMs: 300, write: lagLog })
   traceIpc()
   registerIpc()
+  mobileRuntime = new MobileRuntime({
+    state: () => state,
+    commit,
+    terminals,
+    activities,
+    launch: launchTerminal,
+    changed: mobileChanged,
+    sized: (id, change) => {
+      mainWindow?.webContents.send('terminal:size', { id, ...change })
+      mobileServer?.publishSize({ id, ...change })
+    },
+    icon: (id, path) => projectIcons.get(id, path),
+    usage: () => usage.read(),
+    accounts: () => claudeAccounts.list(),
+    switchAccount: async (id) => {
+      await claudeAccounts.switchTo(id)
+      usage.forget('claude')
+    },
+    relocated: async (id, path) => {
+      watchers.unwatch(id)
+      await projectIcons.refresh(id, path).catch(() => null)
+      mainWindow?.webContents.send('fs:changed', id, { dirs: [], files: [], allFiles: true, git: true, ignoreRules: true, rescan: true })
+    }
+  })
+  mobileServer = new MobileServer({
+    configFile: join(app.getPath('userData'), 'mobile.json'),
+    rendererDir: join(__dirname, '../renderer'),
+    devUrl: is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined,
+    devAssetRoots: [join(app.getAppPath(), 'node_modules'), join(app.getAppPath(), 'src/shared')],
+    androidDir: join(app.getAppPath(), 'resources', 'android'),
+    imageDir: join(app.getPath('temp'), 'kora-paste'),
+    runtime: mobileRuntime,
+    changed: mobileChanged,
+    statusChanged: (status) => mainWindow?.webContents.send('mobile:status', status)
+  })
   setInterval(detectAgents, DETECT_FALLBACK_MS)
   agentFolders.start()
   createWindow()
   createTray()
+  if (mobileServer.pairing.enabled) void setMobileEnabled(true).catch((err) => console.error('[kora] conexão com o celular', err))
   // KORA_UPDATE_FEED aponta para um servidor local nos testes de atualização; o normal são as Releases do GitHub.
   const feed = process.env['KORA_UPDATE_FEED']
   if (app.isPackaged) {

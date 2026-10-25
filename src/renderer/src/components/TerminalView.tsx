@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -14,6 +14,8 @@ import { cn } from '@/lib/utils'
 import { FILE_MIME } from '@/lib/drag'
 import { isCopiedPath } from '@/lib/copied-path'
 import { findPathCandidates } from '@shared/terminal-links'
+import { DESKTOP, type MobileDevice, type TerminalSizeEvent } from '@shared/mobile'
+import { Button } from '@/brand/Button'
 
 const cssVar = (name: string): string =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -47,6 +49,27 @@ const RESTORE_TIMEOUT_MS = 800
 // O que veio antes é uma foto de um processo que não existe mais; o divisor evita ler como se fosse ao vivo.
 const RESTORED_DIVIDER = '\x1b[2m── conteúdo anterior (processo encerrado) ──\x1b[22m\r\n'
 
+// Mesma altura da faixa em main.css (.terminal-phone): o terminal começa logo abaixo dela.
+const STRIP_HEIGHT = 44
+// O fit desconta a barra de rolagem do xterm da largura; a conta feita à mão desconta igual.
+const SCROLLBAR_WIDTH = 14
+const MAX_ZOOM_FONT = 32
+
+function useDeviceName(id: string | null): string | null {
+  const [devices, setDevices] = useState<MobileDevice[]>([])
+  useEffect(() => {
+    if (!id) return
+    let alive = true
+    void window.kora.mobileStatus().then((status) => { if (alive) setDevices(status.devices) }, () => {})
+    const off = window.kora.onMobileStatus((status) => setDevices(status.devices))
+    return () => {
+      alive = false
+      off()
+    }
+  }, [id])
+  return id ? (devices.find((device) => device.id === id)?.name ?? null) : null
+}
+
 interface Props {
   id: string
   visible: boolean
@@ -72,6 +95,13 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
   onReadyRef.current = onReady
   const onOpenPathRef = useRef(onOpenPath)
   onOpenPathRef.current = onOpenPath
+  // Celular usando o terminal: o pty está no tamanho dele e a janela só mostra, sem refazer o fit.
+  const [phone, setPhone] = useState<string | null>(null)
+  const phoneName = useDeviceName(phone)
+  const fontSizeRef = useRef(fontSize)
+  fontSizeRef.current = fontSize
+  const remoteRef = useRef(false)
+  const syncSizeRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     const container = containerRef.current!
@@ -113,6 +143,7 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
     const unregisterScrollback = registerScrollback(id, () => screenText(term.buffer.active))
 
     term.attachCustomKeyEventHandler((event) => {
+      if (event.type === 'keydown' && remoteRef.current) window.kora.takeTerminal(id)
       const key = event.key.toLowerCase()
       const copy = event.type === 'keydown' && event.ctrlKey && !event.altKey && key === 'c'
       if (copy && (event.shiftKey || term.hasSelection())) {
@@ -183,13 +214,67 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
       }
     })
 
-    const unsubscribe = terminalBus.subscribe(id, (data) => term.write(data))
+    // Até a foto da tela chegar, a saída espera: aba aberta pelo celular já tem conteúdo que a janela não viu.
+    let hydrated = false
+    const queued: { data: string; sequence?: number }[] = []
+    const unsubscribe = terminalBus.subscribe(id, (data, sequence) => {
+      if (hydrated) term.write(data)
+      else queued.push({ data, sequence })
+    })
     const input = term.onData((data) => window.kora.writeTerminal(id, data))
-    const resize = term.onResize(({ cols, rows }) => window.kora.resizeTerminal(id, cols, rows))
+    const resize = term.onResize(({ cols, rows }) => {
+      if (!remoteRef.current) window.kora.resizeTerminal(id, cols, rows)
+    })
     const title = term.onTitleChange((raw) => {
       const t = meaningfulTitle(raw)
       if (t) onTitleRef.current(t)
     })
+    // A letra cresce até o terminal do celular ocupar o painel. Só a janela muda; o pty segue no tamanho do celular.
+    const layoutPhone = (): void => {
+      const base = fontSizeRef.current
+      const cell = term.dimensions?.css.cell
+      if (remoteRef.current && cell?.width) {
+        const ratio = base / (term.options.fontSize ?? base)
+        const scale = Math.min(
+          container.clientWidth / (term.cols * cell.width * ratio),
+          (container.clientHeight - STRIP_HEIGHT) / (term.rows * cell.height * ratio)
+        )
+        const next = Math.max(base, Math.min(MAX_ZOOM_FONT, Math.floor(base * scale)))
+        if (term.options.fontSize !== next) term.options.fontSize = next
+      } else if (term.options.fontSize !== base) {
+        term.options.fontSize = base
+      }
+    }
+    // Com o celular no comando, a janela informa o tamanho que quer sem aplicar; vale quando o PC voltar.
+    // A letra ampliada não conta: o tamanho que o PC quer é medido na letra normal.
+    const syncSize = (): void => {
+      if (!remoteRef.current) {
+        fit.fit()
+        return
+      }
+      const cell = term.dimensions?.css.cell
+      const ratio = fontSizeRef.current / (term.options.fontSize ?? fontSizeRef.current)
+      const wanted = ratio === 1 ? fit.proposeDimensions() : cell?.width ? {
+        cols: Math.max(2, Math.floor((container.clientWidth - SCROLLBAR_WIDTH) / (cell.width * ratio))),
+        rows: Math.max(1, Math.floor(container.clientHeight / (cell.height * ratio)))
+      } : undefined
+      if (wanted) window.kora.resizeTerminal(id, wanted.cols, wanted.rows)
+      layoutPhone()
+    }
+    syncSizeRef.current = syncSize
+    const applySize = (event: TerminalSizeEvent): void => {
+      if (event.id !== id) return
+      const isRemote = event.holder !== DESKTOP
+      if (isRemote && (term.cols !== event.cols || term.rows !== event.rows)) {
+        remoteRef.current = true
+        term.resize(event.cols, event.rows)
+      }
+      remoteRef.current = isRemote
+      setPhone(isRemote ? event.holder : null)
+      layoutPhone()
+      if (!isRemote) fit.fit()
+    }
+    const offSize = window.kora.onTerminalSize(applySize)
 
     let ready = false
     let restored = false
@@ -199,11 +284,25 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
       ready = true
       onReadyRef.current(term.cols, term.rows)
     }
+    const hydrate = (current: Awaited<ReturnType<typeof window.kora.terminalSnapshot>> | null): void => {
+      if (disposed) return
+      const snapshot = current?.snapshot ?? null
+      if (current?.size && current.size.holder !== DESKTOP) applySize(current.size)
+      else if (snapshot) term.resize(snapshot.cols, snapshot.rows)
+      if (snapshot) term.write(snapshot.data)
+      for (const chunk of queued) {
+        if (!snapshot || chunk.sequence === undefined || chunk.sequence > snapshot.sequence) term.write(chunk.data)
+      }
+      queued.length = 0
+      hydrated = true
+      if (snapshot && !remoteRef.current) fit.fit()
+    }
     const finishRestore = (saved: string | null): void => {
       if (restored || disposed) return
       clearTimeout(restoreTimer)
       restored = true
       if (saved) term.write(`${saved.replace(/\r?\n/g, '\r\n')}\r\n${RESTORED_DIVIDER}`)
+      void window.kora.terminalSnapshot(id).then(hydrate, () => hydrate(null))
       markReady()
     }
     // O spawn espera o histórico: assim o shell novo imprime depois do divisor, não no meio dele.
@@ -211,7 +310,7 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
     void window.kora.loadScrollback(id).then(finishRestore, () => finishRestore(null))
     const observer = new ResizeObserver(() => {
       if (container.offsetWidth === 0 || container.offsetHeight === 0) return
-      fit.fit()
+      syncSize()
       markReady()
     })
     observer.observe(container)
@@ -228,6 +327,7 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
       container.removeEventListener('paste', onPaste, true)
       pathLinks.dispose()
       observer.disconnect()
+      offSize()
       title.dispose()
       resize.dispose()
       input.dispose()
@@ -242,7 +342,7 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
     const term = termRef.current
     if (!term || term.options.fontSize === fontSize) return
     term.options.fontSize = fontSize
-    fitRef.current?.fit()
+    syncSizeRef.current()
   }, [fontSize])
 
   // WebGL só na aba visível: cada contexto custa ~22 MB de GPU e o Chromium tolera ~16 ao mesmo tempo.
@@ -271,7 +371,7 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
       }
     }
     const frame = requestAnimationFrame(() => {
-      fitRef.current?.fit()
+      syncSizeRef.current()
       term.focus()
     })
     return () => cancelAnimationFrame(frame)
@@ -300,7 +400,36 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
       }}
       onDrop={onDrop}
     >
-      <div ref={containerRef} className="h-full w-full" />
+      {/* O container continua do tamanho da janela: é ele que o fit mede para guardar o tamanho que o PC quer
+          quando voltar. Só o .xterm muda de lugar (main.css). */}
+      <div ref={containerRef} className={cn('h-full w-full', phone && 'terminal-phone')} />
+      {phone && (
+        <div
+          role="status"
+          className="absolute inset-x-0 top-0 flex items-center gap-3 border-b border-[color-mix(in_oklab,var(--brand-amber)_45%,transparent)] bg-[color-mix(in_oklab,var(--brand-amber)_14%,var(--card))] px-4 text-xs text-foreground"
+          style={{ height: STRIP_HEIGHT }}
+        >
+          <span className="relative flex size-2 shrink-0">
+            <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500 opacity-60" />
+            <span className="relative size-2 rounded-full bg-emerald-500" />
+          </span>
+          <span className="min-w-0 truncate">
+            Em uso no celular <strong className="font-semibold">{phoneName ?? 'Celular'}</strong>
+            <span className="text-muted-foreground"> · digite aqui para voltar ao PC</span>
+          </span>
+          <span className="flex-1" />
+          <Button
+            className="shrink-0 py-1.5"
+            aria-label={`Em uso no celular ${phoneName ?? ''}. Usar no PC`}
+            onClick={() => {
+              window.kora.takeTerminal(id)
+              termRef.current?.focus()
+            }}
+          >
+            Usar no PC
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
