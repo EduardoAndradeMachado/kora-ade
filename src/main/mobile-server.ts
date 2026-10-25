@@ -377,6 +377,11 @@ export class MobileServer {
           }
         }
         if (url.pathname === '/api/device') {
+          if (request.method === 'DELETE') {
+            this.revoke(device)
+            response.setHeader('set-cookie', `${this.cookieName()}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`)
+            return json(response, 200, {})
+          }
           if (request.method === 'POST') this.rename(device, z.object({ name: DeviceNameSchema }).parse(await this.body(request)).name)
           else if (request.method !== 'GET') return json(response, 405, { error: 'Método não permitido.' })
           return json(response, 200, { id: device, name: this.pairing.devices.find((d) => d.id === device)?.name ?? '' })

@@ -17,7 +17,9 @@ class DescobertaTest {
 
     @Test
     fun conviteSoAceitaOQrDoKora() {
-        assertEquals(Convite("192.168.0.10", "abc-123"), lerConvite("http://192.168.0.10:43127/#pair=abc-123"))
+        assertEquals(Convite("192.168.0.10", 43127, "abc-123"), lerConvite("http://192.168.0.10:43127/#pair=abc-123"))
+        // O Kora Dev fica noutra porta, para os dois do mesmo PC estarem ligados juntos.
+        assertEquals(Convite("192.168.0.10", 43128, "xyz"), lerConvite("http://192.168.0.10:43128/#pair=xyz"))
         assertNull(lerConvite("https://192.168.0.10:43127/#pair=abc"))
         assertNull(lerConvite("http://192.168.0.10:8080/#pair=abc"))
         assertNull(lerConvite("http://exemplo.com:43127/#pair=abc"))

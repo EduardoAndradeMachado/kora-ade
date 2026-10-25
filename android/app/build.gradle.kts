@@ -21,8 +21,8 @@ android {
         minSdk = 30
         targetSdk = 37
         // O Kora do PC compara este número com o do app instalado para oferecer a atualização.
-        versionCode = 9
-        versionName = "0.2.5"
+        versionCode = 10
+        versionName = "0.3.0"
     }
 
     signingConfigs {

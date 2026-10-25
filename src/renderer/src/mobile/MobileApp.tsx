@@ -182,8 +182,9 @@ export function MobileApp(): React.JSX.Element {
     <h1>Kora no celular</h1>
     <p>{error}</p>
     <p>No PC, abra Configurações → Celular → Nova conexão e leia o QR code.</p>
-    {koraApp() && <div className="app-actions"><button className="primary" onClick={() => koraApp()!.lerQr()}>Ler QR code do PC</button><button onClick={() => koraApp()!.escolherPc()}>Procurar outro PC</button></div>}
-    <button onClick={() => void run(refresh)}>Tentar novamente</button>
+    {koraApp()
+      ? <div className="app-actions"><button className="primary" onClick={() => koraApp()!.lerQr()}>Ler QR code do PC</button><button onClick={() => koraApp()!.escolherPc()}>Trocar de PC</button></div>
+      : <button onClick={() => void run(refresh)}>Tentar novamente</button>}
   </div></main>
 
   const project = state.projects.find((project) => project.id === projectId)

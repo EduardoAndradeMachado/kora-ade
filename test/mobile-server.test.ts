@@ -335,6 +335,18 @@ describe('acesso ao servidor do celular', () => {
     expect(new MobilePairingStore(a.config).serverId).toBe(idA)
   })
 
+  it('o celular que esquece o PC sai do pareamento: o cookie dele para de valer e o outro celular continua', async () => {
+    const s = await setup()
+    const { code } = s.server.pairing.invite()
+    const other = (await fetch(`${s.url}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, name: 'Outro' }) })).headers.get('set-cookie')!.split(';')[0]!
+    const left = await fetch(`${s.url}/api/device`, { method: 'DELETE', headers: { cookie: s.cookie } })
+    expect(left.status).toBe(200)
+    expect(left.headers.get('set-cookie')).toMatch(/Max-Age=0/)
+    expect((await fetch(`${s.url}/api/state`, { headers: { cookie: s.cookie } })).status).toBe(401)
+    expect(s.server.pairing.devices.map((d) => d.name)).toEqual(['Outro'])
+    expect((await fetch(`${s.url}/api/state`, { headers: { cookie: other } })).status).toBe(200)
+  })
+
   it('health informa início congelado e desabilita cache', async () => {
     const { url } = await setup()
     const first = await fetch(`${url}/health`)
