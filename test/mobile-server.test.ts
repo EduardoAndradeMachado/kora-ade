@@ -240,8 +240,9 @@ describe('acesso ao servidor do celular', () => {
     expect((await pair()).status).toBe(200)
     expect((await pair()).status).toBe(400)
     const { MobilePairingStore } = await import('../src/main/mobile-pairing')
-    expect(new MobilePairingStore(config).authenticate(cookie.slice(12))).toBe(device)
-    expect(readFileSync(config, 'utf8')).not.toContain(cookie.slice(12).split('.')[1])
+    const token = cookie.slice(cookie.indexOf('=') + 1)
+    expect(new MobilePairingStore(config).authenticate(token)).toBe(device)
+    expect(readFileSync(config, 'utf8')).not.toContain(token.split('.')[1])
     server.revoke(device)
     expect((await fetch(`${url}/api/state`, { headers: { cookie } })).status).toBe(401)
   })
@@ -313,6 +314,25 @@ describe('acesso ao servidor do celular', () => {
     const huge = await post({ cookie: s.cookie, 'content-type': 'image/jpeg' }, Buffer.alloc(21 * 1024 * 1024))
     expect(huge.status).toBe(413)
     expect(existsSync(join(s.dir, 'imagens'))).toBe(true)
+  })
+
+  it('dois Kora no mesmo PC ficam pareados juntos: cada um lê o cookie dele, e o cookie antigo ainda vale', async () => {
+    const a = await setup()
+    const b = await setup()
+    const idA = (await (await fetch(`${a.url}/health`)).json()).id
+    const idB = (await (await fetch(`${b.url}/health`)).json()).id
+    expect(idA).not.toBe(idB)
+    expect(a.cookie.startsWith(`kora-device-${idA}=`)).toBe(true)
+    // O navegador manda os dois cookies para os dois (cookie não separa por porta): cada um acha o seu.
+    const both = `${a.cookie}; ${b.cookie}`
+    expect(await (await fetch(`${a.url}/api/state`, { headers: { cookie: both } })).json()).toMatchObject({ deviceId: a.device })
+    expect(await (await fetch(`${b.url}/api/state`, { headers: { cookie: both } })).json()).toMatchObject({ deviceId: b.device })
+    // Pareamento de antes do id no nome do cookie continua valendo.
+    const legacy = `kora-device=${a.cookie.slice(a.cookie.indexOf('=') + 1)}`
+    expect((await fetch(`${a.url}/api/state`, { headers: { cookie: legacy } })).status).toBe(200)
+    // O id fica guardado: o mesmo Kora reaberto continua com o mesmo id e reconhece o cookie.
+    const { MobilePairingStore } = await import('../src/main/mobile-pairing')
+    expect(new MobilePairingStore(a.config).serverId).toBe(idA)
   })
 
   it('health informa início congelado e desabilita cache', async () => {

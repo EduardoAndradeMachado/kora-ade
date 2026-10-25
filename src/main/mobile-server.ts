@@ -88,6 +88,8 @@ export class MobileServer {
     imageDir?: string
     // Decodificadores, fontes e mapas que o pdf.js do celular busca por URL (scripts/pdfjs-assets.ts).
     pdfjsDir?: string
+    // O app do celular mostra "(Dev)" no nome: os dois Kora do mesmo PC têm o mesmo nome de computador.
+    edition?: 'dev' | 'prod'
     runtime: MobileRuntime
     changed(): void
     // Pareou, renomeou, desvinculou, abriu ou fechou o Kora no celular: a tela do PC atualiza na hora.
@@ -111,6 +113,19 @@ export class MobileServer {
   }
 
   private notify(): void { this.options.statusChanged?.(this.status()) }
+
+  // Cookie não separa por porta: o Kora instalado e o Dev no mesmo PC mandariam o mesmo cookie e um apagaria o
+  // pareamento do outro. Com o id no nome, cada um lê o seu.
+  private cookieName(): string { return `kora-device-${this.pairing.serverId}` }
+
+  private deviceToken(header: string): string {
+    const cookies = new Map(header.split(';').map((part) => part.trim()).filter(Boolean).map((part) => {
+      const at = part.indexOf('=')
+      return [at < 0 ? part : part.slice(0, at), at < 0 ? '' : part.slice(at + 1)] as const
+    }))
+    // kora-device: o nome de antes do id, para quem já tinha pareado não precisar parear de novo.
+    return cookies.get(this.cookieName()) ?? cookies.get('kora-device') ?? ''
+  }
 
   async start(): Promise<MobileStatus> {
     if (this.server) return this.status()
@@ -304,7 +319,7 @@ export class MobileServer {
         const minutes = Math.floor((uptime % 3600) / 60)
         const human = uptime < 60 ? `${uptime}s` : hours ? `${hours}h ${minutes}m` : `${minutes}m`
         // app e name: o app do celular varre a rede atrás deste endereço e mostra o PC pelo nome.
-        return json(response, 200, { app: 'kora', name: hostname(), started_at: new Date(this.started).toISOString(), uptime_seconds: uptime, uptime_human: human })
+        return json(response, 200, { app: 'kora', id: this.pairing.serverId, name: hostname(), edition: this.options.edition ?? 'prod', started_at: new Date(this.started).toISOString(), uptime_seconds: uptime, uptime_human: human })
       }
       // Sem pareamento: o app precisa se atualizar mesmo antes de parear de novo, e o APK não tem nada secreto.
       if ((url.pathname === '/app/android.json' || url.pathname === '/app/kora-celular.apk') && request.method === 'GET') {
@@ -319,13 +334,13 @@ export class MobileServer {
       if (url.pathname === '/api/pair' && request.method === 'POST') {
         const { code, name } = PairSchema.parse(await this.body(request))
         const token = this.pairing.pair(code, name)
-        response.setHeader('set-cookie', `kora-device=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`)
+        response.setHeader('set-cookie', `${this.cookieName()}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`)
         this.options.changed()
         this.notify()
         return json(response, 200, { ok: true })
       }
       if (url.pathname.startsWith('/api/')) {
-        const token = request.headers.cookie?.split(';').map((s) => s.trim()).find((s) => s.startsWith('kora-device='))?.slice(12) ?? ''
+        const token = this.deviceToken(request.headers.cookie ?? '')
         const device = this.pairing.authenticate(token)
         if (!device) return json(response, 401, { error: 'Pareie este celular pelo QR code no PC.' })
         if (url.pathname === '/api/state' && request.method === 'GET') return json(response, 200, { deviceId: device, state: this.options.runtime.snapshot() })

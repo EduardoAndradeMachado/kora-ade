@@ -3,7 +3,9 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { z } from 'zod'
 
 const DeviceSchema = z.object({ id: z.string(), name: z.string(), pairedAt: z.string(), hash: z.string() })
-const ConfigSchema = z.object({ enabled: z.boolean(), devices: z.array(DeviceSchema).max(20) })
+// serverId: identidade desta instalação do Kora (o instalado e o Dev têm pastas de dados diferentes). O celular
+// guarda um pareamento por id, e os dois Kora do mesmo PC convivem pareados no mesmo celular.
+const ConfigSchema = z.object({ enabled: z.boolean(), devices: z.array(DeviceSchema).max(20), serverId: z.string().regex(/^[\w-]{8,32}$/).optional() })
 const digest = (value: string): string => createHash('sha256').update(value).digest('hex')
 const equal = (a: string, b: string): boolean => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b))
 const deviceName = (name: string): string => name.trim().slice(0, 60) || 'Celular'
@@ -14,7 +16,13 @@ export class MobilePairingStore {
 
   constructor(private readonly file: string) {
     this.config = existsSync(file) ? ConfigSchema.parse(JSON.parse(readFileSync(file, 'utf8'))) : { enabled: false, devices: [] }
+    if (!this.config.serverId) {
+      this.config.serverId = randomBytes(9).toString('base64url')
+      this.save()
+    }
   }
+
+  get serverId(): string { return this.config.serverId! }
 
   get enabled(): boolean { return this.config.enabled }
   get devices(): { id: string; name: string; pairedAt: string }[] {
