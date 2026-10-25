@@ -420,7 +420,9 @@ export class MobileServer {
       if (!(allowedFs || pathname === '/mobile.html' || pathname === '/mobile.webmanifest' || pathname === '/mobile-icon.svg' || pathname.startsWith('/src/') || pathname.startsWith('/node_modules/.vite/') || pathname.startsWith('/@vite/') || pathname === '/@react-refresh')) {
         return json(response, 404, { error: 'Arquivo não encontrado.' })
       }
-      const resource = await fetch(new URL(path, this.options.devUrl), { signal: AbortSignal.timeout(5000) })
+      // Na primeira carga o Vite segura os arquivos até terminar de preparar as dependências (CodeMirror, pdf.js);
+      // com a máquina ocupada isso passa de 5 s, e a página do celular não subia.
+      const resource = await fetch(new URL(path, this.options.devUrl), { signal: AbortSignal.timeout(30000) })
       response.writeHead(resource.status, { 'content-type': resource.headers.get('content-type') ?? 'text/plain' })
       response.end(Buffer.from(await resource.arrayBuffer()))
       return
