@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { chromium, expect as browserExpect } from '@playwright/test'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -236,9 +236,18 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await browserExpect(page.getByRole('dialog')).toBeVisible()
     // A listagem inicial (pasta pessoal) sobrescreve o campo quando termina: só digitar depois dela.
     await browserExpect(page.locator('.folder-entries')).toHaveAttribute('aria-busy', 'false')
+    // O caminho digitado fica atrás do ícone; a trilha leva às pastas de cima por toque.
+    await browserExpect(page.getByRole('textbox', { name: 'Caminho no PC', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Digitar caminho', exact: true }).click()
     await page.getByRole('textbox', { name: 'Caminho no PC', exact: true }).fill(newFolder)
     await page.getByRole('button', { name: 'Abrir caminho', exact: true }).click()
-    await browserExpect(page.locator('.folder-selected')).toHaveText(newFolder)
+    const trail = page.getByRole('navigation', { name: 'Pasta atual' })
+    await browserExpect(trail.locator('[aria-current="location"]')).toHaveText('Novo projeto real')
+    await trail.getByRole('button', { name: basename(dir), exact: true }).click()
+    await browserExpect(trail.locator('[aria-current="location"]')).toHaveText(basename(dir))
+    await page.locator('.folder-entries').getByRole('button', { name: 'Novo projeto real' }).click()
+    await browserExpect(page.locator('.folder-selected')).toHaveText('Novo projeto real')
+    await page.screenshot({ path: join(artifacts, 'novo-projeto-350.png') })
     await page.getByRole('button', { name: 'Adicionar projeto', exact: true }).click()
     await browserExpect(page.getByRole('heading', { name: 'Novo projeto real', exact: true })).toBeVisible()
     expect(runtime.snapshot().projects).toHaveLength(2)
@@ -250,9 +259,10 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     mobile.publishState()
     await page.getByRole('button', { name: 'Revincular', exact: true }).click()
     await browserExpect(page.locator('.folder-entries')).toHaveAttribute('aria-busy', 'false')
+    await page.getByRole('button', { name: 'Digitar caminho', exact: true }).click()
     await page.getByRole('textbox', { name: 'Caminho no PC', exact: true }).fill(relocated)
     await page.getByRole('button', { name: 'Abrir caminho', exact: true }).click()
-    await browserExpect(page.locator('.folder-selected')).toHaveText(relocated)
+    await browserExpect(page.locator('.folder-selected')).toHaveText('Pasta corrigida')
     await page.getByRole('button', { name: 'Revincular pasta', exact: true }).click()
     await browserExpect(page.getByRole('dialog')).toHaveCount(0)
     expect(runtime.snapshot().missingProjectIds).toEqual([])

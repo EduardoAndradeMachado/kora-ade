@@ -138,6 +138,11 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .folder-shortcuts { display: flex; overflow-x: auto; gap: 6px; padding: 0 16px 12px; scrollbar-width: none; flex-shrink: 0; }
 .folder-shortcuts button { white-space: nowrap; flex-shrink: 0; font-size: 11px; min-height: 36px; padding: 6px 10px; }
 .folder-shortcuts svg { width: 14px; height: 14px; }
+.folder-trail { display: flex; align-items: center; gap: 4px; padding: 0 8px 8px 16px; flex-shrink: 0; }
+.folder-trail nav { display: flex; align-items: center; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.folder-trail nav button { flex-shrink: 0; min-height: 36px; padding: 6px 4px; background: transparent; border: 0; font-size: 12px; white-space: nowrap; color: var(--muted-foreground); }
+.folder-trail nav > span { flex-shrink: 0; padding: 0 2px; color: var(--muted-foreground); }
+.folder-trail nav button[aria-current] { color: var(--foreground); font-weight: 600; }
 .path-form { padding: 0 16px 12px; flex-shrink: 0; }
 .path-form label { font-size: 11px; display: block; color: var(--muted-foreground); margin-bottom: 6px; }
 .path-form > div { display: flex; gap: 6px; }
