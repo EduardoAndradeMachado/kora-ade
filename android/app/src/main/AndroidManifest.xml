@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Para instalar a versão nova do app que vem do Kora do PC. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Microfone do campo de mensagem: o áudio vai ao Kora do PC, que transcreve pelo Transcritor. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- usesCleartextTraffic: o Kora do PC fala HTTP na rede de casa (porta 43127), sem certificado. -->
     <application
