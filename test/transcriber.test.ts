@@ -68,6 +68,14 @@ describe('cliente do Transcritor', () => {
     expect(fake.seen.at(-1)).toMatchObject({ method: 'DELETE', path: `/trabalhos/${id}` })
   })
 
+  it('resposta fora do contrato vira frase, e o trabalho criado ainda é apagado', async () => {
+    const unknown = { ...fixture.post, body: JSON.stringify({ ...JSON.parse(fixture.post.body), estado: 'estado_novo' }) }
+    const fake = await fakeTranscritor((method) => (method === 'POST' ? unknown : fixture.delete))
+    const failure = createTranscriber({ url: fake.url, token })('C:\\a.ogg', new AbortController().signal)
+    await expect(failure).rejects.toThrow('formato que o Kora não conhece')
+    expect(fake.seen.at(-1)).toMatchObject({ method: 'DELETE', path: `/trabalhos/${id}` })
+  })
+
   it('celular que desiste cancela o trabalho no Transcritor', async () => {
     const abort = new AbortController()
     const fake = await fakeTranscritor((method) => {
@@ -78,5 +86,25 @@ describe('cliente do Transcritor', () => {
     })
     await expect(createTranscriber({ url: fake.url, token, pollMs: 5 })('C:\\a.ogg', abort.signal)).rejects.toThrow()
     expect(fake.seen.at(-1)).toMatchObject({ method: 'DELETE', path: `/trabalhos/${id}` })
+  })
+
+  it('desistir interrompe uma consulta que o Transcritor deixou pendurada', async () => {
+    const abort = new AbortController()
+    const seen: string[] = []
+    const server = createServer((request, response) => {
+      seen.push(`${request.method} ${request.url}`)
+      const reply = request.method === 'POST' ? fixture.post : request.method === 'DELETE' ? fixture.delete : null
+      if (!reply) return abort.abort()
+      response.writeHead(reply.status, { 'content-type': reply.contentType ?? 'application/json' })
+      response.end(reply.body)
+    })
+    servers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+    const started = Date.now()
+    await expect(createTranscriber({ url, token, pollMs: 5 })('C:\\a.ogg', abort.signal)).rejects.toThrow()
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(seen.at(-1)).toBe(`DELETE /trabalhos/${id}`)
+    server.closeAllConnections()
   })
 })

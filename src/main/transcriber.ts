@@ -8,6 +8,8 @@ const DEFAULT_URL = 'http://127.0.0.1:47821'
 const POLL_MS = 500
 // O ditado no PC tem prioridade e pausa os pedidos da API; a espera cobre um ditado longo no meio.
 const TIMEOUT_MS = 5 * 60_000
+// Cada chamada é local e curta: o Transcritor que aceita a conexão e não responde conta como fechado.
+const CALL_MS = 15_000
 
 export class TranscriberUnavailableError extends Error {}
 
@@ -29,6 +31,14 @@ async function defaultToken(): Promise<string> {
   throw new TranscriberUnavailableError('O Transcritor não está instalado neste PC, ou nunca foi aberto.')
 }
 
+// Resposta fora do contrato (versão nova do Transcritor, corpo cortado) vira frase, não a lista de erros do zod.
+const UNKNOWN_REPLY = 'O Transcritor respondeu num formato que o Kora não conhece. Atualize o Kora ou o Transcritor.'
+function parseJob(value: unknown): z.infer<typeof JobSchema> {
+  const job = JobSchema.safeParse(value)
+  if (!job.success) throw new Error(UNKNOWN_REPLY)
+  return job.data
+}
+
 export type Transcribe = (file: string, signal: AbortSignal) => Promise<string>
 
 export function createTranscriber(options: { url?: string; token?: () => Promise<string>; pollMs?: number; timeoutMs?: number } = {}): Transcribe {
@@ -37,9 +47,13 @@ export function createTranscriber(options: { url?: string; token?: () => Promise
   const timeoutMs = options.timeoutMs ?? TIMEOUT_MS
   return async (file, signal) => {
     const token = await (options.token ?? defaultToken)()
-    const call = async (method: string, path: string, body?: unknown): Promise<Response> => {
-      const init: RequestInit = { method, headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }
-      const response = await fetch(base + path, init).catch(() => {
+    // cancel: o celular desistiu. A criação e o DELETE não o recebem: criar pela metade deixaria um trabalho sem id
+    // para apagar, e o DELETE é justamente a limpeza depois de desistir.
+    const call = async (method: string, path: string, body?: unknown, cancel?: AbortSignal): Promise<Response> => {
+      const signal = cancel ? AbortSignal.any([cancel, AbortSignal.timeout(CALL_MS)]) : AbortSignal.timeout(CALL_MS)
+      const init: RequestInit = { method, signal, headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }
+      const response = await fetch(base + path, init).catch((error: unknown) => {
+        if (cancel?.aborted) throw error
         throw new TranscriberUnavailableError('O Transcritor não está aberto no PC. Abra o app e tente de novo.')
       })
       if (response.ok) return response
@@ -47,22 +61,25 @@ export function createTranscriber(options: { url?: string; token?: () => Promise
       const error = await response.json().then((result: { erro?: unknown }) => String(result.erro ?? ''), () => '')
       throw new Error(`O Transcritor falhou (${response.status}${error ? `: ${error}` : ''}).`)
     }
-    const job = JobSchema.parse(await (await call('POST', '/transcrever', { arquivo: file, perfil: 'ditado', cliente: 'kora-celular', esperar: true })).json())
+    const created: unknown = await (await call('POST', '/transcrever', { arquivo: file, perfil: 'ditado', cliente: 'kora-celular', esperar: true })).json().catch(() => null)
+    // O id é lido à parte: com ele o trabalho é apagado mesmo que o resto da resposta não feche com o contrato.
+    const id = (created as { id?: unknown } | null)?.id
+    if (typeof id !== 'string' || !id) throw new Error(UNKNOWN_REPLY)
     try {
       const until = Date.now() + timeoutMs
-      let current = job
+      let current = parseJob(created)
       while (current.estado !== 'concluido') {
         if (current.estado === 'falhou') throw new Error(`O Transcritor não conseguiu transcrever${current.erro ? `: ${current.erro}` : '.'}`)
         if (current.estado === 'cancelado') throw new Error('A transcrição foi cancelada no PC.')
         if (Date.now() > until) throw new Error('O Transcritor demorou demais para responder. Veja se a fila dele está parada.')
         await new Promise((resolve) => setTimeout(resolve, pollMs))
         signal.throwIfAborted()
-        current = JobSchema.parse(await (await call('GET', `/trabalhos/${encodeURIComponent(job.id)}`)).json())
+        current = parseJob(await (await call('GET', `/trabalhos/${encodeURIComponent(id)}`, undefined, signal)).json().catch(() => null))
       }
-      return (await (await call('GET', `/trabalhos/${encodeURIComponent(job.id)}/resultado?formato=texto`)).text()).trim()
+      return (await (await call('GET', `/trabalhos/${encodeURIComponent(id)}/resultado?formato=texto`, undefined, signal)).text()).trim()
     } finally {
       // O áudio é do celular: o resultado não fica guardado no Transcritor, e apagar no meio cancela a transcrição.
-      await call('DELETE', `/trabalhos/${encodeURIComponent(job.id)}`).catch(() => {})
+      await call('DELETE', `/trabalhos/${encodeURIComponent(id)}`).catch(() => {})
     }
   }
 }

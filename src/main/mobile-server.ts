@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { createReadStream, mkdirSync } from 'node:fs'
 import { createSocket } from 'node:dgram'
 import { hostname, networkInterfaces } from 'node:os'
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { extname, join, resolve, sep } from 'node:path'
 import QRCode from 'qrcode'
 import { z } from 'zod'
@@ -55,8 +55,9 @@ const contentTypes: Record<string, string> = {
 }
 const PDFJS_DIRS = new Set(['wasm', 'cmaps', 'standard_fonts', 'iccs'])
 const AUDIO_EXTENSIONS: Record<string, string> = { 'audio/ogg': 'ogg', 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/mpeg': 'mp3', 'audio/wav': 'wav' }
-// O app grava Opus a 24 kbps: 25 MB passam de duas horas de fala.
-const MAX_AUDIO_BYTES = 25 * 1024 * 1024
+// O app para de gravar em 15 minutos, uns 3 MB em Opus a 24 kbps. O corpo tem 60 s para chegar (requestTimeout):
+// 8 MB ainda sobem num Wi-Fi de 1 Mbps.
+const MAX_AUDIO_BYTES = 8 * 1024 * 1024
 // Link de leitura dos arquivos de um projeto, para o HTML aberto no celular carregar o CSS e as imagens dele por
 // caminho relativo. Vale por pouco tempo e só lê: a página roda isolada (sandbox) e não recebe o pareamento.
 const RAW_LINK_MS = 30 * 60_000
@@ -156,6 +157,7 @@ export class MobileServer {
     this.port = (server.address() as { port: number }).port
     this.started = Date.now()
     this.pairing.setEnabled(true)
+    if (this.options.audioDir) await this.dropStaleAudio(this.options.audioDir)
     this.heartbeat = setInterval(() => {
       for (const client of this.clients) client.response.write(': heartbeat\n\n')
     }, 15_000)
@@ -294,11 +296,24 @@ export class MobileServer {
     json(response, 200, { path: savePastedImage(this.options.imageDir, Buffer.concat(chunks), mime) })
   }
 
+  // O Kora instalado e o Dev usam a mesma pasta temporária: só sai o que nenhuma transcrição em andamento usa.
+  private async dropStaleAudio(dir: string): Promise<void> {
+    for (const name of await readdir(dir).catch(() => [])) {
+      const file = join(dir, name)
+      const { mtimeMs } = await stat(file).catch(() => ({ mtimeMs: Date.now() }))
+      if (Date.now() - mtimeMs > 3_600_000) await rm(file, { force: true }).catch(() => {})
+    }
+  }
+
   private async audio(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const { audioDir, transcribe } = this.options
     if (!audioDir || !transcribe) return json(response, 404, { error: 'Este Kora não transcreve áudio.' })
     const extension = AUDIO_EXTENSIONS[request.headers['content-type']?.split(';')[0]?.trim() ?? '']
     if (!extension) return json(response, 415, { error: 'Envie o áudio como OGG, WebM, M4A, AAC, MP3 ou WAV.' })
+    // A resposta fecha antes do fim quando o celular desiste (tela apagada, rede caiu, cancelou): o Transcritor para
+    // junto. Registrado antes de ler o corpo, para não perder a desistência que acontece durante o envio.
+    const gone = new AbortController()
+    response.once('close', () => gone.abort())
     const chunks: Buffer[] = []
     let size = 0
     // Como na imagem: o excesso é lido e descartado para o aviso de tamanho chegar ao celular.
@@ -306,16 +321,18 @@ export class MobileServer {
       size += (chunk as Buffer).length
       if (size <= MAX_AUDIO_BYTES) chunks.push(chunk as Buffer)
     }
-    if (size > MAX_AUDIO_BYTES) return json(response, 413, { error: 'Áudio grande demais: o limite é 25 MB.' })
+    if (size > MAX_AUDIO_BYTES) return json(response, 413, { error: 'Áudio grande demais: o limite é 8 MB.' })
     if (size === 0) return json(response, 400, { error: 'O áudio chegou vazio.' })
+    if (gone.signal.aborted) return
     mkdirSync(audioDir, { recursive: true })
     const file = join(audioDir, `fala-${Date.now()}-${randomBytes(4).toString('hex')}.${extension}`)
-    await writeFile(file, Buffer.concat(chunks))
-    // A resposta fecha antes do fim quando o celular desiste (tela apagada, rede caiu): o Transcritor para junto.
-    const gone = new AbortController()
-    response.once('close', () => gone.abort())
-    const result = await transcribe(file, gone.signal).then((text) => ({ text }), (error: unknown) => ({ error }))
-    await rm(file, { force: true })
+    // Escrita que falha no meio (disco cheio) também deixa arquivo: entra na mesma limpeza da transcrição.
+    const result = await writeFile(file, Buffer.concat(chunks))
+      .then(() => transcribe(file, gone.signal))
+      .then((text) => ({ text }), (error: unknown) => ({ error }))
+    // Cancelado no meio, o Transcritor ainda pode estar com o arquivo aberto até o próximo trecho: no Windows o rm
+    // falha com EBUSY. Novas tentativas cobrem esse intervalo; o que sobrar sai na próxima vez que o Kora ligar.
+    await rm(file, { force: true, maxRetries: 10, retryDelay: 300 }).catch((error: Error) => console.warn(`[kora] áudio não apagado: ${error.message}`))
     if (gone.signal.aborted) return
     if ('error' in result) {
       const { error } = result

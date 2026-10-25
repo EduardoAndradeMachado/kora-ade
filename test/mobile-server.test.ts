@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, writeFileSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, utimesSync, writeFileSync, readFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { createServer, request, type Server } from 'node:http'
@@ -360,6 +360,39 @@ describe('acesso ao servidor do celular', () => {
     } finally {
       fake.close()
     }
+  })
+
+  it('celular que desiste no meio da transcrição para o Transcritor e não deixa o arquivo', async () => {
+    let started!: () => void
+    const reached = new Promise<void>((resolve) => { started = resolve })
+    let stopped!: () => void
+    const cancelled = new Promise<void>((resolve) => { stopped = resolve })
+    const s = await setup(async (_file, signal) => {
+      started()
+      await new Promise((resolve) => signal.addEventListener('abort', resolve))
+      stopped()
+      throw signal.reason
+    })
+    const gaveUp = new AbortController()
+    const sent = fetch(`${s.url}/api/audio`, { method: 'POST', headers: { cookie: s.cookie, 'content-type': 'audio/ogg' }, body: new Uint8Array([1, 2, 3]), signal: gaveUp.signal }).catch(() => null)
+    await reached
+    gaveUp.abort()
+    await cancelled
+    await sent
+    await expect.poll(() => readdirSync(join(s.dir, 'audio'))).toEqual([])
+  })
+
+  it('ao ligar, apaga o áudio esquecido há mais de uma hora e deixa o recente', async () => {
+    const s = await setup(async () => '')
+    await s.server.stop()
+    const dir = join(s.dir, 'audio')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'velho.ogg'), 'a')
+    writeFileSync(join(dir, 'recente.ogg'), 'b')
+    const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000)
+    utimesSync(join(dir, 'velho.ogg'), twoHoursAgo, twoHoursAgo)
+    await s.server.start()
+    expect(readdirSync(dir)).toEqual(['recente.ogg'])
   })
 
   it('Kora sem Transcritor configurado não aceita áudio', async () => {
