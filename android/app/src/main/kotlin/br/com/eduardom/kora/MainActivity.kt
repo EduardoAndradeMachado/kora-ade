@@ -442,7 +442,7 @@ class MainActivity : ComponentActivity() {
             // carrega a página inteira; o resto do Kora fica dentro do app.
             val doKora = request.url.host == atual?.host && request.url.port == atual?.porta
             // Só a página principal: um link dentro da prévia do HTML (iframe) navega dentro dela.
-            if (doKora && (!request.isForMainFrame || request.url.path?.startsWith("/raw/") != true)) return false
+            if (doKora && (!request.isForMainFrame || request.url.path?.startsWith("/raw/") != true || passagem != null)) return false
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
             return true
         }
@@ -523,7 +523,9 @@ class MainActivity : ComponentActivity() {
         if (peloRelay && !voltouParaFrente) return
         val atualAgora = atual
         Thread {
-            val local = sondarSalvo(salvo)
+            // Pelo relay e a casa respondeu: só troca se o pareamento valer lá (celular pareado só pelo relay não tem
+            // cookie na rede local e cairia na tela de parear).
+            val local = sondarSalvo(salvo)?.takeIf { !peloRelay || pareado(it) == true }
             principal.post {
                 if (atual !== atualAgora || isFinishing) return@post
                 when {
@@ -1041,7 +1043,7 @@ class MainActivity : ComponentActivity() {
 
     // Tenta o endereço de casa e depois o do Tailscale; entrando pelo Tailscale, leva o pareamento de casa junto.
     private fun sondarSalvo(salvo: PcSalvo): Kora? = enderecos(salvo).firstNotNullOfOrNull { host ->
-        sondar(host, salvo.porta)?.takeIf { conhecido(listOf(salvo), it) }?.also { if (host != salvo.host) levarPareamento(salvo.host, host, salvo.porta) }
+        sondar(host, salvo.porta)?.takeIf { conhecido(listOf(salvo), it) }?.also { if (host != salvo.host && salvo.host.isNotEmpty()) levarPareamento(salvo.host, host, salvo.porta) }
     }
 
     // O cookie vale por endereço: o mesmo pareamento passa a valer no endereço do Tailscale, sem parear de novo.

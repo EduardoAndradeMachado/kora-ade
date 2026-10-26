@@ -120,10 +120,11 @@ class PassagemTest {
     }
 
     @Test
-    fun oLinkDeArquivoDoProjetoPassaSemOCookieDaTela() {
-        // O HTML aberto no navegador (Abrir página inteira) não tem o cookie; o /raw/ chega ao PC, que confere a chave.
-        val resposta = pedir("GET /raw/chave/pagina.html HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").single()
-        assertEquals(404, resposta.status)
+    fun nenhumCaminhoPassaSemOCookieNemOLinkDeArquivoNemDisfarcadoDeLink() {
+        for (caminho in listOf("/raw/chave/pagina.html", "/raw/../api/state", "/raw/%2e%2e/api/action", "/api/state")) {
+            val resposta = pedir("GET $caminho HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").single()
+            assertEquals(caminho, 403, resposta.status)
+        }
     }
 
     @Test

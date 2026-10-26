@@ -235,3 +235,56 @@ describe('relay como roda no contêiner', () => {
     expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(404)
   })
 })
+
+describe('relay com tráfego pesado e conexões ruins', () => {
+  const upgrade = (port: number, path: string, headers: Record<string, string> = {}): Promise<number> => new Promise((resolve) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers })
+    ws.on('open', () => { ws.terminate(); resolve(101) })
+    ws.on('unexpected-response', (_req, res) => { resolve(res.statusCode!); ws.terminate() })
+    ws.on('error', () => {})
+  })
+
+  it('uma resposta de vários MB passa inteira, como um arquivo grande da tela', async () => {
+    const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
+    const relay = await listen(createRelay({ token: TOKEN }))
+    const app = createHttpServer((_req, res) => res.end(Buffer.alloc(3 * 1024 * 1024, 7)))
+    pc(relay, pcId.fingerprint, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
+    await waitControl()
+    const ws = new WebSocket(`ws://127.0.0.1:${relay}/c/${pcId.fingerprint}`)
+    closers.push(() => ws.terminate())
+    const socket = await sealEnvelope(createWebSocketStream(ws), phoneId, pcId.fingerprint)
+    const size = await new Promise<number>((resolve, reject) => {
+      request({ createConnection: () => socket, path: '/' }, (res) => {
+        let total = 0
+        res.on('data', (chunk: Buffer) => { total += chunk.length })
+        res.on('end', () => resolve(total))
+      }).on('error', reject).end()
+    })
+    expect(size).toBe(3 * 1024 * 1024)
+  })
+
+  it('um quadro acima do limite derruba só aquela conexão, e o relay segue atendendo os outros', async () => {
+    const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
+    const relay = await listen(createRelay({ token: TOKEN, maxMessageBytes: 64 * 1024 }))
+    const { app } = echoApp()
+    pc(relay, pcId.fingerprint, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
+    await waitControl()
+    const abusive = new WebSocket(`ws://127.0.0.1:${relay}/c/${pcId.fingerprint}`)
+    closers.push(() => abusive.terminate())
+    abusive.on('error', () => {})
+    await new Promise((resolve) => abusive.on('open', resolve))
+    const closed = new Promise((resolve) => abusive.on('close', resolve))
+    abusive.send(Buffer.alloc(200 * 1024))
+    await closed
+    expect(await phoneRequest(relay, pcId.fingerprint, phoneId, 'ainda de pé')).toBe('eco: ainda de pé')
+  })
+
+  it('o PC atrasado para uma sessão que já expirou não é bloqueado, mesmo muitas vezes', async () => {
+    const pcId = createIdentity('PC')
+    const relay = await listen(createRelay({ token: TOKEN, maxFailures: 3, banMs: 60_000 }))
+    const auth = { authorization: `Bearer ${TOKEN}` }
+    for (let i = 0; i < 6; i++) expect(await upgrade(relay, `/s/${pcId.fingerprint}/${'0'.repeat(31)}${i}`, auth)).toBe(404)
+    expect(await upgrade(relay, `/s/${pcId.fingerprint}`, auth)).toBe(101)
+  })
+})
+

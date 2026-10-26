@@ -16,6 +16,9 @@ const PING_MS = 25_000
 const WAIT_PC_MS = 10_000
 const MAX_WAITING_PER_PC = 8
 const MAX_QUEUED_BYTES = 1 << 20
+// O TLS do PC junta vários registros numa escrita só: uma resposta grande (um arquivo da tela, o APK) chega como uma
+// mensagem de vários MB. O limite só barra o absurdo.
+const MAX_MESSAGE_BYTES = 64 << 20
 const MAX_FAILURES = 20
 const FAILURE_WINDOW_MS = 10 * 60_000
 const BAN_MS = 30 * 60_000
@@ -31,6 +34,7 @@ export interface RelayOptions {
   trustProxy?: boolean
   maxFailures?: number
   banMs?: number
+  maxMessageBytes?: number
 }
 
 interface Waiting { pc: string; phone: WebSocket; queue: RawData[]; bytes: number; timer: NodeJS.Timeout }
@@ -38,7 +42,7 @@ interface Waiting { pc: string; phone: WebSocket; queue: RawData[]; bytes: numbe
 const sizeOf = (data: RawData): number => Array.isArray(data) ? data.reduce((sum, part) => sum + part.length, 0) : (data as Buffer).length
 
 export function createRelay(options: RelayOptions): Server {
-  const sockets = new WebSocketServer({ noServer: true, maxPayload: MAX_QUEUED_BYTES })
+  const sockets = new WebSocketServer({ noServer: true, maxPayload: options.maxMessageBytes ?? MAX_MESSAGE_BYTES })
   const controls = new Map<string, WebSocket>()
   const waiting = new Map<string, Waiting>()
   const started = new Date()
@@ -148,10 +152,14 @@ export function createRelay(options: RelayOptions): Server {
     if (!route) {
       // Celular procurando um PC desligado não é ataque: quem está viajando com o PC fora do ar segue tentando, e não
       // pode estar bloqueado quando o PC voltar. Adivinhar um ID de 256 bits não é viável, então isso não abre brecha.
-      if (!(kind === 'c' && ID.test(id) && parts.length === 2)) failed(ip)
+      // O PC com o token certo chegando atrasado a uma sessão que já expirou (o celular desistiu) também não é ataque.
+      if (!(kind === 'c' && ID.test(id) && parts.length === 2) && !(kind === 's' && authorized(request))) failed(ip)
       return refuse(socket)
     }
     sockets.handleUpgrade(request, socket, head, (ws) => {
+      // Mensagem acima do limite ou quadro malformado: a ws avisa com 'error', e sem ninguém ouvindo o processo inteiro
+      // cairia, derrubando todos os PCs e celulares. Só esta conexão fecha.
+      ws.on('error', () => ws.terminate())
       openSockets.set(ip, (openSockets.get(ip) ?? 0) + 1)
       ws.on('close', () => {
         const left = (openSockets.get(ip) ?? 1) - 1

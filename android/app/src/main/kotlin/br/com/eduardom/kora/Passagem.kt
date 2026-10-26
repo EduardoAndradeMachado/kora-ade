@@ -64,9 +64,9 @@ class Passagem(portaPreferida: Int = 0, private val abrir: () -> Envelope) : Clo
                 val destino = consulta["ir"]?.takeIf { it.startsWith("/") && !it.startsWith("//") && it.none { c -> c == '\r' || c == '\n' } } ?: "/"
                 return responder(cliente, "302 Found", "Location: $destino\r\nSet-Cookie: $COOKIE=$segredo; Path=/; HttpOnly; SameSite=Strict\r\n")
             }
-            // /raw/ é o link de leitura de um arquivo do projeto, autorizado pela chave dele (o HTML aberto no navegador
-            // pelo Abrir página inteira não tem o cookie da tela).
-            if (!cookieCerto(texto) && !alvo.startsWith("/raw/")) return responder(cliente, "403 Forbidden", "")
+            // Nenhum pedido passa sem o cookie, nem o /raw/: o PC normaliza o caminho (/raw/../api/ vira /api/), e qualquer
+            // exceção aqui viraria a porta de entrada de outro app do celular para o PC.
+            if (!cookieCerto(texto)) return responder(cliente, "403 Forbidden", "")
             // Qualquer falha ao abrir (rede, relay, Keystore do aparelho) vira 502 para a tela: exceção solta numa thread
             // derrubaria o app inteiro.
             val envelope = try { abrir() } catch (erro: Exception) {
