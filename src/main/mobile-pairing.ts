@@ -1,11 +1,23 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { z } from 'zod'
+import { createIdentity, fingerprintOf, type Identity } from './remote/identity'
 
-const DeviceSchema = z.object({ id: z.string(), name: z.string(), pairedAt: z.string(), hash: z.string() })
+const FINGERPRINT = /^[0-9a-f]{64}$/
+// certificate: impressão digital do certificado do app (Keystore). É ela que autoriza o celular quando ele chega pelo
+// relay, onde não há cookie: quem apresenta esse certificado no aperto de mãos é este celular.
+const DeviceSchema = z.object({ id: z.string(), name: z.string(), pairedAt: z.string(), hash: z.string(), certificate: z.string().regex(FINGERPRINT).optional() })
 // serverId: identidade desta instalação do Kora (o instalado e o Dev têm pastas de dados diferentes). O celular
 // guarda um pareamento por id, e os dois Kora do mesmo PC convivem pareados no mesmo celular.
-const ConfigSchema = z.object({ enabled: z.boolean(), devices: z.array(DeviceSchema).max(20), serverId: z.string().regex(/^[\w-]{8,32}$/).optional() })
+// identity: a chave e o certificado deste Kora no envelope do relay; criados uma vez e guardados, para o ID não mudar.
+// remote: "Fora de casa" ligado e o código de convite do relay (o token que o relay pede ao PC).
+const ConfigSchema = z.object({
+  enabled: z.boolean(),
+  devices: z.array(DeviceSchema).max(20),
+  serverId: z.string().regex(/^[\w-]{8,32}$/).optional(),
+  identity: z.object({ key: z.string(), cert: z.string() }).optional(),
+  remote: z.object({ enabled: z.boolean(), invite: z.string() }).optional()
+})
 const digest = (value: string): string => createHash('sha256').update(value).digest('hex')
 const equal = (a: string, b: string): boolean => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b))
 const deviceName = (name: string): string => name.trim().slice(0, 60) || 'Celular'
@@ -24,6 +36,29 @@ export class MobilePairingStore {
 
   get serverId(): string { return this.config.serverId! }
 
+  identity(): Identity {
+    if (!this.config.identity) {
+      const { key, cert } = createIdentity(`Kora ${this.serverId}`)
+      this.config.identity = { key, cert }
+      this.save()
+    }
+    return { ...this.config.identity, fingerprint: fingerprintOf(this.config.identity.cert) }
+  }
+
+  get remote(): { enabled: boolean; invite: string } { return this.config.remote ?? { enabled: false, invite: '' } }
+
+  setRemote(enabled: boolean, invite = this.remote.invite): void {
+    this.config.remote = { enabled, invite }
+    this.save()
+  }
+
+  // Enquanto o QR está valendo, o PC aceita o aperto de mãos de um certificado novo: é o celular que vai parear.
+  get pairingOpen(): boolean { return this.invitation !== null && Date.now() <= this.invitation.until }
+
+  deviceByCertificate(fingerprint: string): string | null {
+    return this.config.devices.find((device) => device.certificate === fingerprint)?.id ?? null
+  }
+
   get enabled(): boolean { return this.config.enabled }
   get devices(): { id: string; name: string; pairedAt: string }[] {
     return this.config.devices.map(({ id, name, pairedAt }) => ({ id, name, pairedAt }))
@@ -40,7 +75,7 @@ export class MobilePairingStore {
     return this.invitation
   }
 
-  pair(code: string, name: string): string {
+  pair(code: string, name: string, certificate?: string): string {
     if (!this.invitation || Date.now() > this.invitation.until || !equal(code, this.invitation.code)) {
       throw new Error('QR expirado ou já utilizado. Gere outro no PC.')
     }
@@ -48,7 +83,10 @@ export class MobilePairingStore {
     this.invitation = null
     const id = randomUUID()
     const secret = randomBytes(32).toString('base64url')
-    this.config.devices.push({ id, name: deviceName(name), pairedAt: new Date().toISOString(), hash: digest(secret) })
+    const known = certificate !== undefined && FINGERPRINT.test(certificate) ? certificate : undefined
+    // Parear de novo o mesmo app (mesmo certificado) substitui o pareamento antigo em vez de duplicar o celular.
+    if (known) this.config.devices = this.config.devices.filter((device) => device.certificate !== known)
+    this.config.devices.push({ id, name: deviceName(name), pairedAt: new Date().toISOString(), hash: digest(secret), ...(known ? { certificate: known } : {}) })
     this.save()
     return `${id}.${secret}`
   }

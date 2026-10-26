@@ -64,6 +64,8 @@ export interface MobileStatus {
   enabled: boolean
   // O PC tem um endereço de rede local que o celular alcança; sem ele não dá para parear.
   network: boolean
+  // Fora de casa: como está a conexão do PC com o relay; null com ele desligado.
+  remote?: { state: 'conectando' | 'conectado' | 'reconectando' | 'parado'; since: number; error: string | null } | null
   devices: MobileDevice[]
 }
 export interface MobilePairing { url: string; qr: string; expiresAt: string }

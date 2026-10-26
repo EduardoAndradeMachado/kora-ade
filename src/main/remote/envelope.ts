@@ -11,6 +11,15 @@ const fingerprint = (peer: PeerCertificate): string | null => peer.fingerprint25
 // O ID do outro lado de um envelope já aberto (o certificado que ele apresentou no aperto de mãos).
 export const peerFingerprint = (socket: TLSSocket): string | null => fingerprint(socket.getPeerCertificate())
 
+// O TLS do Node não percebe sozinho quando o transporte de baixo fecha, nem o fecha quando ele mesmo é destruído: sem
+// amarrar os dois, um lado ficaria esperando para sempre uma conexão que o outro já largou.
+function bind(transport: Duplex, socket: TLSSocket): void {
+  // O fluxo do WebSocket que fechou só emite 'end' (fica meio aberto esperando a escrita): os dois avisos valem.
+  transport.once('end', () => socket.destroy())
+  transport.once('close', () => socket.destroy())
+  socket.once('close', () => transport.destroy())
+}
+
 function settle(socket: TLSSocket, event: 'secure' | 'secureConnect', check: () => boolean): Promise<TLSSocket> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => fail(new Error('O aperto de mãos com o outro lado não terminou a tempo.')), HANDSHAKE_MS)
@@ -33,6 +42,7 @@ export function openEnvelope(transport: Duplex, me: Identity, accepts: (fingerpr
     requestCert: true,
     rejectUnauthorized: false
   })
+  bind(transport, socket)
   return settle(socket, 'secure', () => {
     const peer = fingerprint(socket.getPeerCertificate())
     return peer !== null && accepts(peer)
@@ -42,5 +52,6 @@ export function openEnvelope(transport: Duplex, me: Identity, accepts: (fingerpr
 // Lado do celular: só fala com o PC cujo certificado veio no QR. Nada é escrito antes dessa conferência.
 export function sealEnvelope(transport: Duplex, me: Identity, expected: string): Promise<TLSSocket> {
   const socket = connect({ socket: transport, key: me.key, cert: me.cert, minVersion: 'TLSv1.3', rejectUnauthorized: false })
+  bind(transport, socket)
   return settle(socket, 'secureConnect', () => fingerprint(socket.getPeerCertificate()) === expected)
 }

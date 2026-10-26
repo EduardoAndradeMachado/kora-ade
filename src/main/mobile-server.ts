@@ -12,6 +12,8 @@ import { MobilePairingStore } from './mobile-pairing'
 import { MAX_PASTED_IMAGE_BYTES, savePastedImage } from './pasted-image'
 import { ConflictError } from './files'
 import type { MobileRuntime } from './mobile-runtime'
+import type { TLSSocket } from 'node:tls'
+import { RelayLink } from './remote/link'
 import { TranscriberUnavailableError, type Transcribe } from './transcriber'
 
 export function isLocalAddress(address: string): boolean {
@@ -71,7 +73,11 @@ const MAX_AUDIO_BYTES = 8 * 1024 * 1024
 // Link de leitura dos arquivos de um projeto, para o HTML aberto no celular carregar o CSS e as imagens dele por
 // caminho relativo. Vale por pouco tempo e só lê: a página roda isolada (sandbox) e não recebe o pareamento.
 const RAW_LINK_MS = 30 * 60_000
-const PairSchema = z.object({ code: z.string().min(1).max(100), name: z.string().max(60) })
+// certificado: o app novo informa a impressão digital do certificado dele, para depois entrar pelo relay sem cookie.
+const PairSchema = z.object({ code: z.string().min(1).max(100), name: z.string().max(60), certificado: z.string().regex(/^[0-9a-f]{64}$/).optional() })
+// Envelope que chegou pelo relay: o aperto de mãos já provou qual celular é (o certificado registrado no pareamento).
+type TunnelSocket = TLSSocket & { koraCertificate?: string }
+const tunnelCertificate = (request: IncomingMessage): string | undefined => (request.socket as TunnelSocket).koraCertificate
 const json = (response: ServerResponse, status: number, body: unknown): void => {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
   response.end(JSON.stringify(body))
@@ -86,7 +92,11 @@ export class MobileServer {
   private server: Server | null = null
   private port = 0
   private started = Date.now()
-  private readonly clients = new Set<{ device: string; response: ServerResponse }>()
+  private readonly clients = new Set<{ device: string; response: ServerResponse; tunnel: boolean }>()
+  // Fora de casa: o link com o relay e o atendimento que recebe os envelopes (não escuta porta nenhuma).
+  private link: RelayLink | null = null
+  private tunnel: Server | null = null
+  private readonly tunnels = new Set<TunnelSocket>()
   private heartbeat: ReturnType<typeof setInterval> | null = null
   private readonly disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   // base: a pasta do arquivo aberto. O link só lê dali para baixo, e de quem pediu (some ao desvincular o celular).
@@ -121,6 +131,7 @@ export class MobileServer {
     return {
       enabled: this.server !== null,
       network: this.server !== null && localAddresses().length > 0,
+      remote: this.link ? this.link.status : null,
       devices: this.pairing.devices.map((device) => ({ ...device, online: this.online(device.id) }))
     }
   }
@@ -147,12 +158,7 @@ export class MobileServer {
 
   async start(): Promise<MobileStatus> {
     if (this.server) return this.status()
-    const server = createServer((req, res) => { void this.handle(req, res) })
-    // Print grande num Wi-Fi fraco leva mais de 10 s para subir. Conexão parada fica aberta 30 s: com os 5 s
-    // padrão, o celular reaproveitava uma conexão que o PC acabara de fechar e a imagem falhava na primeira vez.
-    server.requestTimeout = 60_000
-    server.keepAliveTimeout = 30_000
-    server.headersTimeout = 31_000
+    const server = this.createHttp()
     await new Promise<void>((resolvePromise, reject) => {
       const failed = (error: NodeJS.ErrnoException): void => reject(error.code === 'EADDRINUSE'
         ? new Error('Outro Kora aberto neste PC já está com a conexão do celular ligada. Desligue nele para ligar aqui.')
@@ -168,9 +174,7 @@ export class MobileServer {
     this.started = Date.now()
     this.pairing.setEnabled(true)
     if (this.options.audioDir) await this.dropStaleAudio(this.options.audioDir)
-    this.heartbeat = setInterval(() => {
-      for (const client of this.clients) client.response.write(': heartbeat\n\n')
-    }, 15_000)
+    this.keepClientsAlive()
     this.options.changed()
     this.notify()
     return this.status()
@@ -178,24 +182,92 @@ export class MobileServer {
 
   async stop(): Promise<MobileStatus> {
     this.pairing.setEnabled(false)
-    if (this.heartbeat) clearInterval(this.heartbeat)
-    this.heartbeat = null
-    for (const timer of this.disconnectTimers.values()) clearTimeout(timer)
-    this.disconnectTimers.clear()
-    for (const client of this.clients) {
-      client.response.end()
-    }
-    this.clients.clear()
-    for (const device of this.pairing.devices) this.options.runtime.leave(device.id)
+    // Só a rede local desliga: quem está pelo relay (Fora de casa ligado) continua.
+    this.endClients((client) => !client.tunnel)
     const server = this.server
     this.server = null
     if (server) {
       server.closeAllConnections()
       await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()))
     }
+    this.releaseClientsIfIdle()
     this.options.changed()
     this.notify()
     return this.status()
+  }
+
+  // Fora de casa: o PC fica ligado ao relay e cada celular que chega por ele cai no mesmo atendimento da rede local.
+  startRemote(url: string, invite: string): MobileStatus {
+    this.link?.stop()
+    this.link = new RelayLink({
+      url,
+      token: invite,
+      identity: this.pairing.identity(),
+      accepts: (fingerprint) => this.pairing.deviceByCertificate(fingerprint) !== null || this.pairing.pairingOpen,
+      deliver: (socket, fingerprint) => this.acceptTunnel(socket, fingerprint),
+      onStatus: () => this.notify()
+    })
+    this.link.start()
+    this.keepClientsAlive()
+    this.notify()
+    return this.status()
+  }
+
+  stopRemote(): MobileStatus {
+    this.link?.stop()
+    this.link = null
+    this.endClients((client) => client.tunnel)
+    for (const socket of this.tunnels) socket.destroy()
+    this.tunnels.clear()
+    this.releaseClientsIfIdle()
+    this.notify()
+    return this.status()
+  }
+
+  // O PC voltou da suspensão ou trocou de rede: a conexão com o relay é refeita na hora.
+  reconnectRemote(): void { this.link?.reconnectNow() }
+
+  acceptTunnel(socket: TLSSocket, certificate: string): void {
+    const tunnel = socket as TunnelSocket
+    tunnel.koraCertificate = certificate
+    this.tunnels.add(tunnel)
+    tunnel.once('close', () => this.tunnels.delete(tunnel))
+    this.tunnel ??= this.createHttp()
+    this.tunnel.emit('connection', tunnel)
+  }
+
+  private createHttp(): Server {
+    const server = createServer((req, res) => { void this.handle(req, res) })
+    // Print grande num Wi-Fi fraco leva mais de 10 s para subir. Conexão parada fica aberta 30 s: com os 5 s
+    // padrão, o celular reaproveitava uma conexão que o PC acabara de fechar e a imagem falhava na primeira vez.
+    server.requestTimeout = 60_000
+    server.keepAliveTimeout = 30_000
+    server.headersTimeout = 31_000
+    return server
+  }
+
+  private keepClientsAlive(): void {
+    this.heartbeat ??= setInterval(() => {
+      for (const client of this.clients) client.response.write(': heartbeat\n\n')
+    }, 15_000)
+  }
+
+  private releaseClientsIfIdle(): void {
+    if (this.server || this.link) return
+    if (this.heartbeat) clearInterval(this.heartbeat)
+    this.heartbeat = null
+  }
+
+  private endClients(which: (client: { tunnel: boolean }) => boolean): void {
+    for (const client of [...this.clients]) if (which(client)) {
+      client.response.end()
+      this.clients.delete(client)
+    }
+    for (const device of this.pairing.devices) if (![...this.clients].some((client) => client.device === device.id)) {
+      clearTimeout(this.disconnectTimers.get(device.id))
+      this.disconnectTimers.delete(device.id)
+      this.options.runtime.leave(device.id)
+    }
   }
 
   async invite(): Promise<MobilePairing> {
@@ -216,6 +288,7 @@ export class MobileServer {
       sendEvent(client.response, 'revoked', {})
       client.response.end()
     }
+    for (const socket of this.tunnels) if (socket.koraCertificate && this.pairing.deviceByCertificate(socket.koraCertificate) === null) socket.destroy()
     this.options.changed()
     this.notify()
     return this.status()
@@ -369,16 +442,20 @@ export class MobileServer {
     response.setHeader('referrer-policy', 'no-referrer')
     response.setHeader('content-security-policy', `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${this.options.devUrl ? " 'unsafe-inline'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'${this.options.devUrl ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`)
     try {
+      const certificate = tunnelCertificate(request)
       const hosts = [...localAddresses(), ...tailscaleAddresses(), '127.0.0.1', 'localhost'].map((host) => `${host}:${this.port}`)
       const host = request.headers.host ?? ''
       const remote = request.socket.remoteAddress ?? ''
-      if (!(isLocalAddress(remote) || isTailscaleAddress(remote)) || !hosts.includes(host)) return json(response, 403, { error: 'Conexão permitida somente pela rede local ou pelo Tailscale.' })
+      // Pelo relay não há IP da rede local para conferir: quem passou pelo aperto de mãos já é um certificado conhecido.
+      if (!certificate && (!(isLocalAddress(remote) || isTailscaleAddress(remote)) || !hosts.includes(host))) return json(response, 403, { error: 'Conexão permitida somente pela rede local ou pelo Tailscale.' })
       const url = new URL(request.url ?? '/', `http://${host}`)
       // Antes da checagem de origem: o HTML do projeto roda isolado (sandbox), sem origem, e pede o CSS e as imagens
       // dele daqui. O link só lê arquivos e é a chave dele que autoriza, não o cookie do celular.
       if (url.pathname.startsWith('/raw/') && request.method === 'GET') return this.raw(url.pathname, response)
       const origin = request.headers.origin
-      if ((origin && origin !== `http://${host}`) || request.headers['sec-fetch-site'] === 'cross-site') return json(response, 403, { error: 'Origem não autorizada.' })
+      // Pelo relay a tela do app roda numa origem https; pela rede local, na http do próprio PC.
+      const sameOrigin = origin === `http://${host}` || (certificate !== undefined && origin === `https://${host}`)
+      if ((origin && !sameOrigin) || request.headers['sec-fetch-site'] === 'cross-site') return json(response, 403, { error: 'Origem não autorizada.' })
       if (url.pathname === '/health' && request.method === 'GET') {
         const uptime = Math.floor((Date.now() - this.started) / 1000)
         const hours = Math.floor(uptime / 3600)
@@ -399,16 +476,15 @@ export class MobileServer {
       }
       if (url.pathname.startsWith('/pdfjs/') && request.method === 'GET') return await this.pdfjs(url.pathname, response)
       if (url.pathname === '/api/pair' && request.method === 'POST') {
-        const { code, name } = PairSchema.parse(await this.body(request))
-        const token = this.pairing.pair(code, name)
+        const { code, name, certificado } = PairSchema.parse(await this.body(request))
+        const token = this.pairing.pair(code, name, certificate ?? certificado)
         response.setHeader('set-cookie', `${this.cookieName()}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`)
         this.options.changed()
         this.notify()
         return json(response, 200, { ok: true })
       }
       if (url.pathname.startsWith('/api/')) {
-        const token = this.deviceToken(request.headers.cookie ?? '')
-        const device = this.pairing.authenticate(token)
+        const device = certificate ? this.pairing.deviceByCertificate(certificate) : this.pairing.authenticate(this.deviceToken(request.headers.cookie ?? ''))
         if (!device) return json(response, 401, { error: 'Pareie este celular pelo QR code no PC.' })
         if (url.pathname === '/api/state' && request.method === 'GET') return json(response, 200, { deviceId: device, state: this.options.runtime.snapshot() })
         if (url.pathname === '/api/folders' && request.method === 'GET') {
@@ -473,13 +549,13 @@ export class MobileServer {
           clearTimeout(this.disconnectTimers.get(device))
           this.disconnectTimers.delete(device)
           response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', connection: 'keep-alive' })
-          const client = { device, response }
+          const client = { device, response, tunnel: certificate !== undefined }
           this.clients.add(client)
           sendEvent(response, 'state', this.options.runtime.snapshot())
           if (arrived) this.notify()
           response.on('close', () => {
             this.clients.delete(client)
-            if (!this.server) return
+            if (!this.server && !this.link) return
             if (![...this.clients].some((c) => c.device === device)) {
               const timer = setTimeout(() => {
                 this.disconnectTimers.delete(device)
