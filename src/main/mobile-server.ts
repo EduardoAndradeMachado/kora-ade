@@ -208,6 +208,7 @@ export class MobileServer {
   startRemote(url: string, client: string): MobileStatus {
     this.link?.stop()
     this.relayHost = new URL(url).host
+    let connected = false
     this.link = new RelayLink({
       url,
       client,
@@ -218,7 +219,13 @@ export class MobileServer {
       },
       accepts: (fingerprint) => this.pairing.deviceByCertificate(fingerprint) !== null || this.pairing.pairingOpen,
       deliver: (socket, fingerprint) => this.acceptTunnel(socket, fingerprint),
-      onStatus: () => this.notify()
+      onStatus: (status) => {
+        // Queda da ligação com o relay vai para o errors.log: é o rastro de quando o celular fora de casa perdeu o PC.
+        // A volta da suspensão reconecta direto ('conectando'); desligar de propósito é 'parado' e não conta.
+        if (connected && (status.state === 'reconectando' || status.state === 'conectando')) console.error(`[fora de casa] a conexão com o relay caiu${status.error ? `: ${status.error}` : ''}`)
+        connected = status.state === 'conectado'
+        this.notify()
+      }
     })
     this.link.start()
     this.keepClientsAlive()

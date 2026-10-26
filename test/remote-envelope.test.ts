@@ -181,6 +181,27 @@ describe('relay: quem entra', () => {
     expect(await upgrade(relay, `/s/${real.fingerprint}`, claimed)).toBe(404)
   })
 
+  it('soma as recusas por motivo e registra uma linha por intervalo, sem IP nem impressão digital', async () => {
+    const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
+    const lines: string[] = []
+    const relay = await listen(createRelay({ directory: directory([pcId], [[phoneId, pcId]]), log: (line) => lines.push(line), reportMs: 50 }))
+    const phonePath = `/c/${pcId.fingerprint}`
+    expect(await upgrade(relay, phonePath, relayHeaders(phoneId, phonePath))).toBe(404)
+    expect(await upgrade(relay, phonePath, relayHeaders(phoneId, phonePath))).toBe(404)
+    expect(await upgrade(relay, `/s/${pcId.fingerprint}`)).toBe(404)
+    // Com o CI lento as recusas podem cair em intervalos diferentes: o que vale é a soma das linhas.
+    const totals = (): Record<string, number> => {
+      const sum: Record<string, number> = {}
+      for (const line of lines) {
+        expect(line).toMatch(/^\[relay\] recusas: [a-z-]+=\d+( [a-z-]+=\d+)*$/)
+        for (const [, reason, count] of line.matchAll(/([a-z-]+)=(\d+)/g)) sum[reason!] = (sum[reason!] ?? 0) + Number(count)
+      }
+      return sum
+    }
+    await expect.poll(totals).toEqual({ 'pc-fora-do-ar': 2, 'assinatura-invalida': 1 })
+    expect(lines.join()).not.toContain(pcId.fingerprint.slice(0, 12))
+  })
+
   it('a assinatura vale só para o caminho assinado e por 2 minutos', async () => {
     const pcId = createIdentity('PC')
     const relay = await listen(createRelay({ directory: directory([pcId]) }))

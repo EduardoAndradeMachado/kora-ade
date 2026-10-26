@@ -59,6 +59,9 @@ export interface RelayOptions {
   banMs?: number
   maxMessageBytes?: number
   maxBufferedBytes?: number
+  // Resumo das recusas (uma linha por intervalo, só com o motivo e a contagem); console.warn no contêiner.
+  log?(line: string): void
+  reportMs?: number
 }
 
 interface Waiting { pc: string; phone: WebSocket; phoneId: string; queue: RawData[]; bytes: number; timer: NodeJS.Timeout }
@@ -90,6 +93,17 @@ export function createRelay(options: RelayOptions): Relay {
   const usedSignatures = new Map<string, number>()
   // Celular com sessão aberta agora, por conexão: o online() da tela de admin.
   const live = new Map<WebSocket, string>()
+  // Por que conexões foram recusadas ou derrubadas, somado até o próximo resumo: um celular que não conecta deixa
+  // rastro no log do contêiner, sem IP nem impressão digital.
+  const refusals = new Map<string, number>()
+  const refused = (reason: string): void => { refusals.set(reason, (refusals.get(reason) ?? 0) + 1) }
+  const report = setInterval(() => {
+    if (refusals.size === 0) return
+    const line = [...refusals].map(([reason, count]) => `${reason}=${count}`).join(' ')
+    refusals.clear()
+    ;(options.log ?? console.warn)(`[relay] recusas: ${line}`)
+  }, options.reportMs ?? 60_000)
+  report.unref()
   const failures = new Map<string, { count: number; since: number; bannedUntil: number }>()
   const openSockets = new Map<string, number>()
 
@@ -187,16 +201,29 @@ export function createRelay(options: RelayOptions): Relay {
 
   const phone = (id: string, owner: Owner, socket: WebSocket): void => {
     const pc = controls.get(id)
-    if (!pc || [...waiting.values()].filter((entry) => entry.pc === id).length >= MAX_WAITING_PER_PC) return socket.terminate()
+    if (!pc) {
+      refused('pc-fora-do-ar')
+      return socket.terminate()
+    }
+    if ([...waiting.values()].filter((entry) => entry.pc === id).length >= MAX_WAITING_PER_PC) {
+      refused('fila-do-pc-cheia')
+      return socket.terminate()
+    }
     const session = randomBytes(16).toString('hex')
-    const entry: Waiting = { pc: id, phone: socket, phoneId: owner.fingerprint, queue: [], bytes: 0, timer: setTimeout(() => { waiting.delete(session); socket.terminate() }, WAIT_PC_MS) }
+    const entry: Waiting = {
+      pc: id, phone: socket, phoneId: owner.fingerprint, queue: [], bytes: 0,
+      timer: setTimeout(() => { waiting.delete(session); refused('pc-nao-atendeu'); socket.terminate() }, WAIT_PC_MS)
+    }
     waiting.set(session, entry)
     // O celular começa o aperto de mãos antes de o PC chegar: o que ele mandar fica guardado até a outra ponta existir.
     socket.on('message', (data) => {
       if (!waiting.has(session)) return
       entry.queue.push(data)
       entry.bytes += sizeOf(data)
-      if (entry.bytes > MAX_QUEUED_BYTES) socket.terminate()
+      if (entry.bytes > MAX_QUEUED_BYTES) {
+        refused('fila-de-dados-cheia')
+        socket.terminate()
+      }
     })
     socket.on('close', () => { if (waiting.get(session) === entry) { clearTimeout(entry.timer); waiting.delete(session) } })
     pc.send(JSON.stringify({ sessao: session }))
@@ -213,6 +240,7 @@ export function createRelay(options: RelayOptions): Relay {
     options.usage?.(phoneId, { sessions: 1 })
     const forward = (to: WebSocket, chunk: RawData): void => {
       if (to.bufferedAmount > limit) {
+        refused('buffer-cheio')
         to.terminate()
         return
       }
@@ -246,7 +274,14 @@ export function createRelay(options: RelayOptions): Relay {
 
   const upgrade = async (request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> => {
     const ip = clientIp(request)
-    if (banned(ip) || (openSockets.get(ip) ?? 0) >= MAX_SOCKETS_PER_IP) return refuse(socket)
+    if (banned(ip)) {
+      refused('ip-bloqueado')
+      return refuse(socket)
+    }
+    if ((openSockets.get(ip) ?? 0) >= MAX_SOCKETS_PER_IP) {
+      refused('conexoes-demais-do-ip')
+      return refuse(socket)
+    }
     const path = (request.url ?? '').split('?')[0]!
     const parts = path.split('/').filter(Boolean)
     const [kind, id = '', session] = parts
@@ -259,16 +294,30 @@ export function createRelay(options: RelayOptions): Relay {
     // Assinatura do PC para o caminho de outro PC também é forjada: ninguém fala em nome de outra impressão digital.
     if (owner === 'invalid' || (shape !== 'phone' && owner !== 'denied' && owner !== 'stale' && owner.fingerprint !== id)) {
       failed(ip)
+      refused('assinatura-invalida')
       return refuse(socket)
     }
     // Celular de outro PC é recusa, não ataque: o dono dele só errou de PC (ou desfez o pareamento).
-    if (owner === 'denied') return refuse(socket, '403 Forbidden')
+    if (owner === 'denied') {
+      refused('aparelho-sem-acesso')
+      return refuse(socket, '403 Forbidden')
+    }
     // Assinatura certa com o relógio do aparelho fora da hora: 401, sem bloquear o IP (que pode ser o de muita gente).
-    if (owner === 'stale') return refuse(socket, '401 Unauthorized')
+    if (owner === 'stale') {
+      refused('relogio-fora-da-hora')
+      return refuse(socket, '401 Unauthorized')
+    }
     // Celular procurando um PC desligado não é ataque: quem está viajando com o PC fora do ar segue tentando, e não pode
     // estar bloqueado quando o PC voltar. O PC chegando atrasado a uma sessão que já expirou (o celular desistiu) também
     // não. Os dois já provaram quem são.
-    if ((shape === 'phone' && !controls.has(id)) || (shape === 'data' && waiting.get(session!)?.pc !== id)) return refuse(socket)
+    if (shape === 'phone' && !controls.has(id)) {
+      refused('pc-fora-do-ar')
+      return refuse(socket)
+    }
+    if (shape === 'data' && waiting.get(session!)?.pc !== id) {
+      refused('sessao-vencida')
+      return refuse(socket)
+    }
     if (socket.destroyed) return
     const client = String(request.headers['x-kora-client'] ?? '')
     options.seen?.(owner.fingerprint, { ip, client: CLIENT_INFO.test(client) ? client : '' })
@@ -308,6 +357,7 @@ export function createRelay(options: RelayOptions): Relay {
   const close = server.close.bind(server)
   server.close = (callback) => {
     clearInterval(sweep)
+    clearInterval(report)
     for (const socket of sockets.clients) socket.terminate()
     for (const entry of waiting.values()) clearTimeout(entry.timer)
     return close(callback)
