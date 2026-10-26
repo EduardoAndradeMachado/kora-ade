@@ -68,7 +68,7 @@ export function MobileConnection(): React.JSX.Element {
     <Toggle
       checked={status?.enabled ?? false}
       label="Conexão com o celular"
-      detail="Use as sessões deste PC no celular, pela mesma rede Wi-Fi. Fica ligada até você desligar."
+      detail="Use as sessões deste PC no celular, pela mesma rede Wi-Fi ou, fora de casa, pelo Tailscale. Fica ligada até você desligar."
       onChange={(enabled) => { if (status && !busy) void run(async () => setStatus(await window.kora.setMobileEnabled(enabled))) }}
     />
     {status?.enabled && <>

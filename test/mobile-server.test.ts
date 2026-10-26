@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path'
 import { createServer, request, type Server } from 'node:http'
 import { execFileSync } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
-import { MobileServer } from '../src/main/mobile-server'
+import { MobileServer, isTailscaleAddress, tailscaleAddresses } from '../src/main/mobile-server'
 import { MobileRuntime } from '../src/main/mobile-runtime'
 import { Terminals } from '../src/main/terminals'
 import { DESKTOP, type SizeChange } from '../src/main/terminal-sizes'
@@ -286,6 +286,25 @@ describe('acesso ao servidor do celular', () => {
     expect(link.hostname).toMatch(/^(10|172|192|169)\./)
     expect(link.hash).toMatch(/^#pair=.+/)
     expect(pairing.qr).toMatch(/^data:image\/png;base64,/)
+  })
+
+  it('reconhece só a faixa do Tailscale (100.64.0.0/10) como rede privada além da rede local', () => {
+    for (const ip of ['100.64.0.1', '100.74.20.52', '100.127.255.255', '::ffff:100.100.1.1']) expect(isTailscaleAddress(ip)).toBe(true)
+    for (const ip of ['100.63.255.255', '100.128.0.0', '8.8.8.8', '100.64.0', '100.64.0.256', '']) expect(isTailscaleAddress(ip)).toBe(false)
+  })
+
+  // Só roda no PC com Tailscale: o pedido sai e chega pelo endereço do Tailscale de verdade, como o celular fora de casa.
+  it.skipIf(tailscaleAddresses().length === 0)('pelo endereço do Tailscale, o mesmo pareamento de casa vale e o health o informa', async () => {
+    const s = await setup()
+    const address = tailscaleAddresses()[0]!
+    const viaTailscale = s.url.replace('127.0.0.1', address)
+    expect((await (await fetch(`${s.url}/health`)).json()).tailscale).toBe(address)
+    expect((await fetch(`${viaTailscale}/health`)).status).toBe(200)
+    // O app copia o cookie do endereço de casa para o do Tailscale: o PC reconhece o mesmo celular.
+    const state = await fetch(`${viaTailscale}/api/state`, { headers: { cookie: s.cookie } })
+    expect(state.status).toBe(200)
+    expect((await state.json()).deviceId).toBe(s.device)
+    expect((await fetch(`${viaTailscale}/api/state`)).status).toBe(401)
   })
 
   it('entrega ao app a versão e o APK que vieram no instalador do PC, mesmo sem pareamento', async () => {
