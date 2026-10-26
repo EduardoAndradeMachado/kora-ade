@@ -18,6 +18,7 @@ const api: KoraApi = {
   setTheme: (theme) => ipcRenderer.invoke('settings:theme', theme),
   setSizes: (sizes) => ipcRenderer.invoke('settings:sizes', sizes),
   setAlerts: (alerts) => ipcRenderer.invoke('settings:alerts', alerts),
+  openAtLogin: (enabled) => ipcRenderer.invoke('app:open-at-login', enabled),
   setFileWordWrap: (on) => ipcRenderer.invoke('settings:word-wrap', on),
   focusWindow: () => ipcRenderer.send('window:focus'),
   reportError: (text) => ipcRenderer.send('errors:report', text),

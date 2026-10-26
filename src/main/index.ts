@@ -514,15 +514,12 @@ function setRemoteEnabled(enabled: boolean): MobileStatus {
   if (!enabled) {
     if (keepAwake !== null) powerSaveBlocker.stop(keepAwake)
     keepAwake = null
-    startWithWindows(false)
     terminals.setMirroring(server.pairing.enabled)
     return server.stopRemote()
   }
   terminals.setMirroring(true)
   // Longe de casa por dias: o PC suspenso some do relay até alguém voltar para acordá-lo.
   keepAwake ??= powerSaveBlocker.start('prevent-app-suspension')
-  // Reinício do Windows Update no meio da viagem: o Kora volta sozinho quando alguém entra no Windows.
-  startWithWindows(true)
   return server.startRemote(RELAY_URL, RELAY_CLIENT)
 }
 
@@ -537,9 +534,12 @@ async function mobileAccount(action: AccountAction): Promise<MobileStatus> {
   return setRemoteEnabled(true)
 }
 
-// No desenvolvimento quem abriria com o Windows seria o electron.exe solto, sem o Kora: só o instalado se registra.
-function startWithWindows(enabled: boolean): void {
-  if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: enabled })
+// Abrir com o Windows é escolha de cada um, nas Configurações; a fonte da verdade é o próprio Windows. No
+// desenvolvimento quem abriria seria o electron.exe solto, sem o Kora: só o instalado se registra.
+function openAtLogin(enabled?: boolean): { available: boolean; enabled: boolean } {
+  if (!app.isPackaged) return { available: false, enabled: false }
+  if (enabled !== undefined) app.setLoginItemSettings({ openAtLogin: enabled })
+  return { available: true, enabled: app.getLoginItemSettings().openAtLogin }
 }
 
 // Com a conexão ligada o main mantém a cópia das telas; desligada, o custo de interpretar a saída some.
@@ -746,6 +746,7 @@ function registerIpc(): void {
   ipcMain.handle('update:check', () => updates?.check())
   ipcMain.handle('update:install', () => updates?.install() ?? false)
   ipcMain.handle('app:version', () => app.getVersion())
+  ipcMain.handle('app:open-at-login', (_e, enabled: unknown) => openAtLogin(z.boolean().optional().parse(enabled ?? undefined)))
   ipcMain.handle('terminal:resolve-link', (_e, id: string, text: string) => resolveTerminalLink(projectRoot(id), String(text)))
   ipcMain.on('diag:long-task', (_e, ms: number) => lagLog(`${new Date().toISOString()} interface travada ${Math.round(Number(ms))} ms`))
   ipcMain.handle('fs:move', (_e, id: string, fromRel: string, toDirRel: string) =>

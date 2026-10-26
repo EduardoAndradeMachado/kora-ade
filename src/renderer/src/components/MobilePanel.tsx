@@ -197,7 +197,7 @@ function AwayRoute({ status, busy, onTurn, onAccount, onSignOut, onAdmin }: {
       ? <span className="flex flex-wrap items-center gap-x-1.5">Conta <span className="text-foreground">{account.email}</span>·<button type="button" className="underline hover:text-foreground" disabled={busy} onClick={onSignOut}>Sair</button></span>
       : <AccountForm busy={busy} onSubmit={onAccount} />}
     {account?.admin && <button type="button" className="flex items-center gap-1.5 self-start underline hover:text-foreground" onClick={onAdmin}><Icon name="engrenagem" className="size-3" />Painel do servidor</button>}
-    {remote && <span>Enquanto ligado, o PC não suspende sozinho (a tela pode apagar) e o Kora abre com o Windows. Desligar, reiniciar ou suspender pelo menu tiram o PC do ar.</span>}
+    {remote && <span>Com o Kora aberto, o PC não suspende sozinho (a tela pode apagar). Desligar, reiniciar ou suspender pelo menu tiram o PC do ar; para o Kora voltar sozinho depois de reiniciar, ligue Abrir com o Windows nas Configurações.</span>}
   </RouteCard>
 }
 

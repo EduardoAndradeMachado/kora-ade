@@ -707,6 +707,11 @@ test('R45 tema: fica nas Configurações, chama de "Sistema" o modo que segue o 
   // A janela segue o tema pelo nativeTheme do Electron (o Chromium deriva dele o prefers-color-scheme).
   await expect.poll(() => run.app.evaluate(({ nativeTheme }) => nativeTheme.themeSource)).toBe('dark')
   await waitFor(() => readState(env).settings?.theme === 'dark', 'tema escuro salvo')
+  // Abrir com o Windows é escolha à parte, nas Configurações; fora do app instalado ele avisa que não vale.
+  const dialog = page.getByRole('dialog', { name: 'Configurações' })
+  await expect(dialog.getByRole('switch', { name: 'Abrir o Kora com o Windows' })).toHaveAttribute('aria-checked', 'false')
+  await expect(dialog.locator('section').filter({ hasText: 'Inicialização' })).toContainText('Só funciona no app instalado.')
+  await page.screenshot({ path: 'e2e/.results/configuracoes.png' })
 })
 
 test('R53 voltar para um projeto onde uma aba foi renomeada antes não reabre a edição do nome (clique vai para a aba, não para o título)', async ({ kora }) => {

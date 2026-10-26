@@ -214,6 +214,22 @@ function MobileSummary({ onOpen }: { onOpen(): void }): React.JSX.Element {
   )
 }
 
+function StartupSection(): React.JSX.Element {
+  const [state, setState] = useState<{ available: boolean; enabled: boolean } | null>(null)
+  useEffect(() => { void window.kora.openAtLogin().then(setState) }, [])
+  return (
+    <section className="flex flex-col gap-2.5 border-t px-4 py-3.5">
+      <h3 className="text-xs font-semibold">Inicialização</h3>
+      <Toggle
+        checked={state?.enabled ?? false}
+        label="Abrir o Kora com o Windows"
+        detail={state && !state.available ? 'Só funciona no app instalado.' : 'Abre o Kora sozinho quando você entra no Windows, inclusive depois de uma atualização do sistema.'}
+        onChange={(enabled) => { if (state?.available) void window.kora.openAtLogin(enabled).then(setState) }}
+      />
+    </section>
+  )
+}
+
 export function SettingsPanel(props: SettingsPanelProps): React.JSX.Element {
   const { update } = props
   const version = `Versão ${props.version ?? '…'}`
@@ -266,6 +282,8 @@ export function SettingsPanel(props: SettingsPanelProps): React.JSX.Element {
           ))}
         </div>
       </section>
+
+      <StartupSection />
 
       <section className="flex flex-col gap-2.5 border-t px-4 py-3.5">
         <h3 className="text-xs font-semibold">Atualização</h3>
