@@ -113,7 +113,11 @@ export function MobileApp(): React.JSX.Element {
   }, [device, refresh])
 
   useEffect(() => {
-    const update = (): void => document.documentElement.style.setProperty('--mobile-height', `${window.visualViewport?.height ?? window.innerHeight}px`)
+    // O teclado encolhe a área visível; a pinça também, mas só por ampliar: vezes a escala, o app não encolhe com o zoom.
+    const update = (): void => {
+      const viewport = window.visualViewport
+      document.documentElement.style.setProperty('--mobile-height', `${viewport ? viewport.height * viewport.scale : window.innerHeight}px`)
+    }
     update()
     window.visualViewport?.addEventListener('resize', update)
     window.addEventListener('resize', update)

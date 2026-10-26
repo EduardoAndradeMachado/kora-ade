@@ -546,6 +546,13 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     const frame = page.frameLocator('iframe.html-view')
     await browserExpect(frame.locator('h1')).toHaveText('Página de teste')
     await browserExpect(frame.locator('h1')).toHaveCSS('color', 'rgb(255, 0, 0)')
+    // Pinça amplia a página como uma tela: o app mantém a altura de antes e a prévia não é cortada embaixo.
+    const fullHeight = await page.evaluate(() => document.documentElement.clientHeight)
+    await touch.send('Input.synthesizePinchGesture', { x: 175, y: 400, scaleFactor: 2.5, gestureSourceType: 'mouse' })
+    await expect.poll(() => page.evaluate(() => window.visualViewport!.scale)).toBeGreaterThan(2)
+    await expect.poll(() => page.locator('.mobile-app').evaluate((app) => Math.round(app.getBoundingClientRect().height))).toBe(fullHeight)
+    await touch.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 })
+    await expect.poll(() => page.evaluate(() => window.visualViewport!.scale)).toBe(1)
     await page.goBack()
     await page.locator('.file-row').filter({ hasText: 'doc.pdf' }).click()
     // A página é desenhada de verdade (o canvas ganha pixels) e o zoom dos botões muda o tamanho dela.
