@@ -407,9 +407,11 @@ export class MobileServer {
     } catch {
       return json(response, 400, { error: 'Endereço inválido.' })
     }
-    // Um HTML do projeto roda com scripts: não lê nada fora da pasta dele nem arquivo oculto (.env, .git).
+    // Um HTML do projeto roda com scripts: não lê nada fora da pasta dele nem arquivo oculto (.env, .git). Oculto conta
+    // a partir da pasta do arquivo aberto: o que a pessoa abriu numa pasta oculta (.kora/temp) abre.
     const inside = link.base === '' || parts.join('/').startsWith(`${link.base}/`)
-    if (!inside || parts.some((part) => part.startsWith('.'))) return json(response, 403, { error: 'Fora da pasta deste arquivo.' })
+    const below = link.base === '' ? parts : parts.slice(link.base.split('/').length)
+    if (!inside || below.some((part) => part.startsWith('.'))) return json(response, 403, { error: 'Fora da pasta deste arquivo.' })
     let file: string
     try {
       file = this.options.runtime.filePath(link.projectId, parts.join('/'))

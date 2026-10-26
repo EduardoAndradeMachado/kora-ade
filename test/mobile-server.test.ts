@@ -660,6 +660,23 @@ describe('arquivos do projeto pelo celular', () => {
     writeFileSync(join(s.dir, 'site', '.env'), 'TOKEN=123')
     expect((await fetch(`${s.url}${raw.replace(/site\/index\.html$/, 'segredo.txt')}`)).status).toBe(403)
     expect((await fetch(`${s.url}${raw.replace(/index\.html$/, '.env')}`)).status).toBe(403)
+    // O arquivo aberto numa pasta oculta (os temporários do agente em .kora/temp) abre; o oculto ao lado dele, não.
+    mkdirSync(join(s.dir, '.kora', 'temp', 'sub'), { recursive: true })
+    writeFileSync(join(s.dir, '.kora', 'temp', 'relatorio.pdf'), '%PDF-1.4')
+    writeFileSync(join(s.dir, '.kora', 'temp', '.env'), 'TOKEN=123')
+    writeFileSync(join(s.dir, '.kora', 'temp', 'sub', '.segredo'), 'x')
+    const hidden = (await (await fetch(`${s.url}/api/file-link?project=p&path=${encodeURIComponent(join('.kora', 'temp', 'relatorio.pdf'))}`, { headers: { cookie: s.cookie } })).json()).raw as string
+    const pdf = await fetch(`${s.url}${hidden}`)
+    expect(pdf.status).toBe(200)
+    expect(await pdf.text()).toBe('%PDF-1.4')
+    expect((await fetch(`${s.url}${hidden.replace(/relatorio\.pdf$/, '.env')}`)).status).toBe(403)
+    expect((await fetch(`${s.url}${hidden.replace(/relatorio\.pdf$/, 'sub/.segredo')}`)).status).toBe(403)
+    // HTML na raiz do projeto: o .env da raiz segue fora do alcance.
+    writeFileSync(join(s.dir, 'raiz.html'), '<h1>raiz</h1>')
+    writeFileSync(join(s.dir, '.env'), 'TOKEN=123')
+    const root = (await (await fetch(`${s.url}/api/file-link?project=p&path=raiz.html`, { headers: { cookie: s.cookie } })).json()).raw as string
+    expect((await fetch(`${s.url}${root}`)).status).toBe(200)
+    expect((await fetch(`${s.url}${root.replace(/raiz\.html$/, '.env')}`)).status).toBe(403)
     // Desvincular o celular derruba os links que ele abriu.
     s.server.revoke(s.device)
     expect((await fetch(`${s.url}${raw}`)).status).toBe(403)
