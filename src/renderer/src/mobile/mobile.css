@@ -68,11 +68,11 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .tree-missing svg { width: 14px; height: 14px; }
 .project-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
 .project-heading > svg, .project-heading > img { width: 32px; height: 32px; }
-.project-heading > div { min-width: 0; }
+.project-heading > div { flex: 1; min-width: 0; }
+.project-heading h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-return { width: 40px; height: 36px; min-height: 36px; border-radius: 12px; color: var(--foreground); background: color-mix(in oklab, var(--brand-amber) 16%, transparent); }
 .chat-return svg { width: 20px; height: 20px; }
 .project-heading .chat-return { margin-left: auto; }
-.project-path { color: var(--muted-foreground); font-family: var(--terminal-font-family); font-size: 11px; overflow-wrap: anywhere; margin: 6px 0 0; user-select: text; }
 .missing-notice { display: flex; gap: 12px; border: 1px solid #d98e3a40; background: #d98e3a0b; padding: 14px; border-radius: 6px; margin-bottom: 18px; font-size: 12px; }
 .missing-notice p { color: var(--muted-foreground); margin: 6px 0 10px; }
 .missing-notice > svg { margin-top: 2px; color: var(--brand-amber); }
