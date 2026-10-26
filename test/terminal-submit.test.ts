@@ -54,8 +54,13 @@ async function pastesFor(agent: 'claude' | undefined, text = 'o que é isso?'): 
   // Espera a cópia do terminal ler o pedido de colagem (?2004h); antes disso o envio iria como texto solto.
   await terminals.snapshot(id)
   terminals.submit(id, text, agent, ['C:\\temp\\print-1.png', 'C:\\temp\\print-2.png'])
-  // Espera as colagens e o Enter (ou a falta dele) chegarem: a última resposta do programa é a que vale.
-  await new Promise((resolve) => setTimeout(resolve, 1500))
+  // Espera as colagens e o Enter (ou a falta dele) chegarem: a última resposta do programa é a que vale. Tempo fixo
+  // não serve (com a máquina carregada a última colagem chegava depois); espera o programa ficar 500 ms quieto.
+  const quietSince = { length: -1, at: 0 }
+  await expect.poll(() => {
+    if (output.length !== quietSince.length) Object.assign(quietSince, { length: output.length, at: performance.now() })
+    return output.includes('COLAGENS=') && performance.now() - quietSince.at >= 500
+  }, { timeout: 10_000, interval: 50 }).toBe(true)
   const reports = [...output.matchAll(/COLAGENS=(\{.*?\});/g)]
   expect(reports.length).toBeGreaterThan(0)
   return { ...JSON.parse(reports.at(-1)![1]!), received: output }
