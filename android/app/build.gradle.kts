@@ -21,8 +21,8 @@ android {
         minSdk = 30
         targetSdk = 37
         // O Kora do PC compara este número com o do app instalado para oferecer a atualização.
-        versionCode = 16
-        versionName = "0.5.1"
+        versionCode = 17
+        versionName = "0.5.2"
         resValue("string", "app_name", "Kora")
     }
 
