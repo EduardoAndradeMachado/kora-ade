@@ -5,6 +5,7 @@ import { Icon } from '@/brand/icons'
 import { ipcErrorMessage } from '@/lib/ipc-error'
 import { cn } from '@/lib/utils'
 import { Toggle } from './Toggle'
+import { RemoteConnection } from './RemoteConnection'
 
 type Invite = { pairing: MobilePairing; known: Set<string> }
 
@@ -94,6 +95,7 @@ export function MobileConnection(): React.JSX.Element {
         <Button disabled={busy} onClick={() => void newConnection()}>Gerar outro</Button>
       </div> : status.network && <Button className="self-start" disabled={busy} onClick={() => void newConnection()}><Icon name="novaAba" />Nova conexão</Button>}
     </>}
+    <RemoteConnection status={status} onStatus={setStatus} />
     {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
   </section>
 }

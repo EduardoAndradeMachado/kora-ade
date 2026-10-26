@@ -138,3 +138,25 @@ describe('Fora de casa no servidor do celular', () => {
     expect(reopened.pairing.identity()).toEqual(first)
   })
 })
+
+describe('QR do pareamento', () => {
+  it('pela rede local, leva o PC e o relay sem mudar o que o app atual lê; só com Fora de casa, aponta para o relay', async () => {
+    const { server, relay, pc } = await setup()
+    const home = new URL((await server.invite()).url)
+    expect(home.protocol).toBe('http:')
+    expect(home.searchParams.get('pc')).toBe(pc)
+    expect(home.searchParams.get('relay')).toBeNull()
+    // O app atual só lê host, porta e #pair=: continua igual.
+    expect(home.hash).toMatch(/^#pair=[\w-]+$/)
+    server.startRemote(relay, TOKEN)
+    const both = new URL((await server.invite()).url)
+    expect(both.searchParams.get('relay')).toBe(new URL(relay).host)
+    await server.stop()
+    const away = new URL((await server.invite()).url)
+    expect(`${away.protocol}//${away.host}`).toBe(`https://${new URL(relay).host}`)
+    expect(away.searchParams.get('pc')).toBe(pc)
+    expect(away.hash).toMatch(/^#pair=[\w-]+$/)
+    server.stopRemote()
+    await expect(server.invite()).rejects.toThrow('Ative a conexão antes.')
+  })
+})

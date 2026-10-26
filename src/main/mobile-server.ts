@@ -95,6 +95,7 @@ export class MobileServer {
   private readonly clients = new Set<{ device: string; response: ServerResponse; tunnel: boolean }>()
   // Fora de casa: o link com o relay e o atendimento que recebe os envelopes (não escuta porta nenhuma).
   private link: RelayLink | null = null
+  private relayHost: string | null = null
   private tunnel: Server | null = null
   private readonly tunnels = new Set<TunnelSocket>()
   private heartbeat: ReturnType<typeof setInterval> | null = null
@@ -199,6 +200,7 @@ export class MobileServer {
   // Fora de casa: o PC fica ligado ao relay e cada celular que chega por ele cai no mesmo atendimento da rede local.
   startRemote(url: string, invite: string): MobileStatus {
     this.link?.stop()
+    this.relayHost = new URL(url).host
     this.link = new RelayLink({
       url,
       token: invite,
@@ -216,6 +218,7 @@ export class MobileServer {
   stopRemote(): MobileStatus {
     this.link?.stop()
     this.link = null
+    this.relayHost = null
     this.endClients((client) => client.tunnel)
     for (const socket of this.tunnels) socket.destroy()
     this.tunnels.clear()
@@ -270,11 +273,17 @@ export class MobileServer {
     }
   }
 
+  // O QR leva também a impressão digital do PC (o app confere o PC no aperto de mãos) e o relay, para o app entrar de
+  // fora depois. Pela rede local é o endereço de sempre: o app antigo e a página no navegador ignoram o que está no meio.
+  // Só com Fora de casa ligado, o QR aponta para o relay, que responde 404 a quem o abrir no navegador.
   async invite(): Promise<MobilePairing> {
     const address = this.server ? await preferredAddress() : null
-    if (!address) throw new Error(this.server ? 'Conecte o PC ao Wi-Fi ou ao cabo de rede para conectar o celular.' : 'Ative a conexão antes.')
+    if (!address && !this.relayHost) throw new Error(this.server ? 'Conecte o PC ao Wi-Fi ou ao cabo de rede para conectar o celular.' : 'Ative a conexão antes.')
     const invitation = this.pairing.invite()
-    const link = `http://${address}:${this.port}/#pair=${invitation.code}`
+    const pc = this.pairing.identity().fingerprint
+    const link = address
+      ? `http://${address}:${this.port}/?pc=${pc}${this.relayHost ? `&relay=${this.relayHost}` : ''}#pair=${invitation.code}`
+      : `https://${this.relayHost}/?pc=${pc}#pair=${invitation.code}`
     return { url: link, qr: await QRCode.toDataURL(link, { width: 256, margin: 2, errorCorrectionLevel: 'M' }), expiresAt: new Date(invitation.until).toISOString() }
   }
 

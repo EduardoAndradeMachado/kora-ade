@@ -133,6 +133,7 @@ const api: KoraApi = {
   onMobileState: (listener) => subscribe<[DesktopSessionState]>('mobile:state', listener),
   mobileStatus: () => ipcRenderer.invoke('mobile:status'),
   setMobileEnabled: (enabled) => ipcRenderer.invoke('mobile:enabled', enabled),
+  setMobileRemote: (enabled, invite) => ipcRenderer.invoke('mobile:remote', enabled, invite),
   onMobileStatus: (listener) => subscribe<[MobileStatus]>('mobile:status', listener),
   pairMobile: () => ipcRenderer.invoke('mobile:pair'),
   revokeMobile: (id) => ipcRenderer.invoke('mobile:revoke', id),

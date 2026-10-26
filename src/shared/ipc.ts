@@ -221,6 +221,8 @@ export interface KoraApi {
   onMobileState(listener: (snapshot: DesktopSessionState) => void): () => void
   mobileStatus(): Promise<MobileStatus>
   setMobileEnabled(enabled: boolean): Promise<MobileStatus>
+  // Fora de casa; o convite só precisa vir na primeira vez (fica guardado no PC).
+  setMobileRemote(enabled: boolean, invite?: string): Promise<MobileStatus>
   onMobileStatus(listener: (status: MobileStatus) => void): () => void
   pairMobile(): Promise<MobilePairing>
   revokeMobile(id: string): Promise<MobileStatus>

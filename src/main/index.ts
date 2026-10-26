@@ -2,7 +2,7 @@ import { basename, dirname, join } from 'node:path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, release } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, safeStorage, shell, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { loadState, saveState } from './store'
 import { addProject, applyLayout, forgetSessionName, mergeTabs, missingProjectIds, namedSessions, relocateProject, removeProject, renameProject, setProjectCollapsed, setTabAgent } from './projects'
@@ -497,12 +497,33 @@ function launchTerminal(tab: TabRef, cols: number, rows: number, launch: Launch)
   terminals.spawn(tab.id, cwd, cols, rows, startup)
 }
 
+// Fora de casa: o PC fica no ponto de encontro (relay). KORA_RELAY_URL troca o relay nos testes e no desenvolvimento.
+const RELAY_URL = process.env['KORA_RELAY_URL'] ?? 'wss://kora-sync.eduardom.com.br'
+let keepAwake: number | null = null
+
+function setRemoteEnabled(enabled: boolean, invite?: string): MobileStatus {
+  const server = mobileServer!
+  const code = invite?.trim() || server.pairing.remote.invite
+  if (enabled && !code) throw new Error('Informe o código de convite do ponto de encontro.')
+  server.pairing.setRemote(enabled, code)
+  if (!enabled) {
+    if (keepAwake !== null) powerSaveBlocker.stop(keepAwake)
+    keepAwake = null
+    terminals.setMirroring(server.pairing.enabled)
+    return server.stopRemote()
+  }
+  terminals.setMirroring(true)
+  // Longe de casa por dias: o PC suspenso some do relay até alguém voltar para acordá-lo.
+  keepAwake ??= powerSaveBlocker.start('prevent-app-suspension')
+  return server.startRemote(RELAY_URL, code)
+}
+
 // Com a conexão ligada o main mantém a cópia das telas; desligada, o custo de interpretar a saída some.
 async function setMobileEnabled(enabled: boolean): Promise<MobileStatus> {
   const server = mobileServer!
   if (!enabled) {
     const status = await server.stop()
-    terminals.setMirroring(false)
+    terminals.setMirroring(server.pairing.remote.enabled)
     return status
   }
   terminals.setMirroring(true)
@@ -883,6 +904,7 @@ function registerIpc(): void {
   ipcMain.on('terminal:kill', (_e, id: string) => terminals.kill(id))
   ipcMain.handle('mobile:status', () => mobileServer!.status())
   ipcMain.handle('mobile:enabled', (_e, enabled: unknown) => setMobileEnabled(z.boolean().parse(enabled)))
+  ipcMain.handle('mobile:remote', (_e, enabled: unknown, invite: unknown) => setRemoteEnabled(z.boolean().parse(enabled), z.string().max(200).optional().parse(invite ?? undefined)))
   ipcMain.handle('mobile:pair', () => mobileServer!.invite())
   ipcMain.handle('mobile:revoke', (_e, id: unknown) => mobileServer!.revoke(String(id)))
   ipcMain.handle('mobile:rename', (_e, id: unknown, name: unknown) => mobileServer!.rename(String(id), String(name)))
@@ -1073,6 +1095,11 @@ void app.whenReady().then(() => {
   createWindow()
   createTray()
   if (mobileServer.pairing.enabled) void setMobileEnabled(true).catch((err) => console.error('[kora] conexão com o celular', err))
+  if (mobileServer.pairing.remote.enabled) {
+    try { setRemoteEnabled(true) } catch (err) { console.error('[kora] fora de casa', err) }
+  }
+  // Volta da suspensão: a conexão com o relay morreu enquanto o PC dormia e é refeita na hora.
+  powerMonitor.on('resume', () => mobileServer?.reconnectRemote())
   // KORA_UPDATE_FEED aponta para um servidor local nos testes de atualização; o normal são as Releases do GitHub.
   const feed = process.env['KORA_UPDATE_FEED']
   if (app.isPackaged) {
