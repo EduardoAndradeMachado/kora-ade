@@ -181,7 +181,6 @@ function AwayRoute({ status, busy, onTurn, onAccount, onSignOut, onAdmin }: {
 }): React.JSX.Element {
   const remote = status?.remote ?? null
   const account = status?.account ?? null
-  const [asking, setAsking] = useState(false)
   // Ligar sem conta não liga: o aviso aparece e o formulário de entrar abre logo abaixo.
   const [needsAccount, setNeedsAccount] = useState(false)
   const state = remote ? REMOTE_STATE[remote.state] : null
@@ -191,14 +190,12 @@ function AwayRoute({ status, busy, onTurn, onAccount, onSignOut, onAdmin }: {
       if (busy) return
       if (account || !enabled) return onTurn(enabled)
       setNeedsAccount(true)
-      setAsking(true)
     }}>
     {!account && needsAccount && <span role="alert" className="flex items-center gap-1.5 text-[var(--brand-amber)]"><Icon name="cadeado" active className="size-3" />Entre na sua conta do Kora para ligar o acesso fora de casa.</span>}
     {state && <span className="flex items-center gap-1.5"><Dot tone={refused ? 'wait' : state.tone} />{refused ? remote!.error : state.text}</span>}
     {account
       ? <span className="flex flex-wrap items-center gap-x-1.5">Conta <span className="text-foreground">{account.email}</span>·<button type="button" className="underline hover:text-foreground" disabled={busy} onClick={onSignOut}>Sair</button></span>
-      : asking ? <AccountForm busy={busy} onSubmit={onAccount} onCancel={() => setAsking(false)} />
-      : <span>Precisa de uma conta do Kora, gratuita. <button type="button" className="underline hover:text-foreground" onClick={() => setAsking(true)}>Entrar ou criar conta</button></span>}
+      : <AccountForm busy={busy} onSubmit={onAccount} />}
     {account?.admin && <button type="button" className="flex items-center gap-1.5 self-start underline hover:text-foreground" onClick={onAdmin}><Icon name="engrenagem" className="size-3" />Painel do servidor</button>}
     {remote && <span>Enquanto ligado, o PC não suspende sozinho (a tela pode apagar) e o Kora abre com o Windows. Desligar, reiniciar ou suspender pelo menu tiram o PC do ar.</span>}
   </RouteCard>
@@ -208,7 +205,7 @@ type AccountStep = 'entrar' | 'cadastro' | 'codigo-cadastro' | 'esqueci' | 'codi
 
 // Entrar, criar conta ou trocar a senha, dentro do próprio cartão. O código chega por e-mail e é digitado aqui; a senha
 // só é escolhida junto com o código, por quem recebeu o e-mail.
-function AccountForm({ busy, onSubmit, onCancel }: { busy: boolean; onSubmit(action: AccountAction): Promise<void>; onCancel(): void }): React.JSX.Element {
+function AccountForm({ busy, onSubmit }: { busy: boolean; onSubmit(action: AccountAction): Promise<void> }): React.JSX.Element {
   const [step, setStep] = useState<AccountStep>('entrar')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -238,6 +235,7 @@ function AccountForm({ busy, onSubmit, onCancel }: { busy: boolean; onSubmit(act
   }
   const withCode = step === 'codigo-cadastro' || step === 'codigo-esqueci'
   const input = 'w-full min-w-0 rounded-md border bg-transparent px-2 py-1 text-xs text-foreground'
+  const link = 'font-medium text-[var(--brand-amber)] hover:underline disabled:opacity-50'
   const title = { entrar: 'Entrar na conta do Kora', cadastro: 'Criar conta do Kora', 'codigo-cadastro': 'Confirme o e-mail', esqueci: 'Trocar a senha', 'codigo-esqueci': 'Nova senha' }[step]
   const action = { entrar: 'Entrar e ligar', cadastro: 'Enviar código', 'codigo-cadastro': 'Criar conta e ligar', esqueci: 'Enviar código', 'codigo-esqueci': 'Trocar senha e ligar' }[step]
   return <form aria-label={title} className="flex flex-col gap-1.5" onSubmit={(event) => { event.preventDefault(); submit() }}>
@@ -245,19 +243,21 @@ function AccountForm({ busy, onSubmit, onCancel }: { busy: boolean; onSubmit(act
     {notice && <span role="status">{notice}</span>}
     {withCode
       ? <input autoFocus inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="Código de 6 números" aria-label="Código do e-mail" className={cn(input, 'tracking-widest')} />
-      : <input autoFocus type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="seu@email.com" aria-label="E-mail" className={input} />}
+      : <input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="seu@email.com" aria-label="E-mail" className={input} />}
     {(step === 'entrar' || withCode) && <input type="password" autoComplete={step === 'entrar' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)}
       placeholder={step === 'entrar' ? 'Senha' : 'Nova senha, 10 caracteres ou mais'} aria-label={step === 'entrar' ? 'Senha' : 'Nova senha'} className={input} />}
     {error && <span role="alert" className="text-destructive">{error}</span>}
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <Button type="submit" disabled={busy || !(withCode ? code.length === 6 && password : email.trim() && (step !== 'entrar' || password))} className="px-2.5 py-1">{busy ? 'Aguarde…' : action}</Button>
+    <div className="mt-1 flex items-center gap-2">
+      <Button type="submit" disabled={busy || !(withCode ? code.length === 6 && password : email.trim() && (step !== 'entrar' || password))} className="px-3 py-1.5">{busy ? 'Aguarde…' : action}</Button>
+    </div>
+    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
       {step === 'entrar' && <>
-        <button type="button" className="underline hover:text-foreground" onClick={() => go('cadastro')}>Criar conta</button>
-        <button type="button" className="underline hover:text-foreground" onClick={() => go('esqueci')}>Esqueci a senha</button>
+        <span>Não tem conta? <button type="button" className={link} onClick={() => go('cadastro')}>Criar conta</button></span>
+        <span aria-hidden>·</span>
+        <button type="button" className={link} onClick={() => go('esqueci')}>Esqueci a senha</button>
       </>}
-      {withCode && <button type="button" className="underline hover:text-foreground" disabled={busy} onClick={() => void send({ acao: step === 'codigo-cadastro' ? 'cadastro' : 'esqueci', email }, step)}>Reenviar código</button>}
-      {step !== 'entrar' && <button type="button" className="underline hover:text-foreground" onClick={() => go('entrar')}>Já tenho conta</button>}
-      <button type="button" className="underline hover:text-foreground" onClick={onCancel}>Cancelar</button>
+      {withCode && <><span>Não chegou? <button type="button" className={link} disabled={busy} onClick={() => void send({ acao: step === 'codigo-cadastro' ? 'cadastro' : 'esqueci', email }, step)}>Reenviar código</button></span><span aria-hidden>·</span></>}
+      {step !== 'entrar' && <span>Já tem conta? <button type="button" className={link} onClick={() => go('entrar')}>Entrar</button></span>}
     </div>
   </form>
 }

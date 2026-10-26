@@ -100,7 +100,7 @@ test('R-conta Fora de casa: cria a conta pelo painel do celular, liga, e o dono 
     await admin.getByRole('button', { name: 'Voltar' }).click()
     await panel.getByRole('button', { name: 'Sair' }).click()
     await expect(away).toHaveAttribute('aria-checked', 'false')
-    await expect(panel.getByText('Entrar ou criar conta')).toBeVisible()
+    await expect(panel.getByRole('form', { name: 'Entrar na conta do Kora' })).toBeVisible()
     await expect.poll(async () => (await relay.sql`select 1 from kora_sync.devices where kind = 'pc'`).length).toBe(0)
   } finally {
     await relay.close()
