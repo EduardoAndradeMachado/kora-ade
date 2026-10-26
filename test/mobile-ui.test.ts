@@ -321,6 +321,13 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.getByRole('button', { name: 'Continuar sessão', exact: true }).click()
     await browserExpect(treeTab).toContainText('Aberta')
     expect(terminals.pids().has(tab.id)).toBe(true)
+    // Recolher no celular vale só para ele e continua assim depois de reabrir o app.
+    await page.getByRole('button', { name: 'Recolher Projeto de validação', exact: true }).click()
+    await page.reload()
+    await browserExpect(page.getByRole('button', { name: 'Expandir Projeto de validação', exact: true })).toBeVisible()
+    await browserExpect(treeTab).toHaveCount(0)
+    await page.getByRole('button', { name: 'Expandir Projeto de validação', exact: true }).click()
+    await browserExpect(treeTab).toBeVisible()
 
     const newFolder = join(dir, 'Novo projeto real')
     mkdirSync(newFolder)

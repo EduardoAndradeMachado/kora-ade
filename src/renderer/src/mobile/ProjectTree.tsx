@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Icon } from '@/brand/icons'
 import type { MobileState, MobileTab } from '@shared/mobile'
 import type { Project, ProjectGroup } from '@shared/state'
@@ -7,6 +7,17 @@ import { agentLabel } from '@/components/AgentIcon'
 import { MobileProjectAvatar } from './MobileProjectAvatar'
 import { TabIcon } from './NewTabSheet'
 import { useLongPress } from './longPress'
+
+// Abrir e recolher no celular vale só para ele e sobrevive a sair da lista e reabrir o app; o que nunca foi mexido
+// aqui segue o PC. remembered segura a escolha entre uma visita e outra à lista mesmo sem localStorage.
+const EXPANDED_KEY = 'kora-tree-expanded'
+let remembered: Record<string, boolean> | null = null
+const savedExpanded = (): Record<string, boolean> => {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? '{}')
+    return value && typeof value === 'object' ? value as Record<string, boolean> : {}
+  } catch { return {} }
+}
 
 export const tabStatus = (tab: MobileTab): string => !tab.live ? 'Suspensa' : tab.activity === 'working' ? 'Trabalhando' : 'Aberta'
 
@@ -20,7 +31,11 @@ export function ProjectTree({ state, search, onProject, onFiles, onNewTab, onTab
   onTabActions(tab: MobileTab): void
   onRelocate(id: string): void
 }): React.JSX.Element {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [expanded, setExpanded] = useState(() => remembered ?? savedExpanded())
+  useEffect(() => {
+    remembered = expanded
+    try { localStorage.setItem(EXPANDED_KEY, JSON.stringify(expanded)) } catch { /* sem armazenamento, vale até fechar o app */ }
+  }, [expanded])
   const longPress = useLongPress()
   const query = search.trim().toLocaleLowerCase('pt-BR')
   const matches = (project: Project): boolean => !query || `${project.name} ${project.path}`.toLocaleLowerCase('pt-BR').includes(query) || state.tabs.some((tab) => tab.projectId === project.id && tab.title.toLocaleLowerCase('pt-BR').includes(query))
