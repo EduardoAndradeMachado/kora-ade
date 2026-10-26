@@ -69,7 +69,7 @@ export function SizeControl(props: Props): React.JSX.Element {
         data-tip="Tamanho da interface, do terminal e dos arquivos"
         onClick={(e) => setAnchor(anchor ? null : e.currentTarget.getBoundingClientRect())}
         className={cn(
-          'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs tabular-nums text-muted-foreground hover:bg-secondary hover:text-foreground',
+          'flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-xs tabular-nums text-muted-foreground hover:bg-secondary hover:text-foreground',
           anchor && 'bg-secondary text-foreground'
         )}
       >

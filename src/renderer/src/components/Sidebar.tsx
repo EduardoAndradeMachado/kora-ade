@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { GROUP_NAME_MAX, type Project, type ProjectGroup, type ThemePreference } from '@shared/state'
+import { GROUP_NAME_MAX, type Project, type ProjectGroup } from '@shared/state'
 import { childrenOf, depthOf, descendantIds, drawOrder } from '@shared/groups'
 import { AlertBell, isDormant, TabIcon, type RenameRequest, type Tab } from '@/components/TabBar'
 import { NewTabMenu, type NewTabChoice } from '@/components/NewTabMenu'
@@ -13,7 +13,7 @@ import { UpdateBanner } from '@/components/UpdateBanner'
 import { cn } from '@/lib/utils'
 import { useMobileStatus } from '@/lib/use-mobile-status'
 import { copyPath } from '@/lib/copied-path'
-import { Icon, type IconName } from '@/brand/icons'
+import { Icon } from '@/brand/icons'
 import { Wordmark } from '@/brand/Logo'
 import { hintClass, mergeDragHandlers, mimeFor, useReorderDrag } from '@/lib/drag'
 import type { Place, ProjectDrop } from '@shared/arrange'
@@ -52,8 +52,6 @@ interface Props {
   onRelocate(project: Project): void
   onArrangeProject(draggedId: string, drop: ProjectDrop): void
   onReorderTab(projectId: string, fromId: string, toId: string, place: Place): void
-  theme: ThemePreference
-  onSetTheme(theme: ThemePreference): void
   zoom: number
   terminalFontSize: number
   fileFontSize: number
@@ -65,12 +63,6 @@ interface Props {
   onOpenSettings(): void
   onOpenMobile(): void
 }
-
-const THEMES: { theme: ThemePreference; label: string; icon: IconName }[] = [
-  { theme: 'system', label: 'Sistema', icon: 'temaSistema' },
-  { theme: 'light', label: 'Claro', icon: 'temaClaro' },
-  { theme: 'dark', label: 'Escuro', icon: 'temaEscuro' }
-]
 
 const iconButton =
   'rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground'
@@ -89,7 +81,6 @@ function readHiddenOpen(): boolean {
 export function Sidebar(props: Props): React.JSX.Element {
   const [menu, setMenu] = useState<{ x: number; y: number; project: Project } | null>(null)
   const [iconVersion, setIconVersion] = useState<Record<string, number>>({})
-  const [themeMenu, setThemeMenu] = useState<{ x: number; y: number } | null>(null)
   const [hiddenOpen, setHiddenOpen] = useState(readHiddenOpen)
   const projectDrag = useReorderDrag('projects', 'y', (dragged, target, place) =>
     props.onArrangeProject(dragged, { kind: 'project', id: target, place })
@@ -473,25 +464,6 @@ export function Sidebar(props: Props): React.JSX.Element {
             <Icon name="engrenagem" className="size-3.5" />
           </button>
           <MobileButton onClick={props.onOpenMobile} />
-          <button
-            type="button"
-            data-tip="Tema"
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect()
-              setThemeMenu({ x: r.left, y: r.top - 8 - THEMES.length * 28 })
-            }}
-            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
-          >
-            {(() => {
-              const current = THEMES.find((t) => t.theme === props.theme) ?? THEMES[0]!
-              return (
-                <>
-                  <Icon name={current.icon} className="size-3.5" />
-                  {current.label}
-                </>
-              )
-            })()}
-          </button>
         </div>
         <SizeControl
           zoom={props.zoom}
@@ -502,17 +474,6 @@ export function Sidebar(props: Props): React.JSX.Element {
           onFileFont={props.onFileFont}
         />
       </div>
-      {themeMenu && (
-        <ContextMenu
-          x={themeMenu.x}
-          y={themeMenu.y}
-          items={THEMES.map((t) => ({
-            label: `${t.theme === props.theme ? '● ' : ''}${t.label}`,
-            onSelect: () => props.onSetTheme(t.theme)
-          }))}
-          onClose={() => setThemeMenu(null)}
-        />
-      )}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={projectMenu(menu.project)} onClose={() => setMenu(null)} />}
       {groupMenu && (
         <ContextMenu x={groupMenu.x} y={groupMenu.y} items={groupMenuItems(groupMenu.group)} onClose={() => setGroupMenu(null)} />

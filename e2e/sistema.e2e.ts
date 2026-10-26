@@ -342,8 +342,8 @@ test('R50 engrenagem abre Configurações com logo, versão e estado da atualiza
   const gear = page.locator(tip('Configurações'))
   await expect(gear.locator('[data-icon="engrenagem"]')).toHaveCount(1)
   const gearBox = (await gear.boundingBox())!
-  const themeBox = (await page.locator(tip('Tema')).boundingBox())!
-  expect(gearBox.x + gearBox.width, 'engrenagem na ponta esquerda, antes do tema').toBeLessThanOrEqual(themeBox.x)
+  const phoneBox = (await page.locator(tip('Celular')).boundingBox())!
+  expect(gearBox.x + gearBox.width, 'engrenagem na ponta esquerda, antes do celular').toBeLessThanOrEqual(phoneBox.x)
   await gear.click()
   const dialog = page.getByRole('dialog', { name: 'Configurações' })
   await expect(dialog).toBeVisible()

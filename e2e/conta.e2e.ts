@@ -43,9 +43,10 @@ test('R-conta Fora de casa: cria a conta pelo painel do celular, liga, e o dono 
     const away = panel.getByRole('switch', { name: 'Fora de casa' })
     await expect(away).toHaveAttribute('aria-checked', 'false')
 
-    // Sem conta, ligar abre o formulário em vez de ligar.
+    // Sem conta, ligar não liga: aparece o aviso para entrar e o formulário logo abaixo.
     await away.click()
     await expect(away).toHaveAttribute('aria-checked', 'false')
+    await expect(panel.getByRole('alert')).toContainText('Entre na sua conta do Kora para ligar o acesso fora de casa.')
     await expect(panel.getByRole('form', { name: 'Entrar na conta do Kora' })).toBeVisible()
     await page.screenshot({ path: 'e2e/.results/conta-entrar.png' })
 
@@ -61,7 +62,7 @@ test('R-conta Fora de casa: cria a conta pelo painel do celular, liga, e o dono 
     await panel.getByLabel('Código do e-mail').fill('000000')
     await panel.getByLabel('Nova senha').fill('senha-boa-123')
     await panel.getByRole('button', { name: 'Criar conta e ligar' }).click()
-    await expect(panel.getByRole('alert')).toContainText('Código incorreto ou vencido')
+    await expect(panel.getByRole('alert').filter({ hasText: 'Código incorreto ou vencido' })).toBeVisible()
 
     await panel.getByLabel('Código do e-mail').fill(code[1]! + code[2]!)
     await panel.getByRole('button', { name: 'Criar conta e ligar' }).click()

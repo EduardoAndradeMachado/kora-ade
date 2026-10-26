@@ -693,12 +693,20 @@ test('R44 clique com o botão do meio fecha a aba, na barra de cima e na lateral
   await expect(ui.sideTab(page, 'Dois')).toHaveCount(0)
 })
 
-test('R45 tema: o seletor chama o modo que segue o sistema de "Sistema"', async ({ kora }) => {
-  const run = await kora.launch(kora.env())
+test('R45 tema: fica nas Configurações, chama de "Sistema" o modo que segue o Windows e a escolha vale e é salva', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
   const page = run.page
-  await page.locator(tip('Tema')).click()
-  await expect(ui.menuItem(page, '● Sistema')).toBeVisible()
+  await expect(page.locator(tip('Tema'))).toHaveCount(0)
+  await page.locator(tip('Configurações')).click()
+  const themes = page.getByRole('dialog', { name: 'Configurações' }).getByRole('group', { name: 'Tema' })
+  await expect(themes.getByRole('button', { name: 'Sistema' })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByText('Seguir o Windows')).toHaveCount(0)
+  await themes.getByRole('button', { name: 'Escuro' }).click()
+  await expect(themes.getByRole('button', { name: 'Escuro' })).toHaveAttribute('aria-pressed', 'true')
+  // A janela segue o tema pelo nativeTheme do Electron (o Chromium deriva dele o prefers-color-scheme).
+  await expect.poll(() => run.app.evaluate(({ nativeTheme }) => nativeTheme.themeSource)).toBe('dark')
+  await waitFor(() => readState(env).settings?.theme === 'dark', 'tema escuro salvo')
 })
 
 test('R53 voltar para um projeto onde uma aba foi renomeada antes não reabre a edição do nome (clique vai para a aba, não para o título)', async ({ kora }) => {

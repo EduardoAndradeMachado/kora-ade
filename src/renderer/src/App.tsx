@@ -940,8 +940,6 @@ export function App(): React.JSX.Element {
         onTerminalFont={onTerminalFont}
         onFileFont={onFileFont}
         onReorderTab={reorderTab}
-        theme={state.settings.theme}
-        onSetTheme={(theme) => void window.kora.setTheme(theme).then(setState)}
         update={update}
         onInstallUpdate={installUpdate}
         onOpenSettings={() => setSettingsOpen(true)}
@@ -1180,6 +1178,8 @@ export function App(): React.JSX.Element {
           onCheck={() => void window.kora.checkUpdate()}
           onInstall={() => void installUpdate()}
           onClose={closeSettings}
+          theme={state.settings.theme}
+          onSetTheme={(theme) => void window.kora.setTheme(theme).then(setState)}
           alerts={state.settings.alerts}
           onAlertsChange={(alerts) => void window.kora.setAlerts(alerts).then(setState)}
           onPreviewSound={playChime}

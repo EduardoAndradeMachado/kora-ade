@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { UpdateStatus } from '@shared/update'
-import type { Alerts } from '@shared/state'
+import type { Alerts, ThemePreference } from '@shared/state'
 import type { ErrorSummary } from '@shared/ipc'
 import { Button } from '@/brand/Button'
-import { Icon } from '@/brand/icons'
+import { Icon, type IconName } from '@/brand/icons'
 import { Lockup } from '@/brand/Logo'
 import { cn } from '@/lib/utils'
 import { ipcErrorMessage } from '@/lib/ipc-error'
@@ -15,6 +15,13 @@ import { Toggle } from './Toggle'
 const SITE_URL = 'https://kora-ade.vercel.app/'
 const REPO_URL = 'https://github.com/EduardoAndradeMachado/kora-ade'
 
+// "Sistema" segue o tema do Windows.
+const THEMES: { theme: ThemePreference; label: string; icon: IconName }[] = [
+  { theme: 'system', label: 'Sistema', icon: 'temaSistema' },
+  { theme: 'light', label: 'Claro', icon: 'temaClaro' },
+  { theme: 'dark', label: 'Escuro', icon: 'temaEscuro' }
+]
+
 export interface SettingsPanelProps {
   version: string | null
   update: UpdateStatus
@@ -22,6 +29,8 @@ export interface SettingsPanelProps {
   onInstall(): void
   installing: boolean
   onClose(): void
+  theme: ThemePreference
+  onSetTheme(theme: ThemePreference): void
   alerts: Alerts
   onAlertsChange(next: Alerts): void
   onPreviewSound(): void
@@ -236,6 +245,27 @@ export function SettingsPanel(props: SettingsPanelProps): React.JSX.Element {
         <Lockup height={34} />
         <span className="rounded-full border px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">{version}</span>
       </div>
+
+      <section className="flex flex-col gap-2.5 border-t px-4 py-3.5">
+        <h3 className="text-xs font-semibold">Aparência</h3>
+        <div role="group" aria-label="Tema" className="grid grid-cols-3 gap-1.5">
+          {THEMES.map((option) => (
+            <button
+              key={option.theme}
+              type="button"
+              aria-pressed={props.theme === option.theme}
+              onClick={() => props.onSetTheme(option.theme)}
+              className={cn(
+                'flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground',
+                props.theme === option.theme && 'border-[var(--brand-amber)] text-foreground'
+              )}
+            >
+              <Icon name={option.icon} active={props.theme === option.theme} className="size-3.5" />
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section className="flex flex-col gap-2.5 border-t px-4 py-3.5">
         <h3 className="text-xs font-semibold">Atualização</h3>

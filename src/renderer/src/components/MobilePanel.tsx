@@ -125,7 +125,7 @@ export function MobilePanel({ onClose }: { onClose(): void }): React.JSX.Element
 
       <section className="flex flex-col gap-3 px-5 py-4">
         <h3 className="text-xs font-semibold">Caminhos até este PC</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-3">
           <HomeRoute status={status} busy={busy} onTurn={(enabled) => run(async () => setStatus(await window.kora.setMobileEnabled(enabled)))} />
           <AwayRoute status={status} busy={busy}
             onTurn={(enabled) => run(async () => setStatus(await window.kora.setMobileRemote(enabled)))}
@@ -168,7 +168,6 @@ function HomeRoute({ status, busy, onTurn }: { status: MobileStatus | null; busy
     {on && (status?.address
       ? <span className="flex flex-wrap items-center gap-x-1.5"><Dot tone="ok" />Neste Wi-Fi em <code className="text-foreground">{status.address}</code></span>
       : <span className="flex items-center gap-1.5"><Dot tone="wait" />Conecte o PC ao Wi-Fi ou ao cabo de rede.</span>)}
-    {on && status?.tailscale && <span className="flex flex-wrap items-center gap-x-1.5"><Dot tone="ok" />Também pelo Tailscale em <code className="text-foreground">{status.tailscale}</code></span>}
   </RouteCard>
 }
 
@@ -183,10 +182,18 @@ function AwayRoute({ status, busy, onTurn, onAccount, onSignOut, onAdmin }: {
   const remote = status?.remote ?? null
   const account = status?.account ?? null
   const [asking, setAsking] = useState(false)
+  // Ligar sem conta não liga: o aviso aparece e o formulário de entrar abre logo abaixo.
+  const [needsAccount, setNeedsAccount] = useState(false)
   const state = remote ? REMOTE_STATE[remote.state] : null
   const refused = remote?.error?.includes('conta ativa') ?? false
   return <RouteCard label="Fora de casa" detail="De qualquer rede, cifrado de ponta a ponta pelo servidor do Kora." checked={remote !== null}
-    onToggle={(enabled) => { if (busy) return; if (account || !enabled) onTurn(enabled); else setAsking(true) }}>
+    onToggle={(enabled) => {
+      if (busy) return
+      if (account || !enabled) return onTurn(enabled)
+      setNeedsAccount(true)
+      setAsking(true)
+    }}>
+    {!account && needsAccount && <span role="alert" className="flex items-center gap-1.5 text-[var(--brand-amber)]"><Icon name="cadeado" active className="size-3" />Entre na sua conta do Kora para ligar o acesso fora de casa.</span>}
     {state && <span className="flex items-center gap-1.5"><Dot tone={refused ? 'wait' : state.tone} />{refused ? remote!.error : state.text}</span>}
     {account
       ? <span className="flex flex-wrap items-center gap-x-1.5">Conta <span className="text-foreground">{account.email}</span>·<button type="button" className="underline hover:text-foreground" disabled={busy} onClick={onSignOut}>Sair</button></span>
