@@ -540,7 +540,7 @@ async function setMobileEnabled(enabled: boolean): Promise<MobileStatus> {
   try {
     return await server.start()
   } catch (err) {
-    terminals.setMirroring(false)
+    terminals.setMirroring(server.pairing.remote.enabled)
     throw err
   }
 }

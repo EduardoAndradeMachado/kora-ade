@@ -211,6 +211,7 @@ export class MobileServer {
     })
     this.link.start()
     this.keepClientsAlive()
+    if (this.options.audioDir) void this.dropStaleAudio(this.options.audioDir).catch(() => {})
     this.notify()
     return this.status()
   }
