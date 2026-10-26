@@ -104,6 +104,8 @@ class MainActivity : ComponentActivity() {
     private val principal = Handler(Looper.getMainLooper())
     // Fora de casa: a passagem que leva a tela ao PC pelo relay (null pela rede de casa) e o WebSocket até o relay.
     private var passagem: Passagem? = null
+    // O #pair= da página que está abrindo: se ela cair e o app trocar para o relay, o convite vai junto.
+    private var codigoPendente: String? = null
     private val http by lazy { OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).pingInterval(25, TimeUnit.SECONDS).build() }
     private val certificadosRegistrados = mutableSetOf<String>()
     private val reavaliar = Runnable { reavaliarCaminho(voltouParaFrente = false) }
@@ -258,6 +260,7 @@ class MainActivity : ComponentActivity() {
                 principal.post {
                     when {
                         kora != null && pareado != false -> abrir(kora)
+                        kora != null && ultimo?.peloRelay == true -> abrirPeloRelay(ultimo)
                         // Longe de casa: a rede local não responde, mas o PC está no relay.
                         kora == null && ultimo?.peloRelay == true -> abrirPeloRelay(ultimo)
                         else -> procurar()
@@ -452,7 +455,7 @@ class MainActivity : ComponentActivity() {
             Log.w(TAG, "falha ao abrir ${request.url}: ${error.errorCode} ${error.description}")
             // A rede local não respondeu e o PC está no relay: tenta por ele antes de mostrar a lista de PCs.
             val salvo = pcs.find { it.id == atual?.id }
-            if (salvo != null && salvo.peloRelay && passagem == null) return abrirPeloRelay(salvo)
+            if (salvo != null && salvo.peloRelay && passagem == null) return abrirPeloRelay(salvo, codigoPendente)
             val motivo = "Não consegui abrir o Kora${atual?.let { " do PC ${exibido(it)}" } ?: ""}. O PC está ligado, com a conexão do celular ativa?"
             fecharPassagem()
             atual = null
@@ -473,6 +476,7 @@ class MainActivity : ComponentActivity() {
 
     private fun abrir(kora: Kora, codigo: String? = null) {
         fecharPassagem()
+        codigoPendente = codigo
         atual = kora
         pcs = lembrar(pcs, kora)
         preferencias.edit().putString(ULTIMO_PC, kora.id).remove(HOST_ANTIGO).apply()
@@ -491,6 +495,7 @@ class MainActivity : ComponentActivity() {
         val pc = salvo.pc ?: return
         val relay = salvo.relay ?: return
         fecharPassagem()
+        codigoPendente = codigo
         val nova = Passagem(PORTA_PASSAGEM) { Envelope.abrir(http, "wss://$relay/c/$pc", contextoDoEnvelope(IdentidadeDoCelular.chave(), pc), PRAZO_RELAY_MS) }.iniciar()
         passagem = nova
         atual = Kora(salvo.id, "127.0.0.1", nova.porta, salvo.nome, salvo.edicao, salvo.tailscale, pc, relay)
@@ -528,6 +533,7 @@ class MainActivity : ComponentActivity() {
             val local = sondarSalvo(salvo)?.takeIf { !peloRelay || pareado(it) == true }
             principal.post {
                 if (atual !== atualAgora || isFinishing) return@post
+                if (local != null) pcs = lembrar(pcs, local)
                 when {
                     peloRelay && local != null -> abrir(local)
                     !peloRelay && local == null && salvo.peloRelay -> abrirPeloRelay(salvo)
@@ -566,7 +572,8 @@ class MainActivity : ComponentActivity() {
     // Pareamento só pelo relay: o /health do PC chega pelo envelope (o PC aceita um certificado novo enquanto o QR vale).
     private fun sondarPeloRelay(relay: String, pc: String): Kora? = runCatching {
         Envelope.abrir(http, "wss://$relay/c/$pc", contextoDoEnvelope(IdentidadeDoCelular.chave(), pc), PRAZO_RELAY_MS).use { envelope ->
-            envelope.saida.write("GET /health HTTP/1.1\r\nHost: kora\r\nConnection: close\r\n\r\n".toByteArray())
+            // HTTP/1.0: o PC responde sem dividir o corpo em partes (chunked), e o JSON vem inteiro depois do cabeçalho.
+            envelope.saida.write("GET /health HTTP/1.0\r\nHost: kora\r\n\r\n".toByteArray())
             val saude = JSONObject(envelope.entrada.readBytes().decodeToString().substringAfter("\r\n\r\n"))
             val edicao = saude.optString("edition")
             Kora(saude.getString("id"), "", 0, nomeDoPc(saude.optString("name").ifEmpty { "PC" }, edicao), edicao, saude.optString("tailscale").takeIf { !saude.isNull("tailscale") && it.isNotEmpty() }, pc, relay)
@@ -641,6 +648,7 @@ class MainActivity : ComponentActivity() {
                 when {
                     kora == null && salvo.peloRelay -> abrirPeloRelay(salvo)
                     kora == null -> procurar("O ${salvo.exibido} não respondeu. No PC, o Kora precisa estar aberto, com a conexão do celular ligada (Configurações → Celular).")
+                    pareado == false && salvo.peloRelay -> abrirPeloRelay(salvo)
                     pareado == false -> parear(salvo.exibido)
                     else -> abrir(kora)
                 }
