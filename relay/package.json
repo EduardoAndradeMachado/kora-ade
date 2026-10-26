@@ -1,0 +1,10 @@
+{
+  "name": "kora-relay",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "engines": { "node": ">=22.18" },
+  "dependencies": {
+    "ws": "8.22.0"
+  }
+}

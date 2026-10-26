@@ -16,12 +16,21 @@ const PING_MS = 25_000
 const WAIT_PC_MS = 10_000
 const MAX_WAITING_PER_PC = 8
 const MAX_QUEUED_BYTES = 1 << 20
+const MAX_FAILURES = 20
+const FAILURE_WINDOW_MS = 10 * 60_000
+const BAN_MS = 30 * 60_000
+const MAX_SOCKETS_PER_IP = 32
 
 export interface RelayOptions {
   token: string
   // Caminho do health check (started_at), que não é adivinhável para não revelar o serviço a quem vasculha.
   healthPath?: string
   pingMs?: number
+  // Atrás do proxy do EasyPanel todos chegam do IP do proxy: o IP de quem pediu vem no X-Forwarded-For. Só ligar com o
+  // proxy na frente, porque sem ele qualquer um forja esse cabeçalho.
+  trustProxy?: boolean
+  maxFailures?: number
+  banMs?: number
 }
 
 interface Waiting { pc: string; phone: WebSocket; queue: RawData[]; bytes: number; timer: NodeJS.Timeout }
@@ -34,6 +43,29 @@ export function createRelay(options: RelayOptions): Server {
   const waiting = new Map<string, Waiting>()
   const started = new Date()
   const expected = Buffer.from(`Bearer ${options.token}`)
+  const failures = new Map<string, { count: number; since: number; bannedUntil: number }>()
+  const openSockets = new Map<string, number>()
+
+  // O proxy acrescenta o IP de quem conectou no fim da lista; o começo dela pode ter sido escrito por quem pediu.
+  const clientIp = (request: IncomingMessage): string => {
+    const forwarded = options.trustProxy ? String(request.headers['x-forwarded-for'] ?? '').split(',').map((part) => part.trim()).filter(Boolean).at(-1) : undefined
+    return forwarded ?? request.socket.remoteAddress ?? ''
+  }
+  const banned = (ip: string): boolean => (failures.get(ip)?.bannedUntil ?? 0) > Date.now()
+  // Quem insiste em token errado ou caminho inventado fica bloqueado por um tempo, com a mesma resposta de sempre.
+  const failed = (ip: string): void => {
+    const now = Date.now()
+    const current = failures.get(ip)
+    const entry = current && now - current.since < FAILURE_WINDOW_MS ? current : { count: 0, since: now, bannedUntil: 0 }
+    entry.count++
+    if (entry.count >= (options.maxFailures ?? MAX_FAILURES)) entry.bannedUntil = now + (options.banMs ?? BAN_MS)
+    failures.set(ip, entry)
+  }
+  const sweep = setInterval(() => {
+    const now = Date.now()
+    for (const [ip, entry] of failures) if (entry.bannedUntil <= now && now - entry.since >= FAILURE_WINDOW_MS) failures.delete(ip)
+  }, 60_000)
+  sweep.unref()
 
   const authorized = (request: IncomingMessage): boolean => {
     const given = Buffer.from(request.headers.authorization ?? '')
@@ -91,17 +123,21 @@ export function createRelay(options: RelayOptions): Server {
   }
 
   const server = createServer((request, response) => {
-    if (options.healthPath && request.method === 'GET' && request.url === options.healthPath) {
+    const ip = clientIp(request)
+    if (!banned(ip) && options.healthPath && request.method === 'GET' && request.url === options.healthPath) {
       const uptime = Math.floor((Date.now() - started.getTime()) / 1000)
       const hours = Math.floor(uptime / 3600)
       const minutes = Math.floor((uptime % 3600) / 60)
       response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
       return response.end(JSON.stringify({ started_at: started.toISOString(), uptime_seconds: uptime, uptime_human: hours ? `${hours}h ${minutes}m` : `${minutes}m` }))
     }
+    if (!banned(ip)) failed(ip)
     response.writeHead(404, { 'content-length': '0' }).end()
   })
 
   server.on('upgrade', (request, socket, head) => {
+    const ip = clientIp(request)
+    if (banned(ip) || (openSockets.get(ip) ?? 0) >= MAX_SOCKETS_PER_IP) return refuse(socket)
     const parts = (request.url ?? '').split('?')[0]!.split('/').filter(Boolean)
     const [kind, id = '', session] = parts
     const route =
@@ -109,8 +145,19 @@ export function createRelay(options: RelayOptions): Server {
       : kind === 's' && ID.test(id) && parts.length === 3 && SESSION.test(session!) && waiting.get(session!)?.pc === id && authorized(request) ? 'data'
       : kind === 'c' && ID.test(id) && parts.length === 2 && controls.has(id) ? 'phone'
       : null
-    if (!route) return refuse(socket)
+    if (!route) {
+      // Celular procurando um PC desligado não é ataque: quem está viajando com o PC fora do ar segue tentando, e não
+      // pode estar bloqueado quando o PC voltar. Adivinhar um ID de 256 bits não é viável, então isso não abre brecha.
+      if (!(kind === 'c' && ID.test(id) && parts.length === 2)) failed(ip)
+      return refuse(socket)
+    }
     sockets.handleUpgrade(request, socket, head, (ws) => {
+      openSockets.set(ip, (openSockets.get(ip) ?? 0) + 1)
+      ws.on('close', () => {
+        const left = (openSockets.get(ip) ?? 1) - 1
+        if (left > 0) openSockets.set(ip, left)
+        else openSockets.delete(ip)
+      })
       keepAlive(ws)
       if (route === 'control') control(id, ws)
       else if (route === 'phone') phone(id, ws)
@@ -119,6 +166,7 @@ export function createRelay(options: RelayOptions): Server {
   })
 
   server.on('close', () => {
+    clearInterval(sweep)
     for (const socket of sockets.clients) socket.terminate()
     for (const entry of waiting.values()) clearTimeout(entry.timer)
   })

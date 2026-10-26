@@ -2,6 +2,8 @@ import { createServer as createHttpServer, request, type Server, type IncomingMe
 import { createPublicKey, X509Certificate } from 'node:crypto'
 import { createServer as createTcpServer, connect as tcpConnect, type Server as TcpServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
+import { spawn } from 'node:child_process'
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket, createWebSocketStream } from 'ws'
 import { createRelay } from '../relay/relay'
@@ -156,5 +158,80 @@ describe('relay discreto', () => {
     expect(health.headers['cache-control']).toBe('no-store')
     expect(JSON.parse(health.body)).toMatchObject({ started_at: expect.any(String), uptime_seconds: expect.any(Number) })
     expect(health.body.toLowerCase()).not.toContain('kora')
+  })
+})
+
+describe('relay contra abuso', () => {
+  const upgrade = (port: number, path: string, headers: Record<string, string> = {}): Promise<number> => new Promise((resolve) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers })
+    ws.on('open', () => { ws.terminate(); resolve(101) })
+    ws.on('unexpected-response', (_req, res) => { resolve(res.statusCode!); ws.terminate() })
+    ws.on('error', () => {})
+  })
+  const auth = { authorization: `Bearer ${TOKEN}` }
+
+  it('bloqueia por um tempo quem erra demais, inclusive com o token certo depois', async () => {
+    const pcId = createIdentity('PC')
+    const relay = await listen(createRelay({ token: TOKEN, maxFailures: 3, banMs: 400 }))
+    for (let i = 0; i < 3; i++) expect(await upgrade(relay, `/s/${pcId.fingerprint}`, { authorization: 'Bearer chute' })).toBe(404)
+    expect(await upgrade(relay, `/s/${pcId.fingerprint}`, auth)).toBe(404)
+    await new Promise((resolve) => setTimeout(resolve, 450))
+    expect(await upgrade(relay, `/s/${pcId.fingerprint}`, auth)).toBe(101)
+  })
+
+  it('celular procurando um PC desligado não é bloqueado, e entra quando o PC volta', async () => {
+    const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
+    const relay = await listen(createRelay({ token: TOKEN, maxFailures: 3, banMs: 60_000 }))
+    for (let i = 0; i < 6; i++) expect(await upgrade(relay, `/c/${pcId.fingerprint}`)).toBe(404)
+    const { app } = echoApp()
+    pc(relay, pcId.fingerprint, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
+    await waitControl()
+    expect(await phoneRequest(relay, pcId.fingerprint, phoneId, 'voltei')).toBe('eco: voltei')
+  })
+
+  it('atrás do proxy, bloqueia o IP de quem pediu e não o do proxy; sem proxy, ignora o cabeçalho', async () => {
+    const pcId = createIdentity('PC')
+    const behind = await listen(createRelay({ token: TOKEN, trustProxy: true, maxFailures: 2, banMs: 60_000 }))
+    const attacker = { 'x-forwarded-for': '203.0.113.9' }
+    for (let i = 0; i < 2; i++) expect(await upgrade(behind, '/inventado', attacker)).toBe(404)
+    expect(await upgrade(behind, `/s/${pcId.fingerprint}`, { ...auth, ...attacker })).toBe(404)
+    // O PC legítimo chega pelo mesmo proxy, com outro IP: segue entrando.
+    expect(await upgrade(behind, `/s/${pcId.fingerprint}`, { ...auth, 'x-forwarded-for': '198.51.100.4' })).toBe(101)
+    // Quem forja o começo da lista não escapa: vale o último IP, o que o proxy acrescentou.
+    expect(await upgrade(behind, `/s/${pcId.fingerprint}`, { ...auth, 'x-forwarded-for': '198.51.100.4, 203.0.113.9' })).toBe(404)
+    const direct = await listen(createRelay({ token: TOKEN, maxFailures: 2, banMs: 60_000 }))
+    for (let i = 0; i < 2; i++) expect(await upgrade(direct, '/inventado', { 'x-forwarded-for': '203.0.113.50' })).toBe(404)
+    expect(await upgrade(direct, `/s/${pcId.fingerprint}`, { ...auth, 'x-forwarded-for': '198.51.100.77' })).toBe(404)
+  })
+})
+
+describe('relay como roda no contêiner', () => {
+  const run = (env: Record<string, string>): ReturnType<typeof spawn> => {
+    const child = spawn(process.execPath, ['main.ts'], { cwd: resolve('relay'), env: { ...process.env, ...env } })
+    closers.push(() => child.kill())
+    return child
+  }
+  const output = (child: ReturnType<typeof spawn>): Promise<{ code: number | null; text: string }> => new Promise((done) => {
+    let text = ''
+    child.stdout!.on('data', (chunk) => { text += chunk })
+    child.stderr!.on('data', (chunk) => { text += chunk })
+    child.on('exit', (code) => done({ code, text }))
+  })
+
+  it('recusa subir sem token forte ou com health previsível', async () => {
+    expect(await output(run({ RELAY_TOKEN: 'curto', HEALTH_PATH: '/saude-a8f3k2p9' }))).toMatchObject({ code: 1, text: expect.stringContaining('RELAY_TOKEN') })
+    expect(await output(run({ RELAY_TOKEN: 'x'.repeat(40), HEALTH_PATH: '/health' }))).toMatchObject({ code: 1, text: expect.stringContaining('HEALTH_PATH') })
+  })
+
+  it('sobe com a configuração do EasyPanel e responde o health no caminho secreto', async () => {
+    const child = run({ RELAY_TOKEN: 'x'.repeat(40), HEALTH_PATH: '/saude-a8f3k2p9', PORT: '0', TRUST_PROXY: '1' })
+    const port = await new Promise<number>((done, fail) => {
+      child.stdout!.on('data', (chunk) => { const match = /porta (\d+)/.exec(String(chunk)); if (match) done(Number(match[1])) })
+      child.on('exit', (code) => fail(new Error(`saiu com ${code}`)))
+    })
+    const health = await fetch(`http://127.0.0.1:${port}/saude-a8f3k2p9`)
+    expect(health.status).toBe(200)
+    expect((await health.json()).started_at).toEqual(expect.any(String))
+    expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(404)
   })
 })
