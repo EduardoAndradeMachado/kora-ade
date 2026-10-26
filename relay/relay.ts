@@ -19,6 +19,7 @@ const MAX_QUEUED_BYTES = 1 << 20
 // O TLS do PC junta vários registros numa escrita só: uma resposta grande (um arquivo da tela, o APK) chega como uma
 // mensagem de vários MB. O limite só barra o absurdo.
 const MAX_MESSAGE_BYTES = 64 << 20
+const MAX_BUFFERED_BYTES = 32 << 20
 const MAX_FAILURES = 20
 const FAILURE_WINDOW_MS = 10 * 60_000
 const BAN_MS = 30 * 60_000
@@ -35,6 +36,7 @@ export interface RelayOptions {
   maxFailures?: number
   banMs?: number
   maxMessageBytes?: number
+  maxBufferedBytes?: number
 }
 
 interface Waiting { pc: string; phone: WebSocket; queue: RawData[]; bytes: number; timer: NodeJS.Timeout }
@@ -118,9 +120,17 @@ export function createRelay(options: RelayOptions): Server {
     clearTimeout(entry.timer)
     waiting.delete(session)
     const { phone: other, queue } = entry
-    for (const chunk of queue) socket.send(chunk, { binary: true })
-    other.on('message', (chunk) => socket.send(chunk, { binary: true }))
-    socket.on('message', (chunk) => other.send(chunk, { binary: true }))
+    const limit = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES
+    const forward = (to: WebSocket, chunk: RawData): void => {
+      if (to.bufferedAmount > limit) {
+        to.terminate()
+        return
+      }
+      to.send(chunk, { binary: true })
+    }
+    for (const chunk of queue) forward(socket, chunk)
+    other.on('message', (chunk) => forward(socket, chunk))
+    socket.on('message', (chunk) => forward(other, chunk))
     const end = (): void => { other.close(); socket.close() }
     other.on('close', end)
     socket.on('close', end)

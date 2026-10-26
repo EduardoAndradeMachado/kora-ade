@@ -288,3 +288,36 @@ describe('relay com tráfego pesado e conexões ruins', () => {
   })
 })
 
+describe('relay com quem não lê', () => {
+  it('o destino que para de ler derruba a sessão em vez de acumular memória na VPS', async () => {
+    const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
+    const relay = await listen(createRelay({ token: TOKEN, maxBufferedBytes: 256 * 1024 }))
+    // O PC manda uma resposta enorme no ritmo que o relay aceita; o celular nunca lê o que chega.
+    // Os buffers do kernel no loopback engolem dezenas de MB, então o fluxo precisa ser bem maior que eles.
+    const TOTAL = 256 * 1024 * 1024
+    const outcome = new Promise<'cortada' | 'completa'>((resolve) => {
+      const app = createHttpServer((_req, res) => {
+        const chunk = Buffer.alloc(1024 * 1024, 1)
+        let sent = 0
+        const pump = (): void => {
+          while (sent < TOTAL) {
+            sent += chunk.length
+            if (!res.write(chunk)) return void res.once('drain', pump)
+          }
+          res.end()
+        }
+        res.on('close', () => resolve(res.writableFinished ? 'completa' : 'cortada'))
+        pump()
+      })
+      pc(relay, pcId.fingerprint, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
+    })
+    await waitControl()
+    const ws = new WebSocket(`ws://127.0.0.1:${relay}/c/${pcId.fingerprint}`)
+    closers.push(() => ws.terminate())
+    const socket = await sealEnvelope(createWebSocketStream(ws), phoneId, pcId.fingerprint)
+    ;(ws as unknown as { _socket: { pause(): void } })._socket.pause()
+    request({ createConnection: () => socket, path: '/' }, () => {}).on('error', () => {}).end()
+    // Sem o teto, o relay guardaria os 256 MB na memória e a resposta terminaria; com ele, a sessão cai no meio.
+    expect(await outcome).toBe('cortada')
+  }, 30_000)
+})
