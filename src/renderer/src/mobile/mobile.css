@@ -121,7 +121,6 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .error-banner > span { flex: 1; }
 .error-banner svg { width: 15px; height: 15px; }
 .pair-screen { height: var(--mobile-height); overflow: auto; padding: 24px; display: grid; place-items: center; }
-.splash { height: var(--mobile-height); display: grid; place-items: center; animation: fade-in .3s ease both; }
 .pair-card { width: min(100%, 420px); border: 1px solid var(--border); border-radius: 10px; padding: 28px; background: var(--card); }
 .pair-card h1 { margin-top: 28px; }
 .pair-card p { font-size: 13px; color: var(--muted-foreground); margin: 14px 0; }
@@ -340,7 +339,6 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .pdf-count { display: flex; align-items: center; padding: 0 8px 0 6px; margin-right: 2px; border-right: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pdf-error { margin: 16px; }
 
-.loading { flex: 1; min-height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; color: var(--muted-foreground); font-size: 13px; }
 
 .file-retry { flex: 1; display: grid; place-items: center; padding: 24px; }
 
@@ -381,3 +379,35 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
   .file-mode button { min-height: 26px; }
   .save-button { min-height: 30px; }
 }
+
+/* Esqueleto: o formato do que vai aparecer, com um brilho passando; parado para quem pede menos movimento. As linhas
+   usam as classes das reais (file-row, folder-entry, session-row, tree-project-row) e caixas de texto da altura do
+   texto de verdade, para a troca não mexer na tela. */
+.skeleton-bar { display: block; height: 10px; border-radius: 4px; flex-shrink: 0; background: linear-gradient(90deg, var(--secondary) 30%, color-mix(in oklab, var(--secondary), var(--foreground) 9%) 50%, var(--secondary) 70%); background-size: 300% 100%; animation: skeleton-shine 1.5s ease-in-out infinite; }
+@keyframes skeleton-shine { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton-bar { animation: none; } }
+.skeleton-list { display: flex; flex-direction: column; }
+.skeleton-row { display: flex; align-items: center; pointer-events: none; }
+/* As linhas reais esticam todo span de dentro (.folder-entry span { flex: 1 }); no esqueleto só o texto estica. */
+.skeleton-row span { flex: 0 0 auto; }
+.skeleton-row .skeleton-row-text, .skeleton-row .skeleton-line { flex: 1 1 auto; }
+.skeleton-row .skeleton-icon, .usage-agent-name .skeleton-icon { width: 17px; height: 17px; border-radius: 4px; }
+.skeleton-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.skeleton-line { display: flex; align-items: center; height: 18px; flex: 1; }
+.skeleton-line-small { height: 15px; margin-top: 5px; }
+.session-row.skeleton-row { min-height: 44px; }
+.tree-project-row.skeleton-row { gap: 10px; padding: 0 4px; }
+.skeleton-tree-toggle { width: 24px; flex-shrink: 0; }
+.tree-project-row .skeleton-action { width: 18px; height: 18px; margin: 0 9px; }
+.skeleton-static { pointer-events: none; opacity: .55; }
+.skeleton-search-text { font-size: 16px; color: var(--muted-foreground); padding: 12px 0; }
+.skeleton-count { width: 10px; height: 12px; }
+.skeleton-pill { height: 36px; border-radius: 6px; }
+.skeleton-trail { width: 62%; height: 12px; margin: 12px 4px; }
+.skeleton-code { display: flex; flex-direction: column; padding: 4px 0; background: var(--card); height: 100%; }
+.skeleton-code-line { display: flex; align-items: center; gap: 14px; height: 19.5px; padding: 0 8px 0 10px; }
+.skeleton-gutter { width: 14px; height: 9px; opacity: .6; }
+.skeleton-terminal { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 8px; background: var(--terminal-surface); }
+.skeleton-terminal-line { display: flex; align-items: center; height: 15px; }
+.skeleton-pages { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 16px; }
+.skeleton-pages .skeleton-page { width: min(100%, 420px); height: auto; aspect-ratio: 1 / 1.414; border-radius: 4px; }

@@ -9,6 +9,7 @@ import { api } from './api'
 import { pathForPrompt, uploadImage } from './images'
 import { canRecord, onNativeAudio, startRecording, stopRecording, transcribeAudio } from './voice'
 import { VoiceMeter } from './VoiceMeter'
+import { SkeletonTerminal } from './Skeleton'
 
 export interface TerminalChunk { id: string; data: string; sequence: number }
 
@@ -57,6 +58,8 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   onError(message: string): void
 }): React.JSX.Element {
   const [holder, setHolder] = useState<string | null>(tab.holder)
+  // Até o histórico do PC chegar, o terminal mostra o esqueleto em vez de uma tela vazia.
+  const [hydrating, setHydrating] = useState(true)
   const [draft, setDraft] = useState(() => drafts.get(tab.id)?.text ?? '')
   const [sending, setSending] = useState(false)
   const [images, setImages] = useState<Attached[]>(() => drafts.get(tab.id)?.images ?? [])
@@ -228,10 +231,14 @@ export function SessionView({ tab, device, connected, connection, feed, command,
           sequence = snapshot.sequence
         }
         hydrated = true
+        setHydrating(false)
         for (const chunk of queued) receive(chunk)
         queued.length = 0
       } catch (error) {
-        if (!disposed) onError(error instanceof Error ? error.message : String(error))
+        if (!disposed) {
+          setHydrating(false)
+          onError(error instanceof Error ? error.message : String(error))
+        }
       }
     })()
 
@@ -367,6 +374,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     </button>}
     <div className="terminal-area">
       <div className="terminal-mount" ref={mount} />
+      {hydrating && <SkeletonTerminal label="Abrindo a conversa…" />}
     </div>
     {moreKeys && <nav className="terminal-keys more-keys" aria-label="Mais teclas do terminal">
       {MORE_KEYS.map(([label, data]) => <button disabled={!connected} key={label} onClick={() => keys(data)}>{label}</button>)}

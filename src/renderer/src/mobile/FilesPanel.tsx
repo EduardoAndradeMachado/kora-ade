@@ -4,7 +4,7 @@ import { viewerFor } from '@shared/file-kind'
 import { Icon, type IconName } from '@/brand/icons'
 import { GIT_STYLE, gitMaps, gitPathKey } from '@/lib/git-decorations'
 import { api } from './api'
-import { Loading } from './Loading'
+import { SkeletonRows } from './Skeleton'
 
 const FILE_ICON: Record<ReturnType<typeof viewerFor>, IconName> = { markdown: 'arquivo', code: 'codigo', pdf: 'pdf', image: 'imagem', external: 'arquivo' }
 
@@ -52,7 +52,7 @@ export function FilesPanel({ projectId, dir, onFailed, onDir, onFile }: {
       <button className="icon-button" aria-label="Atualizar arquivos" disabled={loading} onClick={() => { load(); loadGit() }}><Icon name="atualizar" /></button>
     </nav>
     {error && <p role="alert" className="error">{error}</p>}
-    {!listing && !error && <Loading label="Abrindo a pasta…" />}
+    {!listing && !error && <SkeletonRows label="Abrindo a pasta…" row="file-row" count={9} />}
     {listing?.entries.length === 0 && <p className="empty-copy">Pasta vazia.</p>}
     {listing?.entries.map((entry) => {
       const status = (entry.isDir ? git.dirs : git.files).get(gitPathKey(entry.path))

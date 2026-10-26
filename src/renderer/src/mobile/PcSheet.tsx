@@ -8,7 +8,7 @@ import type { Alerts, ThemePreference } from '@shared/state'
 import type { IconName } from '@/brand/icons'
 import type { MobileUsage } from '@shared/mobile'
 import { api, koraApp } from './api'
-import { Loading } from './Loading'
+import { SkeletonUsage } from './Skeleton'
 
 export type PcView = 'usage' | 'settings'
 
@@ -55,7 +55,7 @@ export function PcSheet({ view, themes, theme, onTheme, alerts, sound, onSound, 
       {view === 'usage' ? <>
       <section aria-labelledby="usage-title">
         <div className="pc-heading"><h2 id="usage-title">Limites de uso</h2><button className="icon-button" aria-label="Atualizar limites" disabled={busy !== null} onClick={() => void run('usage', load)}><Icon name="atualizar" /></button></div>
-        {!data ? <Loading size={40} /> : data.usage.length === 0 ? <p className="empty-copy">Nenhum dado de uso do Claude Code nem do Codex no PC.</p> : data.usage.map((usage) => <div className="usage-agent" key={usage.agent}>
+        {!data ? <SkeletonUsage /> : data.usage.length === 0 ? <p className="empty-copy">Nenhum dado de uso do Claude Code nem do Codex no PC.</p> : data.usage.map((usage) => <div className="usage-agent" key={usage.agent}>
           <div className="usage-agent-name"><AgentIcon kind={usage.agent} /><strong>{agentLabel(usage.agent)}</strong>{usage.account && <small>{usage.account}</small>}</div>
           {usage.error && <p className="error">{usage.error}</p>}
           {usage.windows.map((limit) => <div className="usage-window" key={limit.label}>

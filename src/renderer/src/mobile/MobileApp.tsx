@@ -15,7 +15,7 @@ import { AgentIcon, agentLabel } from '@/components/AgentIcon'
 import { CompactAgent } from '@/components/UsageMeter'
 import { useLongPress } from './longPress'
 import { PcSheet } from './PcSheet'
-import { Loading } from './Loading'
+import { SkeletonHome, SkeletonRows } from './Skeleton'
 import { FilesPanel } from './FilesPanel'
 import { FileViewer } from './FileViewer'
 import type { ThemePreference } from '@shared/state'
@@ -56,6 +56,7 @@ export function MobileApp(): React.JSX.Element {
   const { projectId, tabId } = route
   useEffect(() => { if (projectId && route.files !== undefined) lastFolder.set(projectId, route.files) }, [projectId, route.files])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
   const [connection, setConnection] = useState(0)
@@ -80,8 +81,7 @@ export function MobileApp(): React.JSX.Element {
   }, [pairCode, refresh])
 
   // O app Android cobre a página com a logo até ela ter o que mostrar; assim a abertura não pisca telas.
-  const settled = Boolean(pairCode || state || error)
-  useEffect(() => { if (settled) koraApp()?.pronto() }, [settled])
+  useEffect(() => { koraApp()?.pronto() }, [])
 
   const [usage, setUsage] = useState<AgentUsage[]>([])
   const home = state !== null && !projectId
@@ -157,7 +157,8 @@ export function MobileApp(): React.JSX.Element {
     setSessions([])
     if (!projectId || !device) return
     let disposed = false
-    void api<SessionSummary[]>(`sessions?project=${encodeURIComponent(projectId)}`).then((sessions) => { if (!disposed) setSessions(sessions) }).catch((error) => { if (!disposed) setError(error.message) })
+    setSessionsLoading(true)
+    void api<SessionSummary[]>(`sessions?project=${encodeURIComponent(projectId)}`).then((sessions) => { if (!disposed) setSessions(sessions) }).catch((error) => { if (!disposed) setError(error.message) }).finally(() => { if (!disposed) setSessionsLoading(false) })
     return () => { disposed = true }
   }, [projectId, device, connection])
 
@@ -200,7 +201,7 @@ export function MobileApp(): React.JSX.Element {
     {error && <p role="alert" className="error">{error}</p>}
   </div></main>
 
-  if (!state && !error) return <main className="splash" aria-busy="true"><Loading label="Conectando ao PC…" size={72} /></main>
+  if (!state && !error) return <SkeletonHome />
 
   if (!state) return <main className="pair-screen"><div className="pair-card">
     <Wordmark height={36} />
@@ -250,7 +251,8 @@ export function MobileApp(): React.JSX.Element {
         {tabs.length === 0 && <p className="empty-copy">Nenhuma aba aberta. Inicie uma conversa acima.</p>}
         {tabs.map((tab) => <button className="session-row" key={tab.id} onClick={() => open(tab.id)} {...longPress(() => tabActions(tab))}><TabIcon tab={tab} alert={alerted.has(tab.id)} /><span><strong>{tab.title}</strong><small>{tabStatus(tab, alerted.has(tab.id))}</small></span><Icon name="expandir" /></button>)}
         <div className="list-heading"><h2>Conversas salvas</h2><span>{saved.length}</span></div>
-        {saved.length === 0 && <p className="empty-copy">As conversas salvas neste projeto aparecem aqui.</p>}
+        {sessionsLoading && <SkeletonRows label="Carregando as conversas salvas" row="session-row" count={2} detail />}
+        {!sessionsLoading && saved.length === 0 && <p className="empty-copy">As conversas salvas neste projeto aparecem aqui.</p>}
         {saved.map((session) => <button className="session-row" disabled={busy || !connected || missing} key={`${session.kind}:${session.sessionId}`} onClick={() => void run(async () => { const result = await command({ type: 'open-session', projectId, agent: { kind: session.kind, sessionId: session.sessionId }, ...START_SIZE }); await refresh(); if (result.tabId) open(result.tabId) })}><AgentIcon kind={session.kind} /><span><strong>{session.title}</strong><small>{agentLabel(session.kind)} · {new Date(session.updatedAt).toLocaleDateString('pt-BR')}</small></span><Icon name="expandir" /></button>)}
       </>}
     </main> : !selectedTab ? <main className="session-message"><Icon name="sessoes" /><p>Esta aba foi fechada.</p><button onClick={back}>Voltar às conversas</button></main> : <>

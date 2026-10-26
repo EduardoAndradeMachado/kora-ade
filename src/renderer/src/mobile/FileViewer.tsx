@@ -6,7 +6,7 @@ import { Icon } from '@/brand/icons'
 import { api } from './api'
 import { CodeEditor } from './CodeEditor'
 import { PdfPages } from './PdfPages'
-import { Loading } from './Loading'
+import { SkeletonCode } from './Skeleton'
 
 type Kind = 'markdown' | 'html' | 'code' | 'pdf' | 'image' | 'external'
 const kindOf = (path: string): Kind => (/\.html?$/i.test(path) ? 'html' : viewerFor(path))
@@ -151,7 +151,7 @@ export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }
       {notice.tone !== 'conflict' && <button className="icon-button" aria-label="Dispensar aviso" onClick={() => setNotice(null)}><Icon name="fechar" /></button>}
     </div>}
     <div className="file-body">
-      {!file && !raw && loading && <Loading label="Abrindo o arquivo…" />}
+      {!file && !raw && loading && <SkeletonCode label="Abrindo o arquivo…" />}
       {!file && !raw && !loading && <div className="file-retry"><button onClick={() => void load(true)}><Icon name="atualizar" />Tentar de novo</button></div>}
       {textual && file && (mode === 'edit' || kind === 'code')
         && <CodeEditor key={version} path={path} text={shown} dark={dark} onChange={(text) => setDraft(text === file.content ? null : text)} />}

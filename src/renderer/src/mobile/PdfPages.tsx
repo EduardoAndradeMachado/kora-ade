@@ -1,7 +1,7 @@
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
 import { Icon } from '@/brand/icons'
-import { Loading } from './Loading'
+import { SkeletonPage } from './Skeleton'
 
 // A página abre na largura da tela; a pinça, o duplo toque e os botões mudam o zoom sem tirar do lugar o ponto sob os
 // dedos. Só as páginas perto da tela ocupam memória, e recarregar (o agente gerou o PDF de novo) volta ao mesmo lugar.
@@ -177,7 +177,7 @@ export function PdfPages({ url, controls, onTap }: { url: string; controls: bool
 
   return <div className="pdf-view">
     <div className="pdf-scroller" ref={(element) => { scrollerRef.current = element; setScroller(element) }} style={{ padding: GAP }} onClick={tap} onDoubleClick={toggleZoom}>
-      {state.kind === 'loading' ? <Loading label="Abrindo o PDF…" /> : width > 0 && (
+      {state.kind === 'loading' ? <SkeletonPage label="Abrindo o PDF…" /> : width > 0 && (
         <div className="pdf-pages" style={{ gap: GAP }} aria-label={`PDF com ${state.doc.numPages} ${state.doc.numPages === 1 ? 'página' : 'páginas'}`}>
           {Array.from({ length: state.doc.numPages }, (_, index) => <PdfPage key={index} doc={state.doc} number={index + 1} width={pageWidth} ratio={state.ratio} root={scroller} />)}
         </div>
