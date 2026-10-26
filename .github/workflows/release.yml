@@ -26,6 +26,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # O relay é um pacote à parte (vai sozinho para o contêiner); os testes dele precisam das dependências dele.
+      - run: pnpm install --frozen-lockfile --dir relay
       - run: pnpm exec playwright install --only-shell chromium
       - name: Tag e package.json com a mesma versão
         shell: bash

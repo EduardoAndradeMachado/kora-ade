@@ -927,16 +927,17 @@ test('R66 caminho no topo do arquivo: clique copia; o lápis edita o caminho e a
   try {
     await header().locator(tip('Clique para copiar o caminho')).click()
     await expect(header().getByRole('status')).toHaveText('Copiado')
-    expect(await readClipboardText(run)).toBe('src\\app.ts')
+    // O cabeçalho mostra e copia o caminho completo, não o relativo ao projeto.
+    expect(await readClipboardText(run)).toBe(join(env.project, 'src', 'app.ts'))
   } finally {
     await restoreClipboard(run, saved)
   }
 
   await pencil().click()
-  await expect(input()).toHaveValue('src\\app.ts')
+  await expect(input()).toHaveValue(join(env.project, 'src', 'app.ts'))
   await page.keyboard.press('Escape')
   await expect(input()).toHaveCount(0)
-  await expect(header().locator('[data-path]')).toHaveText('src\\app.ts')
+  await expect(header().locator('[data-path]')).toHaveText(join(env.project, 'src', 'app.ts'))
 
   await pencil().click()
   await input().fill('src\\nada.ts')
@@ -947,7 +948,7 @@ test('R66 caminho no topo do arquivo: clique copia; o lápis edita o caminho e a
   await input().fill('lib/util.ts:3')
   await page.keyboard.press('Enter')
   await expect(ui.barTab(page, 'util.ts')).toBeVisible()
-  await expect(header().locator('[data-path]')).toHaveText('lib\\util.ts')
+  await expect(header().locator('[data-path]')).toHaveText(join(env.project, 'lib', 'util.ts'))
   await expect(row(run, 'lib\\util.ts'), 'o arquivo aberto aparece na árvore').toBeVisible()
   const editor = page.locator('.monaco-editor').filter({ visible: true })
   await expect(editor.locator('.active-line-number')).toHaveText('3')
@@ -956,5 +957,5 @@ test('R66 caminho no topo do arquivo: clique copia; o lápis edita o caminho e a
   await input().fill(join(env.project, 'foto.png'))
   await page.keyboard.press('Enter')
   await expect(ui.barTab(page, 'foto.png')).toBeVisible()
-  await expect(header().locator('[data-path]')).toHaveText('foto.png')
+  await expect(header().locator('[data-path]')).toHaveText(join(env.project, 'foto.png'))
 })

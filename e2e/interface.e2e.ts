@@ -102,13 +102,15 @@ test('R82 pasta recolhida na lateral continua recolhida ao reabrir o app (mesmo 
   await expect(folder(third.page).locator(tip('Recolher'))).toBeVisible()
 })
 
-test('R11 painel direito: nome do projeto no topo e abas Arquivos | Git | Sessões abaixo', async ({ kora }) => {
+test('R11 painel direito: nome do projeto no topo e abas Arquivos | Git | Sessões | Métricas abaixo', async ({ kora }) => {
   const run = await kora.launch(kora.env())
   const panel = rightPanel(run.page)
   const header = panel.locator('span.font-semibold')
   await expect(header).toHaveText('proj-teste')
   const tabs = panel.locator('div.border-b').nth(1).locator('button')
-  await expect(tabs).toHaveText(['Arquivos', 'Git', 'Sessões'])
+  // Métricas fica só com o ícone (quatro rótulos não cabem): o nome dela está no aria-label.
+  await expect(tabs).toHaveText(['Arquivos', 'Git', 'Sessões', ''])
+  await expect(tabs.nth(3)).toHaveAttribute('aria-label', 'Métricas da sessão')
   const h = (await header.boundingBox())!
   const t = (await tabs.first().boundingBox())!
   expect(h.y + h.height).toBeLessThanOrEqual(t.y)

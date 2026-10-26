@@ -347,7 +347,7 @@ test('R50 engrenagem abre Configurações com logo, versão e estado da atualiza
   await gear.click()
   const dialog = page.getByRole('dialog', { name: 'Configurações' })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByLabel('kora')).toBeVisible()
+  await expect(dialog.getByLabel('kora', { exact: true })).toBeVisible()
   await expect(dialog).toContainText(`Versão ${version}`)
   await expect(dialog).toContainText('só funciona no app instalado')
   await expect(dialog.getByRole('button', { name: 'Buscar atualização' })).toBeDisabled()
