@@ -22,11 +22,13 @@ export interface LinkOptions {
   maxDelayMs?: number
   // O relay manda ping a cada 25 s; sem ping por este tempo, a conexão está morta mesmo sem o sistema ter percebido.
   silenceMs?: number
+  handshakeMs?: number
 }
 
 const MIN_DELAY_MS = 1_000
 const MAX_DELAY_MS = 60_000
 const SILENCE_MS = 70_000
+const HANDSHAKE_MS = 15_000
 
 export class RelayLink {
   private control: WebSocket | null = null
@@ -70,7 +72,7 @@ export class RelayLink {
   private connect(): void {
     if (!this.running) return
     this.report(this.attempts === 0 ? 'conectando' : 'reconectando', this.current.error)
-    const socket = new WebSocket(`${this.options.url}/s/${this.options.identity.fingerprint}`, { headers: { authorization: `Bearer ${this.options.token}` } })
+    const socket = new WebSocket(`${this.options.url}/s/${this.options.identity.fingerprint}`, { headers: { authorization: `Bearer ${this.options.token}` }, handshakeTimeout: this.options.handshakeMs ?? HANDSHAKE_MS })
     this.control = socket
     socket.on('open', () => {
       this.attempts = 0
@@ -113,7 +115,7 @@ export class RelayLink {
   }
 
   private session(id: string): void {
-    const data = new WebSocket(`${this.options.url}/s/${this.options.identity.fingerprint}/${id}`, { headers: { authorization: `Bearer ${this.options.token}` } })
+    const data = new WebSocket(`${this.options.url}/s/${this.options.identity.fingerprint}/${id}`, { headers: { authorization: `Bearer ${this.options.token}` }, handshakeTimeout: this.options.handshakeMs ?? HANDSHAKE_MS })
     data.on('error', () => {})
     this.pending.add(data)
     openEnvelope(createWebSocketStream(data), this.options.identity, this.options.accepts)

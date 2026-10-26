@@ -126,3 +126,19 @@ describe('link do PC com o relay', () => {
     await expect(phoneRequest(relay.port, pc, phone, 'ninguém')).rejects.toThrow()
   })
 })
+
+describe('link com relay que aceita e não responde', () => {
+  it('o upgrade sem resposta vira reconexão, em vez de ficar conectando para sempre', async () => {
+    const { createServer: createTcp } = await import('node:net')
+    const mute = createTcp(() => {})
+    await new Promise<void>((resolve) => mute.listen(0, '127.0.0.1', resolve))
+    closers.push(() => mute.close())
+    const port = (mute.address() as AddressInfo).port
+    const pc = createIdentity('PC')
+    const states: LinkState[] = []
+    const stuck = new RelayLink({ url: `ws://127.0.0.1:${port}`, token: TOKEN, identity: pc, accepts: () => true, deliver: () => {}, onStatus: (status) => { states.push(status.state) }, handshakeMs: 200, minDelayMs: 50, maxDelayMs: 100 })
+    closers.push(() => stuck.stop())
+    stuck.start()
+    await until(() => states.includes('reconectando'), 3_000)
+  })
+})
