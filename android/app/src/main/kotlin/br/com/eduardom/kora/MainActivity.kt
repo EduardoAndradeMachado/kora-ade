@@ -506,7 +506,7 @@ class MainActivity : ComponentActivity() {
         codigoPendente = codigo
         val nova = Passagem(PORTA_PASSAGEM) { abrirEnvelope(relay, pc) }.iniciar()
         passagem = nova
-        atual = Kora(salvo.id, "127.0.0.1", nova.porta, salvo.nome, salvo.edicao, salvo.tailscale, pc, relay)
+        atual = Kora(salvo.id, "127.0.0.1", nova.porta, salvo.nome, salvo.edicao, pc, relay)
         preferencias.edit().putString(ULTIMO_PC, salvo.id).apply()
         busca?.shutdownNow()
         val minha = ++geracao
@@ -526,7 +526,7 @@ class MainActivity : ComponentActivity() {
         principal.postDelayed(reavaliar, ESPERA_REDE_MS)
     }
 
-    // Pela rede de casa e ela sumiu: passa ao relay (ou ao Tailscale, se ele responder). Pelo relay e a casa voltou a
+    // Pela rede de casa e ela sumiu: passa ao relay. Pelo relay e a casa voltou a
     // responder: volta para a rede local, mais rápida, mas só quando o app volta para a frente, para uma troca de Wi-Fi
     // não recarregar a tela no meio de uma mensagem.
     private fun reavaliarCaminho(voltouParaFrente: Boolean) {
@@ -584,7 +584,7 @@ class MainActivity : ComponentActivity() {
             envelope.saida.write("GET /health HTTP/1.0\r\nHost: kora\r\n\r\n".toByteArray())
             val saude = JSONObject(envelope.entrada.readBytes().decodeToString().substringAfter("\r\n\r\n"))
             val edicao = saude.optString("edition")
-            Kora(saude.getString("id"), "", 0, nomeDoPc(saude.optString("name").ifEmpty { "PC" }, edicao), edicao, saude.optString("tailscale").takeIf { !saude.isNull("tailscale") && it.isNotEmpty() }, pc, relay)
+            Kora(saude.getString("id"), "", 0, nomeDoPc(saude.optString("name").ifEmpty { "PC" }, edicao), edicao, pc, relay)
         }
     }.getOrNull()
 
@@ -757,7 +757,7 @@ class MainActivity : ComponentActivity() {
         pareados.clear()
         naRede.clear()
         val ip = ipDoCelular()
-        // Fora de casa não há rede local para varrer, mas os salvos com Tailscale ainda respondem.
+        // Sem Wi-Fi não há rede local para varrer; os salvos ainda são sondados para a lista mostrar o estado de cada um.
         val salvos = pcs.flatMap { pc -> enderecos(pc).map { it to pc.porta } }
         buscando = ip != null || salvos.isNotEmpty()
         this.aviso = aviso ?: if (!buscando) "Conecte o celular ao Wi-Fi de casa para achar o Kora do PC." else null
@@ -768,12 +768,10 @@ class MainActivity : ComponentActivity() {
         // Os salvos primeiro, para o estado deles aparecer logo; depois as duas portas de cada vizinho (o Kora
         // instalado e o Kora Dev podem estar ligados no mesmo PC).
         val enderecos = (salvos + (ip?.let { vizinhos(it) } ?: emptyList()).flatMap { host -> PORTAS.map { host to it } }).distinct()
-        val casaPeloTailscale = pcs.filter { it.tailscale != null && it.tailscale != it.host }.associate { (it.tailscale!! to it.porta) to it.host }
         val pool = Executors.newFixedThreadPool(SONDAS_EM_PARALELO).also { busca = it }
         var pendentes = enderecos.size
         for ((host, porta) in enderecos) pool.execute {
             val kora = sondar(host, porta)
-            casaPeloTailscale[host to porta]?.let { casa -> if (kora != null) levarPareamento(casa, host, porta) }
             val pareado = kora?.let(::pareado)
             principal.post {
                 if (minha != geracao) return@post
@@ -1057,18 +1055,8 @@ class MainActivity : ComponentActivity() {
         renderizar()
     }
 
-    // Tenta o endereço de casa e depois o do Tailscale; entrando pelo Tailscale, leva o pareamento de casa junto.
     private fun sondarSalvo(salvo: PcSalvo): Kora? = enderecos(salvo).firstNotNullOfOrNull { host ->
-        sondar(host, salvo.porta)?.takeIf { conhecido(listOf(salvo), it) }?.also { if (host != salvo.host && salvo.host.isNotEmpty()) levarPareamento(salvo.host, host, salvo.porta) }
-    }
-
-    // O cookie vale por endereço: o mesmo pareamento passa a valer no endereço do Tailscale, sem parear de novo.
-    private fun levarPareamento(casa: String, tailscale: String, porta: Int) {
-        val cookies = CookieManager.getInstance()
-        for (cookie in cookiesDePareamento(cookies.getCookie("http://$casa:$porta"))) {
-            cookies.setCookie("http://$tailscale:$porta", "$cookie; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict")
-        }
-        cookies.flush()
+        sondar(host, salvo.porta)?.takeIf { conhecido(listOf(salvo), it) }
     }
 
     private fun sondar(host: String, porta: Int): Kora? = runCatching {
@@ -1082,11 +1070,10 @@ class MainActivity : ComponentActivity() {
             // Kora de antes do id: o endereço vira o id, como era o único PC que o app guardava.
             val id = saude.optString("id").ifEmpty { "$host:$porta" }
             val edicao = saude.optString("edition")
-            val tailscale = if (saude.isNull("tailscale")) null else saude.optString("tailscale").ifEmpty { null }
             val pc = saude.optString("pc").takeIf { IMPRESSAO_DIGITAL.matches(it) }
             // relay ausente: Kora antigo, nada a dizer (null). Presente e nulo: o PC desligou Fora de casa ("").
             val relay = if (!saude.has("relay")) null else if (saude.isNull("relay")) "" else relayValido(saude.optString("relay")) ?: ""
-            Kora(id, host, porta, nomeDoPc(saude.optString("name").ifEmpty { host }, edicao), edicao, tailscale, pc, relay)
+            Kora(id, host, porta, nomeDoPc(saude.optString("name").ifEmpty { host }, edicao), edicao, pc, relay)
         } finally {
             conexao.disconnect()
         }

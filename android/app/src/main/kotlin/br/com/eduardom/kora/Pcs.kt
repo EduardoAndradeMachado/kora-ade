@@ -9,7 +9,7 @@ import org.json.JSONObject
  */
 // pc e relay: com os dois o app entra de fora pelo relay, conferindo o PC pela impressão digital. host vazio: o PC foi
 // pareado só pelo relay e ainda não apareceu na rede local.
-data class PcSalvo(val id: String, val host: String, val porta: Int, val nome: String, val apelido: String? = null, val edicao: String = "", val tailscale: String? = null, val pc: String? = null, val relay: String? = null) {
+data class PcSalvo(val id: String, val host: String, val porta: Int, val nome: String, val apelido: String? = null, val edicao: String = "", val pc: String? = null, val relay: String? = null) {
     val peloRelay: Boolean get() = pc != null && relay != null
 
     val exibido: String get() = apelido ?: nome
@@ -23,7 +23,7 @@ fun lerPcs(json: String?): List<PcSalvo> {
         val id = pc.optString("id").ifEmpty { return@mapNotNull null }
         val host = pc.optString("host")
         if (host.isEmpty() && pc.optString("pc").isEmpty()) return@mapNotNull null
-        PcSalvo(id, host, pc.optInt("porta", PORTAS.first()), pc.optString("nome").ifEmpty { host }, pc.optString("apelido").ifEmpty { null }, pc.optString("edicao"), pc.optString("tailscale").ifEmpty { null },
+        PcSalvo(id, host, pc.optInt("porta", PORTAS.first()), pc.optString("nome").ifEmpty { host }, pc.optString("apelido").ifEmpty { null }, pc.optString("edicao"),
             pc.optString("pc").takeIf { IMPRESSAO_DIGITAL.matches(it) }, relayValido(pc.optString("relay").ifEmpty { null }))
     }
 }
@@ -31,7 +31,6 @@ fun lerPcs(json: String?): List<PcSalvo> {
 fun escreverPcs(pcs: List<PcSalvo>): String = JSONArray(pcs.map { pc ->
     JSONObject().put("id", pc.id).put("host", pc.host).put("porta", pc.porta).put("nome", pc.nome).put("edicao", pc.edicao)
         .apply { pc.apelido?.let { put("apelido", it) } }
-        .apply { pc.tailscale?.let { put("tailscale", it) } }
         .apply { pc.pc?.let { put("pc", it) } }
         .apply { pc.relay?.let { put("relay", it) } }
 }).toString()
@@ -46,29 +45,20 @@ fun lembrar(pcs: List<PcSalvo>, kora: Kora): List<PcSalvo> {
     val anterior = pcs.find { it.id == semId(kora) }?.takeIf { kora.id != semId(kora) }
     val restantes = if (anterior == null) pcs else pcs.filter { it.id != semId(kora) }
     val conhecido = restantes.find { it.id == kora.id }
-    // Entrar pelo Tailscale não troca o endereço de casa: em casa o app continua indo direto pela rede local.
     // Pelo relay o /health não traz endereço de casa (host vazio): o que já se sabia dele continua.
-    val host = when {
-        kora.host.isEmpty() -> conhecido?.host ?: ""
-        conhecido != null && kora.host == kora.tailscale -> conhecido.host
-        else -> kora.host
-    }
+    val host = kora.host.ifEmpty { conhecido?.host ?: "" }
     val porta = if (kora.porta == 0) conhecido?.porta ?: PORTAS.first() else kora.porta
     val relay = when (kora.relay) {
         null -> conhecido?.relay
         "" -> null
         else -> kora.relay
     }
-    val atualizado = PcSalvo(kora.id, host, porta, kora.nome, conhecido?.apelido ?: anterior?.apelido, kora.edicao, kora.tailscale ?: conhecido?.tailscale, kora.pc ?: conhecido?.pc, relay)
+    val atualizado = PcSalvo(kora.id, host, porta, kora.nome, conhecido?.apelido ?: anterior?.apelido, kora.edicao, kora.pc ?: conhecido?.pc, relay)
     return if (conhecido == null) restantes + atualizado else restantes.map { if (it.id == kora.id) atualizado else it }
 }
 
-/** Onde procurar o PC: primeiro o endereço de casa, depois o do Tailscale. */
-fun enderecos(pc: PcSalvo): List<String> = listOfNotNull(pc.host.takeIf { it.isNotEmpty() }, pc.tailscale?.takeIf { it != pc.host })
-
-/** Os cookies de pareamento do Kora (src/main/mobile-server.ts, cookieName) no cabeçalho que o CookieManager devolve. */
-fun cookiesDePareamento(cabecalho: String?): List<String> =
-    cabecalho.orEmpty().split(';').map { it.trim() }.filter { it.startsWith("kora-device") && '=' in it }
+/** Onde procurar o PC na rede: só o endereço de casa (vazio no PC pareado só pelo relay). */
+fun enderecos(pc: PcSalvo): List<String> = listOfNotNull(pc.host.takeIf { it.isNotEmpty() })
 
 /** Nome vazio volta ao nome que o próprio Kora informa. */
 fun renomear(pcs: List<PcSalvo>, id: String, apelido: String): List<PcSalvo> =

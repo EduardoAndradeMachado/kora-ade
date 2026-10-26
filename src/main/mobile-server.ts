@@ -25,13 +25,6 @@ export function isLocalAddress(address: string): boolean {
     (parts[0] === 172 && parts[1]! >= 16 && parts[1]! <= 31) || (parts[0] === 169 && parts[1] === 254)
 }
 
-// 100.64.0.0/10 é a faixa que o Tailscale dá a cada aparelho: fora de casa, o celular chega ao PC pela rede privada
-// cifrada dele, sem nada exposto na internet. O pareamento continua sendo o que autoriza.
-export function isTailscaleAddress(address: string): boolean {
-  const parts = address.replace(/^::ffff:/, '').split('.').map(Number)
-  return parts.length === 4 && parts.every((p) => Number.isInteger(p) && p >= 0 && p <= 255) && parts[0] === 100 && parts[1]! >= 64 && parts[1]! <= 127
-}
-
 function interfaceAddresses(accept: (address: string) => boolean): string[] {
   return [...new Set(Object.values(networkInterfaces()).flatMap((interfaces) =>
     (interfaces ?? []).filter((i) => i.family === 'IPv4' && !i.internal && accept(i.address)).map((i) => i.address)
@@ -39,7 +32,6 @@ function interfaceAddresses(accept: (address: string) => boolean): string[] {
 }
 
 export const localAddresses = (): string[] => interfaceAddresses(isLocalAddress)
-export const tailscaleAddresses = (): string[] => interfaceAddresses(isTailscaleAddress)
 
 // Adaptador de VM (VMware, Hyper-V, WSL) também tem endereço de rede local, mas o celular não o alcança. O endereço
 // certo é o da rota padrão: connect em UDP não manda pacote, só pergunta ao sistema por qual interface sairia.
@@ -136,7 +128,6 @@ export class MobileServer {
       network: this.server !== null && localAddresses().length > 0,
       remote: this.link ? this.link.status : null,
       address: this.server ? this.lanAddress : null,
-      tailscale: this.server ? tailscaleAddresses()[0] ?? null : null,
       account: this.pairing.remote.email ? { email: this.pairing.remote.email, admin: this.admin } : null,
       devices: this.pairing.devices.map((device) => {
         const online = this.online(device.id)
@@ -505,11 +496,11 @@ export class MobileServer {
     response.setHeader('content-security-policy', `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${this.options.devUrl ? " 'unsafe-inline'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'${this.options.devUrl ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`)
     try {
       const certificate = tunnelCertificate(request)
-      const hosts = [...localAddresses(), ...tailscaleAddresses(), '127.0.0.1', 'localhost'].map((host) => `${host}:${this.port}`)
+      const hosts = [...localAddresses(), '127.0.0.1', 'localhost'].map((host) => `${host}:${this.port}`)
       const host = request.headers.host ?? ''
       const remote = request.socket.remoteAddress ?? ''
       // Pelo relay não há IP da rede local para conferir: quem passou pelo aperto de mãos já é um certificado conhecido.
-      if (!certificate && (!(isLocalAddress(remote) || isTailscaleAddress(remote)) || !hosts.includes(host))) return json(response, 403, { error: 'Conexão permitida somente pela rede local ou pelo Tailscale.' })
+      if (!certificate && (!isLocalAddress(remote) || !hosts.includes(host))) return json(response, 403, { error: 'Conexão permitida somente pela rede local.' })
       const url = new URL(request.url ?? '/', `http://${host}`)
       // Antes da checagem de origem: o HTML do projeto roda isolado (sandbox), sem origem, e pede o CSS e as imagens
       // dele daqui. O link só lê arquivos e é a chave dele que autoriza, não o cookie do celular.
@@ -523,10 +514,9 @@ export class MobileServer {
         const hours = Math.floor(uptime / 3600)
         const minutes = Math.floor((uptime % 3600) / 60)
         const human = uptime < 60 ? `${uptime}s` : hours ? `${hours}h ${minutes}m` : `${minutes}m`
-        // app e name: o app do celular varre a rede atrás deste endereço e mostra o PC pelo nome. tailscale: o app guarda
-        // esse endereço junto do de casa e o usa, com o mesmo pareamento, quando o de casa não responde. pc e relay: com
-        // eles o app que já está pareado passa a entrar de fora pelo relay, sem ler outro QR (a impressão digital é pública).
-        return json(response, 200, { app: 'kora', id: this.pairing.serverId, name: hostname(), edition: this.options.edition ?? 'prod', tailscale: tailscaleAddresses()[0] ?? null, pc: this.pairing.identity().fingerprint, relay: this.relayHost, started_at: new Date(this.started).toISOString(), uptime_seconds: uptime, uptime_human: human })
+        // app e name: o app do celular varre a rede atrás deste endereço e mostra o PC pelo nome. pc e relay: com eles o
+        // app que já está pareado passa a entrar de fora pelo relay, sem ler outro QR (a impressão digital é pública).
+        return json(response, 200, { app: 'kora', id: this.pairing.serverId, name: hostname(), edition: this.options.edition ?? 'prod', pc: this.pairing.identity().fingerprint, relay: this.relayHost, started_at: new Date(this.started).toISOString(), uptime_seconds: uptime, uptime_human: human })
       }
       // Sem pareamento: o app precisa se atualizar mesmo antes de parear de novo, e o APK não tem nada secreto.
       if ((url.pathname === '/app/android.json' || url.pathname === '/app/kora-celular.apk') && request.method === 'GET') {

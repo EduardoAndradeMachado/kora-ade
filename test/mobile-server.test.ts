@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path'
 import { createServer, request, type Server } from 'node:http'
 import { execFileSync } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
-import { MobileServer, isTailscaleAddress, tailscaleAddresses } from '../src/main/mobile-server'
+import { MobileServer } from '../src/main/mobile-server'
 import { MobileRuntime } from '../src/main/mobile-runtime'
 import { Terminals } from '../src/main/terminals'
 import { DESKTOP, type SizeChange } from '../src/main/terminal-sizes'
@@ -289,23 +289,30 @@ describe('acesso ao servidor do celular', () => {
     expect(pairing.qr).toMatch(/^data:image\/png;base64,/)
   })
 
-  it('reconhece só a faixa do Tailscale (100.64.0.0/10) como rede privada além da rede local', () => {
-    for (const ip of ['100.64.0.1', '100.74.20.52', '100.127.255.255', '::ffff:100.100.1.1']) expect(isTailscaleAddress(ip)).toBe(true)
-    for (const ip of ['100.63.255.255', '100.128.0.0', '8.8.8.8', '100.64.0', '100.64.0.256', '']) expect(isTailscaleAddress(ip)).toBe(false)
-  })
-
-  // Só roda no PC com Tailscale: o pedido sai e chega pelo endereço do Tailscale de verdade, como o celular fora de casa.
-  it.skipIf(tailscaleAddresses().length === 0)('pelo endereço do Tailscale, o mesmo pareamento de casa vale e o health o informa', async () => {
+  // O servidor só escuta em 0.0.0.0, então o teste troca o IP de origem de cada conexão nova como o socket o veria vindo
+  // de outro aparelho; o resto do caminho (Host, cabeçalhos, rotas) é o de verdade.
+  it('só aceita conexão da rede local: a faixa 100.64.0.0/10 é recusada como qualquer IP de fora', async () => {
     const s = await setup()
-    const address = tailscaleAddresses()[0]!
-    const viaTailscale = s.url.replace('127.0.0.1', address)
-    expect((await (await fetch(`${s.url}/health`)).json()).tailscale).toBe(address)
-    expect((await fetch(`${viaTailscale}/health`)).status).toBe(200)
-    // O app copia o cookie do endereço de casa para o do Tailscale: o PC reconhece o mesmo celular.
-    const state = await fetch(`${viaTailscale}/api/state`, { headers: { cookie: s.cookie } })
-    expect(state.status).toBe(200)
-    expect((await state.json()).deviceId).toBe(s.device)
-    expect((await fetch(`${viaTailscale}/api/state`)).status).toBe(401)
+    let remote = ''
+    ;(s.server as unknown as { server: Server }).server.prependListener('connection', (socket) => {
+      Object.defineProperty(socket, 'remoteAddress', { value: remote })
+    })
+    const from = (address: string): Promise<{ status?: number; body: string }> => new Promise((resolve, reject) => {
+      remote = address
+      const req = request(`${s.url}/health`, { agent: false }, (response) => {
+        let body = ''
+        response.setEncoding('utf8').on('data', (chunk: string) => { body += chunk }).on('end', () => resolve({ status: response.statusCode, body }))
+      })
+      req.on('error', reject).end()
+    })
+    const lan = await from('192.168.1.50')
+    expect(lan.status).toBe(200)
+    expect(JSON.parse(lan.body)).not.toHaveProperty('tailscale')
+    for (const address of ['100.74.20.52', '::ffff:100.100.1.1', '8.8.8.8']) {
+      const denied = await from(address)
+      expect(denied.status, address).toBe(403)
+      expect(JSON.parse(denied.body).error).toBe('Conexão permitida somente pela rede local.')
+    }
   })
 
   it('entrega ao app a versão e o APK que vieram no instalador do PC, mesmo sem pareamento', async () => {

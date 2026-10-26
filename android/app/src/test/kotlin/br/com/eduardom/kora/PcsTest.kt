@@ -79,22 +79,12 @@ class PcsTest {
     }
 
     @Test
-    fun entrarPeloTailscaleGuardaOsDoisEnderecosSemTrocarODeCasa() {
-        val emCasa = lembrar(emptyList(), prod.copy(tailscale = "100.74.20.52"))
-        assertEquals("100.74.20.52", emCasa.single().tailscale)
-        val naRua = lembrar(emCasa, prod.copy(host = "100.74.20.52", tailscale = "100.74.20.52"))
-        assertEquals("192.168.0.7", naRua.single().host)
-        assertEquals(listOf("192.168.0.7", "100.74.20.52"), enderecos(naRua.single()))
-        assertEquals(naRua, lerPcs(escreverPcs(naRua)))
-        // Kora antigo, sem tailscale no /health: o endereço guardado continua.
-        assertEquals("100.74.20.52", lembrar(naRua, prod).single().tailscale)
-        assertEquals(listOf("192.168.0.7"), enderecos(lembrar(emptyList(), prod).single()))
-    }
-
-    @Test
-    fun soOsCookiesDePareamentoDoKoraVaoParaOEnderecoDoTailscale() {
-        assertEquals(listOf("kora-device-abc=t1", "kora-device=t0"), cookiesDePareamento("outro=x; kora-device-abc=t1;kora-device=t0"))
-        assertEquals(emptyList<String>(), cookiesDePareamento(null))
+    fun pcSalvoPorVersaoAntigaComEnderecoExtraNoJsonSoProcuraOEnderecoDeCasa() {
+        val salvo = lerPcs("""[{"id":"id-prod","host":"192.168.0.7","porta":43127,"nome":"Eduardo","edicao":"","tailscale":"100.74.20.52"}]""")
+        assertEquals(listOf("192.168.0.7"), enderecos(salvo.single()))
+        assertEquals(listOf(PcSalvo("id-prod", "192.168.0.7", 43127, "Eduardo")), salvo)
+        // Gravar de novo descarta a chave que o app não usa mais.
+        assertTrue("100.74.20.52" !in escreverPcs(salvo))
     }
 
     @Test

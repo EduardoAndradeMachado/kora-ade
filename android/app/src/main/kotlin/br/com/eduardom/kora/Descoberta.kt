@@ -6,10 +6,9 @@ import java.net.URI
 // fica noutra para os dois poderem estar ligados ao mesmo tempo.
 val PORTAS = listOf(43127, 43128)
 
-// tailscale: o endereço do PC no Tailscale, que o /health informa; com ele o celular chega ao PC fora de casa.
 // pc e relay: a impressão digital do certificado do PC e o relay em que ele está (Fora de casa). relay null quer dizer
 // que o /health não falou dele (Kora antigo); vazio, que o PC informou que Fora de casa está desligado.
-data class Kora(val id: String, val host: String, val porta: Int, val nome: String, val edicao: String = "", val tailscale: String? = null, val pc: String? = null, val relay: String? = null)
+data class Kora(val id: String, val host: String, val porta: Int, val nome: String, val edicao: String = "", val pc: String? = null, val relay: String? = null)
 
 // host null: o QR veio só pelo relay (Fora de casa ligado, rede local desligada); o pareamento vai pelo relay.
 data class Convite(val host: String?, val porta: Int, val codigo: String, val pc: String? = null, val relay: String? = null)
