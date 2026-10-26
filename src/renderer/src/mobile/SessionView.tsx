@@ -41,6 +41,10 @@ const MORE_KEYS: [string, string][] = [
 const MIN_COLS = 20
 const MIN_ROWS = 5
 
+interface Attached { path: string; preview: string }
+// A tela da conversa desmonta ao abrir os arquivos ou outra aba; o que estava escrito em cada aba espera a volta.
+const drafts = new Map<string, { text: string; images: Attached[] }>()
+
 // O terminal do celular só mostra: as respostas automáticas do terminal (consulta de cor, de teclado) já vêm
 // da janela do PC, e uma segunda resposta chegaria ao programa como se fosse digitada.
 export function SessionView({ tab, device, connected, connection, feed, command, onError }: {
@@ -53,9 +57,9 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   onError(message: string): void
 }): React.JSX.Element {
   const [holder, setHolder] = useState<string | null>(tab.holder)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(() => drafts.get(tab.id)?.text ?? '')
   const [sending, setSending] = useState(false)
-  const [images, setImages] = useState<{ path: string; preview: string }[]>([])
+  const [images, setImages] = useState<Attached[]>(() => drafts.get(tab.id)?.images ?? [])
   const [uploading, setUploading] = useState(0)
   // Erro de imagem ou de envio aparece no campo, onde a pessoa agiu, e não no aviso do topo.
   const [composerError, setComposerError] = useState<string | null>(null)
@@ -240,6 +244,11 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     }
   }, [tab.id, live, connected, connection, device, feed, command, onError])
 
+  useEffect(() => {
+    if (draft || images.length > 0) drafts.set(tab.id, { text: draft, images })
+    else drafts.delete(tab.id)
+  }, [tab.id, draft, images])
+
   // O campo cresce com o texto até 140 px (o max-height do CSS); depois rola por dentro.
   useLayoutEffect(() => {
     const element = field.current
@@ -316,17 +325,29 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     }
   }
   const removeImage = (path: string): void => setImages((list) => list.filter((image) => image.path !== path))
+  const clear = (): void => {
+    setDraft('')
+    setImages([])
+    setComposerError(null)
+  }
   const submit = (): void => {
     const text = draft.trim()
     if ((!text && images.length === 0) || uploading) return
+    const sent = { text: draft, images }
     setComposerError(null)
     setSending(true)
+    // O campo esvazia no toque, não na resposta do PC: quem sai e volta antes dela não acha o texto pronto para
+    // mandar de novo. Se o envio falha, o texto volta, a menos que a pessoa já tenha escrito outro.
+    setDraft('')
+    setImages([])
+    drafts.delete(tab.id)
     void send({ type: 'send', tabId: tab.id, text, images: images.map((image) => pathForPrompt(image.path)) })
-      .then(() => {
-        setDraft('')
-        setImages([])
+      .catch((error: Error) => {
+        if (!drafts.has(tab.id)) drafts.set(tab.id, sent)
+        setDraft((current) => current || sent.text)
+        setImages((current) => (current.length > 0 ? current : sent.images))
+        setComposerError(error.message)
       })
-      .catch((error: Error) => setComposerError(error.message))
       .finally(() => setSending(false))
   }
 
@@ -364,7 +385,10 @@ export function SessionView({ tab, device, connected, connection, feed, command,
           <textarea ref={field} aria-label="Mensagem para a sessão" placeholder="Mensagem para a sessão" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} />
           {/* Ditando, a linha vira descartar, ondas e transcrever: anexar e enviar saem para não mandar a mensagem no meio. */}
           {voice === 'idle' ? <div className="composer-actions">
-            <button type="button" className="attach-button" aria-label="Anexar imagem" disabled={!connected} onClick={() => picker.current?.click()}><Icon name="novaAba" /></button>
+            <div className="composer-tools">
+              <button type="button" className="attach-button" aria-label="Anexar imagem" disabled={!connected} onClick={() => picker.current?.click()}><Icon name="novaAba" /></button>
+              {(draft !== '' || images.length > 0) && <button type="button" className="clear-draft" aria-label="Limpar mensagem" onClick={clear}><Icon name="excluir" /></button>}
+            </div>
             <div className="composer-send">
               {microphone && <button type="button" className="mic-button" aria-label="Gravar áudio" disabled={!connected}
                 onClick={() => { setComposerError(null); startRecording() }}>

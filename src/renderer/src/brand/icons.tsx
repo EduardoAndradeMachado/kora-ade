@@ -303,6 +303,14 @@ const BRAND = {
       <circle cx="12" cy="12" r="3" fill={a} stroke={a} />
     </>
   ),
+  conversa: (a) => (
+    <>
+      <path d="M6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4 3.5V17h-.5A2.5 2.5 0 0 1 4 14.5v-8A2.5 2.5 0 0 1 6.5 4Z" />
+      <circle cx="8.5" cy="10.5" r="1.2" fill={a} stroke="none" />
+      <circle cx="12" cy="10.5" r="1.2" fill={a} stroke="none" />
+      <circle cx="15.5" cy="10.5" r="1.2" fill={a} stroke="none" />
+    </>
+  ),
   sino: (a) => (
     <>
       <path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z" />

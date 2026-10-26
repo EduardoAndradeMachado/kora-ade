@@ -7,6 +7,7 @@ export interface MobileRoute {
   // Folhas abertas por cima da tela: o voltar do celular fecha a folha antes de sair da tela.
   newTab?: string
   actions?: string
+  rename?: string
   pc?: 'usage' | 'settings'
   // Arquivos do projeto: files é a pasta aberta ('' é a raiz); file, o arquivo aberto por cima dela.
   files?: string

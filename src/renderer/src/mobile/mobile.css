@@ -69,8 +69,8 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .project-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
 .project-heading > svg, .project-heading > img { width: 32px; height: 32px; }
 .project-heading > div { min-width: 0; }
-.chat-return { width: 38px; height: 40px; min-height: 40px; color: var(--muted-foreground); }
-.chat-return svg { width: 16px; height: 16px; }
+.chat-return { width: 40px; height: 36px; min-height: 36px; border-radius: 12px; color: var(--foreground); background: color-mix(in oklab, var(--brand-amber) 16%, transparent); }
+.chat-return svg { width: 20px; height: 20px; }
 .project-heading .chat-return { margin-left: auto; }
 .project-path { color: var(--muted-foreground); font-family: var(--terminal-font-family); font-size: 11px; overflow-wrap: anywhere; margin: 6px 0 0; user-select: text; }
 .missing-notice { display: flex; gap: 12px; border: 1px solid #d98e3a40; background: #d98e3a0b; padding: 14px; border-radius: 6px; margin-bottom: 18px; font-size: 12px; }
@@ -92,7 +92,9 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .session-row > svg:last-child { width: 14px; height: 14px; color: var(--muted-foreground); }
 .session-strip { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding: 0 8px 0 12px; min-height: 44px; flex-shrink: 0; }
 .session-strip > svg { width: 14px; height: 14px; }
-.session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.session-name { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-start; gap: 6px; min-height: 40px; padding: 0; border: 0; background: transparent; color: inherit; font-size: 12px; font-weight: 400; }
+.session-name span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-name svg { width: 12px; height: 12px; color: var(--muted-foreground); }
 .session-strip .icon-button { width: 38px; min-height: 40px; height: 40px; }
 .session-strip .icon-button svg { width: 15px; height: 15px; }
 .size-banner { flex-shrink: 0; border: 0; border-radius: 0; border-bottom: 1px solid var(--border); background: var(--secondary); color: var(--muted-foreground); font-size: 12px; padding: 8px 16px; min-height: 36px; text-align: left; }
@@ -243,6 +245,10 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .composer-error button svg { width: 12px; height: 12px; }
 .composer-actions .attach-button { margin-left: -4px; }
 .composer-send { display: flex; align-items: center; gap: 4px; }
+.composer-tools { display: flex; align-items: center; gap: 4px; }
+/* No cinza dos vizinhos, e não no vermelho de excluir: aparece em toda mensagem escrita e não deve chamar o dedo. */
+.clear-draft { flex-shrink: 0; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: transparent; color: var(--muted-foreground); }
+.composer .clear-draft svg { width: 18px; height: 18px; color: inherit; }
 .mic-button { flex-shrink: 0; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: transparent; color: var(--muted-foreground); }
 .mic-button svg { width: 20px; height: 20px; }
 .voice-cancel, .voice-confirm { flex-shrink: 0; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; }

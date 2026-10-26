@@ -138,7 +138,7 @@ export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }
       </div>}
       {!textual && raw && <button className="icon-button" aria-label="Recarregar do PC" onClick={() => void load(false)}><Icon name="atualizar" /></button>}
       {textual && draft !== null && <button className="primary save-button" disabled={saving} onClick={() => void save(base)}>{saving ? 'Salvando…' : 'Salvar'}</button>}
-      {onChat && <button className="icon-button chat-return" aria-label="Voltar à conversa" onClick={onChat}><Icon name="sessoes" /></button>}
+      {onChat && <button className="icon-button chat-return" aria-label="Voltar à conversa" onClick={onChat}><Icon name="conversa" active /></button>}
     </div>
     {notice && <div role={notice.tone === 'info' ? 'status' : 'alert'} className={`file-notice ${notice.tone}`}>
       <span>{notice.text}</span>
