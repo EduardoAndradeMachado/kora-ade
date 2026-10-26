@@ -1,8 +1,8 @@
 import { test, expect } from './harness'
-import { newTab, readState, typeLine, ui, waitFor, type KoraRun } from './kora'
+import { MOBILE_PORT, newTab, readState, typeLine, ui, waitFor, type KoraRun } from './kora'
 
 // O celular de verdade é uma página no navegador; aqui ele é a mesma API HTTP, chamada direto pelo teste.
-const BASE = 'http://127.0.0.1:43127'
+const BASE = `http://127.0.0.1:${MOBILE_PORT}`
 
 interface PhoneTab { id: string; title: string; live: boolean; holder: string | null }
 

@@ -8,6 +8,7 @@ import { _electron, expect, type ElectronApplication, type Locator, type Page } 
 
 export const ROOT = resolve(__dirname, '..')
 export const BUILD_DIR = process.env['KORA_E2E_BUILD'] ?? join(ROOT, 'e2e', '.build', 'app')
+export const MOBILE_PORT = 43137
 const FIXTURES = join(ROOT, 'e2e', 'fixtures')
 const electronPath = createRequire(join(ROOT, 'package.json'))('electron') as unknown as string
 // KORA_E2E_EXE roda a suíte contra o app empacotado (distwin-unpackedKora ADE.exe), com asar e módulos nativos reais.
@@ -94,6 +95,8 @@ export function appEnv(env: KoraEnv): Record<string, string> {
   out['USERPROFILE'] = env.home
   out['HOME'] = env.home
   out['KORA_USER_DATA'] = env.userData
+  // Fora da 43127, que é a do Kora instalado: a suíte roda com ele aberto.
+  out['KORA_MOBILE_PORT'] = String(MOBILE_PORT)
   // No app empacotado o atualizador consultaria o GitHub; nos testes ele fala com uma porta local fechada.
   out['KORA_UPDATE_FEED'] = 'http://127.0.0.1:9/'
   out['KORA_FAKE_LOG'] = env.log

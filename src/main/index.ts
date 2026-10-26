@@ -1095,7 +1095,7 @@ void app.whenReady().then(() => {
     pdfjsDir: is.dev ? join(app.getAppPath(), 'node_modules', 'pdfjs-dist') : join(app.getAppPath(), 'resources', 'pdfjs'),
     edition: is.dev ? 'dev' : 'prod',
     // Porta própria no Dev: com o Kora instalado aberto, os dois ficam ligados ao celular ao mesmo tempo.
-    port: is.dev ? 43128 : 43127,
+    port: Number(process.env['KORA_MOBILE_PORT']) || (is.dev ? 43128 : 43127),
     runtime: mobileRuntime,
     changed: mobileChanged,
     statusChanged: (status) => mainWindow?.webContents.send('mobile:status', status)
