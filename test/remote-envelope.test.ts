@@ -186,8 +186,25 @@ describe('relay: quem entra', () => {
     const relay = await listen(createRelay({ directory: directory([pcId]) }))
     const path = `/s/${pcId.fingerprint}`
     expect(await upgrade(relay, path, relayHeaders(pcId, `${path}/${'a'.repeat(32)}`))).toBe(404)
-    expect(await upgrade(relay, path, relayHeaders(pcId, path, Date.now() - 3 * 60_000))).toBe(404)
+    expect(await upgrade(relay, path, relayHeaders(pcId, path, Date.now() - 3 * 60_000))).toBe(401)
     expect(await upgrade(relay, path, relayHeaders(pcId, path, Date.now() - 60_000))).toBe(101)
+  })
+
+  it('os mesmos cabeçalhos não abrem uma segunda conexão, mesmo dentro dos 2 minutos', async () => {
+    const pcId = createIdentity('PC')
+    const relay = await listen(createRelay({ directory: directory([pcId]) }))
+    const path = `/s/${pcId.fingerprint}`
+    const copied = relayHeaders(pcId, path)
+    expect(await upgrade(relay, path, copied)).toBe(101)
+    expect(await upgrade(relay, path, copied)).toBe(404)
+    expect(await upgrade(relay, path, relayHeaders(pcId, path))).toBe(101)
+  })
+
+  it('relógio do aparelho fora da hora recebe 401 e não bloqueia o IP (que pode ser de muita gente)', async () => {
+    const [late, other] = [createIdentity('PC atrasado'), createIdentity('Outro PC')]
+    const relay = await listen(createRelay({ directory: directory([late, other]), maxFailures: 2, banMs: 60_000 }))
+    for (let i = 0; i < 5; i++) expect(await upgrade(relay, `/s/${late.fingerprint}`, relayHeaders(late, `/s/${late.fingerprint}`, Date.now() + 10 * 60_000))).toBe(401)
+    expect(await upgrade(relay, `/s/${other.fingerprint}`, relayHeaders(other, `/s/${other.fingerprint}`))).toBe(101)
   })
 
   it('celular só chega ao PC que o registrou; celular de outro PC recebe 403', async () => {
@@ -297,6 +314,8 @@ describe('relay: o que ele mede e responde', () => {
     await new Promise((resolve) => side.control.on('open', resolve))
     const replies: unknown[] = []
     side.control.on('message', (message) => { replies.push(JSON.parse(String(message))) })
+    // JSON válido que não é objeto não derruba o relay (antes, "null" encerrava o processo de todo mundo).
+    for (const strange of ['null', '5', '[]', '"texto"', '{"id":"x"}']) side.control.send(strange)
     side.control.send(JSON.stringify({ id: 7, op: 'celulares', lista: [] }))
     side.control.send(JSON.stringify({ id: 8, op: 'falha' }))
     await expect.poll(() => replies.length).toBe(2)

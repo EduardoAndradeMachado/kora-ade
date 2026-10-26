@@ -46,7 +46,8 @@ service.start()
 const port = Number(env('PORT') || 8080)
 server.listen(port, () => console.log(`relay no ar na porta ${(server.address() as AddressInfo).port}`))
 
-// O EasyPanel manda SIGTERM no redeploy: grava o consumo pendente, fecha as conexões e sai; PC e celular reconectam.
+// O EasyPanel manda SIGTERM no redeploy: fecha as conexões (que somam os últimos segundos de consumo), grava o que
+// ficou na fila e sai; PC e celular reconectam.
 process.on('SIGTERM', () => {
-  void service.stop().finally(() => server.close(() => void sql.end({ timeout: 5 }).finally(() => process.exit(0))))
+  server.close(() => void service.stop().finally(() => void sql.end({ timeout: 5 }).finally(() => process.exit(0))))
 })

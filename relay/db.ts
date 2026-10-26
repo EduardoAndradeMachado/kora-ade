@@ -1,6 +1,7 @@
 import postgres from 'postgres'
 
 export type Sql = postgres.Sql
+export type TransactionSql = postgres.TransactionSql
 
 // Tudo do relay mora no schema kora_sync, com um usuário de banco que só enxerga ele: o mesmo Postgres guarda outros
 // projetos, e um relay comprometido não alcança as tabelas deles. O schema e o usuário são criados uma vez, à mão

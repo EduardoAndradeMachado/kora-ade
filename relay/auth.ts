@@ -26,14 +26,17 @@ export function parseRelayAuth(authorization: string | undefined, certificate: s
   return { fingerprint: match[1]!, at: Number(match[2]), signature: Buffer.from(match[3]!, 'base64url'), certificate: Buffer.from(certificate, 'base64') }
 }
 
-// Certificado com outra impressão digital, assinatura de outro caminho, fora do prazo ou malformada: tudo é recusa.
-export function verifyRelayAuth(auth: RelayAuth, path: string, now = Date.now()): boolean {
-  if (Math.abs(now - auth.at) > AUTH_WINDOW_MS) return false
+// Certificado com outra impressão digital, assinatura de outro caminho ou malformada: 'invalid'. Assinatura certa fora
+// dos 2 minutos: 'stale', que é quase sempre o relógio do aparelho errado, e não deve ser tratada como invasão.
+export function checkRelayAuth(auth: RelayAuth, path: string, now = Date.now()): 'ok' | 'stale' | 'invalid' {
   try {
     const certificate = new X509Certificate(auth.certificate)
-    if (certificate.fingerprint256.replaceAll(':', '').toLowerCase() !== auth.fingerprint) return false
-    return verify('sha256', message(path, auth.at), certificate.publicKey, auth.signature)
+    if (certificate.fingerprint256.replaceAll(':', '').toLowerCase() !== auth.fingerprint) return 'invalid'
+    if (!verify('sha256', message(path, auth.at), certificate.publicKey, auth.signature)) return 'invalid'
+    return Math.abs(now - auth.at) > AUTH_WINDOW_MS ? 'stale' : 'ok'
   } catch {
-    return false
+    return 'invalid'
   }
 }
+
+export const verifyRelayAuth = (auth: RelayAuth, path: string, now = Date.now()): boolean => checkRelayAuth(auth, path, now) === 'ok'

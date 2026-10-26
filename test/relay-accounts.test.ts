@@ -109,12 +109,70 @@ describe('contas do relay', () => {
     expect(await accounts.verifySignup('c@exemplo.com', second, PASSWORD)).toMatchObject({ ok: true })
   })
 
-  it('senha errada 5 vezes trava a conta 15 minutos, mesmo com a senha certa; depois libera', async () => {
+  it('senha errada 5 vezes trava o e-mail 15 minutos naquele IP, mesmo com a senha certa; depois libera', async () => {
     await createVerified('d@exemplo.com')
-    for (let i = 0; i < 5; i++) expect(await accounts.login('d@exemplo.com', 'errada-errada')).toEqual({ ok: false, reason: 'invalid' })
-    expect(await accounts.login('d@exemplo.com', PASSWORD)).toEqual({ ok: false, reason: 'locked' })
+    for (let i = 0; i < 5; i++) expect(await accounts.login('d@exemplo.com', 'errada-errada', '203.0.113.9')).toEqual({ ok: false, reason: 'invalid' })
+    expect(await accounts.login('d@exemplo.com', PASSWORD, '203.0.113.9')).toEqual({ ok: false, reason: 'locked' })
+    // Quem errou de propósito não trava a dona da conta, que entra de outra rede.
+    expect(await accounts.login('d@exemplo.com', PASSWORD, '198.51.100.4')).toMatchObject({ ok: true })
     clock += 15 * 60_000 + 1
-    expect(await accounts.login('d@exemplo.com', PASSWORD)).toMatchObject({ ok: true })
+    expect(await accounts.login('d@exemplo.com', PASSWORD, '203.0.113.9')).toMatchObject({ ok: true })
+  })
+
+  it('a trava responde igual para e-mail com e sem conta: errar não revela quem tem conta', async () => {
+    await createVerified('existe@exemplo.com')
+    for (const email of ['existe@exemplo.com', 'nao-existe@exemplo.com']) {
+      for (let i = 0; i < 5; i++) expect(await accounts.login(email, 'errada-errada', '203.0.113.9')).toEqual({ ok: false, reason: 'invalid' })
+      expect(await accounts.login(email, 'errada-errada', '203.0.113.9')).toEqual({ ok: false, reason: 'locked' })
+    }
+  })
+
+  it('pedir código novo não renova as tentativas sem fim: 10 erros num dia matam até o código certo', async () => {
+    await createVerified('alvo@exemplo.com')
+    for (let round = 0; round < 2; round++) {
+      await accounts.requestReset('alvo@exemplo.com')
+      const code = lastCode('alvo@exemplo.com')
+      for (let i = 0; i < 5; i++) await accounts.confirmReset('alvo@exemplo.com', wrong(code), 'nova-senha-boa')
+      clock += 61_000
+    }
+    await accounts.requestReset('alvo@exemplo.com')
+    expect(await accounts.confirmReset('alvo@exemplo.com', lastCode('alvo@exemplo.com'), 'nova-senha-boa')).toEqual({ ok: false, reason: 'invalid' })
+    clock += 24 * 60 * 60_000 + 1
+    await accounts.requestReset('alvo@exemplo.com')
+    expect(await accounts.confirmReset('alvo@exemplo.com', lastCode('alvo@exemplo.com'), 'nova-senha-boa')).toMatchObject({ ok: true })
+  })
+
+  it('no máximo 5 códigos por hora por conta: ninguém usa o relay para encher a caixa de alguém', async () => {
+    await createVerified('caixa@exemplo.com')
+    sent = []
+    for (let i = 0; i < 8; i++) {
+      await accounts.requestReset('caixa@exemplo.com')
+      clock += 61_000
+    }
+    // 5 por hora contando todos os códigos da conta: o do cadastro, um minuto antes, já gastou um.
+    expect(sent).toHaveLength(4)
+  })
+
+  it('se gravar a senha falha, o código continua valendo: usar o mesmo código de novo funciona', async () => {
+    await accounts.signup('falha@exemplo.com')
+    const code = lastCode('falha@exemplo.com')
+    await sql.unsafe(`create function kora_sync.falha() returns trigger language plpgsql as $$ begin raise exception 'banco fora'; end $$`)
+    await sql.unsafe(`create trigger falha before update on kora_sync.accounts for each row execute function kora_sync.falha()`)
+    try {
+      await expect(accounts.verifySignup('falha@exemplo.com', code, PASSWORD)).rejects.toThrow('banco fora')
+    } finally {
+      await sql.unsafe(`drop trigger falha on kora_sync.accounts; drop function kora_sync.falha()`)
+    }
+    expect(await accounts.verifySignup('falha@exemplo.com', code, PASSWORD)).toMatchObject({ ok: true })
+  })
+
+  it('e-mail que não saiu não segura o próximo pedido: pedir de novo logo em seguida manda de verdade', async () => {
+    let failing = true
+    const flaky = new Accounts(sql, { send: async (to, email) => { if (failing) throw new Error('Resend fora'); sent.push({ to, email }) } }, { codeSecret: 'segredo-de-teste', logoUrl: 'https://exemplo/logo.png', now: () => clock })
+    await expect(flaky.signup('instavel@exemplo.com')).rejects.toThrow('Resend fora')
+    failing = false
+    await flaky.signup('instavel@exemplo.com')
+    expect(sent.map((item) => item.to)).toEqual(['instavel@exemplo.com'])
   })
 
   it('conta sem verificação ou bloqueada não entra, mas só diz isso para quem acertou a senha', async () => {

@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Accounts, normalizeEmail, passwordProblem } from './accounts.ts'
-import { parseRelayAuth, verifyRelayAuth } from './auth.ts'
+import { checkRelayAuth, parseRelayAuth } from './auth.ts'
 import type { Sql } from './db.ts'
 import type { DeviceRecord, Owner, Relay, UsageDelta } from './relay.ts'
 
@@ -50,7 +50,15 @@ export class RelayService {
   start(): void {
     this.timers.push(setInterval(() => void this.flush().catch((error) => console.error('[relay] gravar consumo', error)), 60_000))
     this.timers.push(setInterval(() => void this.prune().catch((error) => console.error('[relay] limpar histórico', error)), 6 * 60 * 60_000))
+    this.timers.push(setInterval(() => this.sweep(), 10 * 60_000))
     for (const timer of this.timers) timer.unref()
+  }
+
+  // Limites por IP e por conta de quem já passou da janela: sem isso o mapa só cresce com IPs novos.
+  sweep(): void {
+    const now = this.now()
+    for (const [key, entry] of this.limits) if (now - entry.since >= LIMIT_WINDOW_MS) this.limits.delete(key)
+    this.accounts.sweep()
   }
 
   async stop(): Promise<void> {
@@ -79,7 +87,8 @@ export class RelayService {
         left join kora_sync.phone_pcs l on l.phone = d.fingerprint
         where d.fingerprint = ${fingerprint}
         group by d.account_id, d.kind, a.blocked_at`
-      const record = row ? { accountId: row.account_id, kind: row.kind, pcs: row.pcs, blocked: row.blocked } : null
+      // Celular não tem bloqueio próprio: quem decide é a conta do PC que ele procura (o relay derruba por ela).
+      const record = row ? { accountId: row.account_id, kind: row.kind, pcs: row.pcs, blocked: row.kind === 'pc' && row.blocked } : null
       this.cache.set(fingerprint, { record, at: this.now() })
       return record
     } catch (error) {
@@ -132,7 +141,9 @@ export class RelayService {
     this.seenQueue = new Map()
     try {
       for (const [fingerprint, totals] of usage) {
-        await this.sql`
+        // Os dois juntos: se o segundo falhar e a fila voltar, o primeiro não pode ter ficado gravado.
+        await this.sql.begin(async (tx) => {
+        await tx`
           insert into kora_sync.usage_daily (fingerprint, day, bytes_in, bytes_out, sessions, connected_seconds)
           select ${fingerprint}, (now() at time zone 'utc')::date, ${totals.bytesIn}, ${totals.bytesOut}, ${totals.sessions}, ${totals.seconds}
           where exists (select 1 from kora_sync.devices where fingerprint = ${fingerprint})
@@ -141,11 +152,12 @@ export class RelayService {
             bytes_out = kora_sync.usage_daily.bytes_out + excluded.bytes_out,
             sessions = kora_sync.usage_daily.sessions + excluded.sessions,
             connected_seconds = kora_sync.usage_daily.connected_seconds + excluded.connected_seconds`
-        await this.sql`
+        await tx`
           update kora_sync.devices set
             bytes_in = bytes_in + ${totals.bytesIn}, bytes_out = bytes_out + ${totals.bytesOut},
             sessions = sessions + ${totals.sessions}, connected_seconds = connected_seconds + ${totals.seconds}
           where fingerprint = ${fingerprint}`
+        })
         usage.delete(fingerprint)
       }
       for (const [fingerprint, info] of seen) {
@@ -175,7 +187,7 @@ export class RelayService {
     switch (message['op']) {
       case 'sincronizar': return this.sync(owner, message)
       case 'conta': return this.account(owner)
-      case 'sair': return this.leave(owner)
+      case 'sair': return this.leave(owner.fingerprint)
       default:
         if (typeof message['op'] === 'string' && message['op'].startsWith('admin:') && (await this.isAdmin(owner))) return this.admin(owner, message)
         // Quem não é admin recebe a mesma resposta de um pedido que não existe.
@@ -184,7 +196,9 @@ export class RelayService {
   }
 
   private async sync(owner: Owner, message: Record<string, unknown>): Promise<{ ok: true }> {
-    const list = Array.isArray(message['celulares']) ? message['celulares'] : []
+    // Lista ausente ou de outro tipo é erro, não "nenhum celular": tratar como vazia apagaria os vínculos do PC.
+    if (!Array.isArray(message['celulares'])) throw new Error('Lista de celulares inválida.')
+    const list: unknown[] = message['celulares']
     const phones = list
       .filter((item): item is { fingerprint: string; name?: unknown } => typeof item === 'object' && item !== null && FINGERPRINT.test(String((item as { fingerprint?: unknown }).fingerprint)))
       .slice(0, MAX_PHONES)
@@ -219,13 +233,22 @@ export class RelayService {
     return { email: row.email, admin: row.admin }
   }
 
-  private async leave(owner: Owner): Promise<{ ok: true }> {
+  private async signOutEverywhere(accountId: string): Promise<void> {
     await this.sql.begin(async (tx) => {
-      await tx`delete from kora_sync.devices where fingerprint = ${owner.fingerprint} and kind = 'pc'`
+      await tx`delete from kora_sync.devices where account_id = ${accountId} and kind = 'pc'`
       await tx`delete from kora_sync.devices d where d.kind = 'phone' and not exists (select 1 from kora_sync.phone_pcs l where l.phone = d.fingerprint)`
     })
     this.cache.clear()
-    this.pairing.delete(owner.fingerprint)
+    this.relay?.dropAccount(accountId)
+  }
+
+  private async leave(fingerprint: string): Promise<{ ok: true }> {
+    await this.sql.begin(async (tx) => {
+      await tx`delete from kora_sync.devices where fingerprint = ${fingerprint} and kind = 'pc'`
+      await tx`delete from kora_sync.devices d where d.kind = 'phone' and not exists (select 1 from kora_sync.phone_pcs l where l.phone = d.fingerprint)`
+    })
+    this.cache.clear()
+    this.pairing.delete(fingerprint)
     return { ok: true }
   }
 
@@ -248,11 +271,16 @@ export class RelayService {
         if (target === owner.accountId) throw new Error('Você não pode bloquear a própria conta.')
         const block = message['op'] === 'admin:bloquear'
         const reason = typeof message['motivo'] === 'string' ? message['motivo'].slice(0, 200) : null
-        const [row] = await this.sql<{ id: string }[]>`
-          update kora_sync.accounts set blocked_at = ${block ? new Date(this.now()) : null}, blocked_reason = ${block ? reason : null}
-          where id = ${target} returning id`
-        if (!row) throw new Error('Conta não encontrada.')
-        await this.sql`insert into kora_sync.admin_log (admin_id, action, account_id, detail) values (${owner.accountId}, ${block ? 'bloquear' : 'desbloquear'}, ${target}, ${this.sql.json({ motivo: reason })})`
+        // Bloqueio e auditoria juntos: ou os dois ficam gravados, ou nenhum.
+        const found = await this.sql.begin(async (tx) => {
+          const [row] = await tx<{ id: string }[]>`
+            update kora_sync.accounts set blocked_at = ${block ? new Date(this.now()) : null}, blocked_reason = ${block ? reason : null}
+            where id = ${target} returning id`
+          if (!row) return false
+          await tx`insert into kora_sync.admin_log (admin_id, action, account_id, detail) values (${owner.accountId}, ${block ? 'bloquear' : 'desbloquear'}, ${target}, ${tx.json({ motivo: reason })})`
+          return true
+        })
+        if (!found) throw new Error('Conta não encontrada.')
         this.cache.clear()
         if (block) this.relay?.dropAccount(target)
         return { ok: true }
@@ -270,13 +298,15 @@ export class RelayService {
     const devices = await this.sql`
       select d.fingerprint, d.account_id, d.kind, d.name, d.platform, d.os_version, d.app_version, d.created_at,
              d.last_seen_at, d.last_ip, d.bytes_in, d.bytes_out, d.sessions, d.connected_seconds,
-             coalesce(sum(u.bytes_in), 0)::bigint as bytes_in_30d, coalesce(sum(u.bytes_out), 0)::bigint as bytes_out_30d,
-             coalesce(sum(u.sessions), 0)::bigint as sessions_30d,
-             coalesce(array_agg(distinct l.pc) filter (where l.pc is not null), '{}') as pcs
+             coalesce(u.bytes_in, 0)::bigint as bytes_in_30d, coalesce(u.bytes_out, 0)::bigint as bytes_out_30d,
+             coalesce(u.sessions, 0)::bigint as sessions_30d, coalesce(l.pcs, '{}') as pcs
       from kora_sync.devices d
-      left join kora_sync.usage_daily u on u.fingerprint = d.fingerprint and u.day >= (now() at time zone 'utc')::date - 29
-      left join kora_sync.phone_pcs l on l.phone = d.fingerprint
-      group by d.fingerprint
+      -- Cada soma num subselect: juntar os dias e os PCs do celular na mesma consulta multiplicaria o consumo.
+      left join (
+        select fingerprint, sum(bytes_in) as bytes_in, sum(bytes_out) as bytes_out, sum(sessions) as sessions
+        from kora_sync.usage_daily where day >= (now() at time zone 'utc')::date - 29 group by fingerprint
+      ) u on u.fingerprint = d.fingerprint
+      left join (select phone, array_agg(pc) as pcs from kora_sync.phone_pcs group by phone) l on l.phone = d.fingerprint
       order by d.created_at`
     const online = this.relay?.online() ?? new Set<string>()
     return {
@@ -307,7 +337,7 @@ export class RelayService {
 
   private async handleApi(request: IncomingMessage, response: ServerResponse, ip: string): Promise<void> {
     const route = (request.url ?? '').split('?')[0]
-    const routes: Record<string, keyof typeof LIMITS> = { '/a/cadastro': 'email', '/a/esqueci': 'email', '/a/verificar': 'auth', '/a/redefinir': 'auth', '/a/entrar': 'auth' }
+    const routes: Record<string, keyof typeof LIMITS> = { '/a/cadastro': 'email', '/a/esqueci': 'email', '/a/verificar': 'auth', '/a/redefinir': 'auth', '/a/entrar': 'auth', '/a/sair': 'auth' }
     const kind = route ? routes[route] : undefined
     if (request.method !== 'POST' || !kind) return void response.writeHead(404, { 'content-length': '0' }).end()
     if (!this.allowed(ip, kind)) return reply(response, 429, { erro: 'Muitas tentativas deste endereço. Espere alguns minutos.' })
@@ -315,6 +345,16 @@ export class RelayService {
     if (!body) return reply(response, 400, { erro: 'Pedido inválido.' })
     const text = (key: string): string => (typeof body[key] === 'string' ? (body[key] as string) : '')
     const email = text('email')
+    if (route === '/a/sair') {
+      // Sair prova a chave do PC, como o login: só o próprio PC se tira da conta.
+      const auth = parseRelayAuth(request.headers.authorization, request.headers['x-kora-certificate'] as string | undefined)
+      const checked = auth ? checkRelayAuth(auth, '/a/sair', this.now()) : 'invalid'
+      if (checked === 'stale') return reply(response, 400, { erro: 'A data e a hora deste PC estão erradas. Ligue o ajuste automático nas configurações do Windows.' })
+      if (!auth || checked !== 'ok') return reply(response, 400, { erro: 'Pedido inválido.' })
+      await this.leave(auth.fingerprint)
+      this.relay?.dropDevice(auth.fingerprint)
+      return reply(response, 200, { ok: true })
+    }
     if (route !== '/a/entrar' && !normalizeEmail(email)) return reply(response, 400, { erro: 'Confira o e-mail.' })
 
     switch (route) {
@@ -332,25 +372,32 @@ export class RelayService {
         const result = route === '/a/verificar'
           ? await this.accounts.verifySignup(email, text('codigo'), password)
           : await this.accounts.confirmReset(email, text('codigo'), password)
-        return result.ok ? reply(response, 200, { ok: true }) : reply(response, 400, { erro: 'Código incorreto ou vencido. Peça outro.' })
+        if (!result.ok) return reply(response, 400, { erro: 'Código incorreto ou vencido. Peça outro.' })
+        // Senha trocada: todo PC que entrou com a senha antiga sai da conta e cai na hora; quem trocou entra de novo.
+        if (route === '/a/redefinir') await this.signOutEverywhere(result.accountId)
+        return reply(response, 200, { ok: true })
       }
       case '/a/entrar': {
         // O login prova a posse da chave do PC (a mesma assinatura das conexões, sobre o caminho com o e-mail): só quem
         // tem a chave registra aquele PC, e ninguém toma a impressão digital de outro para a conta dele.
         const normalized = normalizeEmail(email)
         const auth = parseRelayAuth(request.headers.authorization, request.headers['x-kora-certificate'] as string | undefined)
-        if (!normalized || !auth || !verifyRelayAuth(auth, `/a/entrar/${normalized}`, this.now())) return reply(response, 400, { erro: 'Pedido inválido.' })
-        const result = await this.accounts.login(normalized, text('senha'))
+        const checked = normalized && auth ? checkRelayAuth(auth, `/a/entrar/${normalized}`, this.now()) : 'invalid'
+        if (checked === 'stale') return reply(response, 400, { erro: 'A data e a hora deste PC estão erradas. Ligue o ajuste automático nas configurações do Windows.' })
+        if (!normalized || !auth || checked !== 'ok') return reply(response, 400, { erro: 'Pedido inválido.' })
+        const result = await this.accounts.login(normalized, text('senha'), ip)
         if (!result.ok) {
           const messages = { invalid: 'E-mail ou senha incorretos.', locked: 'Muitas tentativas erradas. Espere alguns minutos e tente de novo.', blocked: 'Esta conta foi suspensa.' }
           return reply(response, result.reason === 'locked' ? 429 : 400, { erro: messages[result.reason] })
         }
-        const [row] = await this.sql<{ kind: string }[]>`
-          insert into kora_sync.devices (fingerprint, account_id, kind, name) values (${auth.fingerprint}, ${result.accountId}, 'pc', ${text('nome').slice(0, 60) || null})
-          on conflict (fingerprint) do update set account_id = excluded.account_id, name = coalesce(excluded.name, kora_sync.devices.name)
-          where kora_sync.devices.kind = 'pc'
-          returning kind`
-        if (!row) return reply(response, 400, { erro: 'Pedido inválido.' })
+        // Quem prova a chave é o dono da impressão digital: se alguém a registrou antes como celular (lendo o /health
+        // na rede local, por exemplo), o registro vira PC desta conta.
+        await this.sql.begin(async (tx) => {
+          await tx`delete from kora_sync.phone_pcs where phone = ${auth.fingerprint}`
+          await tx`
+            insert into kora_sync.devices (fingerprint, account_id, kind, name) values (${auth.fingerprint}, ${result.accountId}, 'pc', ${text('nome').slice(0, 60) || null})
+            on conflict (fingerprint) do update set account_id = excluded.account_id, kind = 'pc', name = coalesce(excluded.name, kora_sync.devices.name)`
+        })
         this.cache.delete(auth.fingerprint)
         const client = String(request.headers['x-kora-client'] ?? '')
         this.seen(auth.fingerprint, { ip, client: CLIENT.test(client) ? client : '' })

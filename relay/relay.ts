@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
-import { parseRelayAuth, verifyRelayAuth } from './auth.ts'
+import { AUTH_WINDOW_MS, checkRelayAuth, parseRelayAuth } from './auth.ts'
 
 // Ponto de encontro entre o celular e o PC. Não guarda nada e não lê nada: junta duas conexões e repassa os bytes do
 // envelope de dentro, que só o celular e o PC abrem.
@@ -68,6 +68,8 @@ export type Relay = Server & {
   dropAccount(accountId: string): void
   // Impressões digitais com conexão aberta agora (PC no controle, celular numa sessão).
   online(): Set<string>
+  // PC que saiu da conta: o controle dele cai na hora.
+  dropDevice(fingerprint: string): void
 }
 
 const CONTROL_MESSAGE_BYTES = 64 * 1024
@@ -81,6 +83,11 @@ export function createRelay(options: RelayOptions): Relay {
   const waiting = new Map<string, Waiting>()
   const started = new Date()
   const byAccount = new Map<string, Set<WebSocket>>()
+  // A conta de cada PC com controle aberto.
+  const controlOwners = new Map<string, string>()
+  // Assinaturas já usadas, até saírem da janela de 2 minutos: quem copiasse os cabeçalhos de uma conexão não abre
+  // outra com eles (os aparelhos assinam de novo a cada conexão).
+  const usedSignatures = new Map<string, number>()
   // Celular com sessão aberta agora, por conexão: o online() da tela de admin.
   const live = new Map<WebSocket, string>()
   const failures = new Map<string, { count: number; since: number; bannedUntil: number }>()
@@ -104,20 +111,29 @@ export function createRelay(options: RelayOptions): Relay {
   const sweep = setInterval(() => {
     const now = Date.now()
     for (const [ip, entry] of failures) if (entry.bannedUntil <= now && now - entry.since >= FAILURE_WINDOW_MS) failures.delete(ip)
+    for (const [signature, until] of usedSignatures) if (until <= now) usedSignatures.delete(signature)
   }, 60_000)
   sweep.unref()
 
   // Assinatura inválida é tentativa de invasão; assinatura boa de aparelho sem registro (ou de conta bloqueada) é só
   // recusa, com 403, para o Kora parar de insistir e mostrar o motivo em vez de ser bloqueado pelo IP.
-  const authenticate = async (request: IncomingMessage, path: string, kind: 'pc' | 'phone', target: string): Promise<Owner | 'invalid' | 'denied'> => {
+  const authenticate = async (request: IncomingMessage, path: string, kind: 'pc' | 'phone', target: string): Promise<Owner | 'invalid' | 'denied' | 'stale'> => {
     const auth = parseRelayAuth(request.headers.authorization, request.headers['x-kora-certificate'] as string | undefined)
-    if (!auth || !verifyRelayAuth(auth, path)) return 'invalid'
+    if (!auth) return 'invalid'
+    const checked = checkRelayAuth(auth, path)
+    if (checked !== 'ok') return checked
+    const signature = auth.signature.toString('base64')
+    if (usedSignatures.has(signature)) return 'invalid'
+    usedSignatures.set(signature, Date.now() + 2 * AUTH_WINDOW_MS)
     let device = await options.directory.find(auth.fingerprint)
     if (kind === 'phone' && (!device || (device.kind === 'phone' && !device.pcs.includes(target))) && options.directory.admit) {
       device = await options.directory.admit(auth.fingerprint, target)
     }
     if (!device || device.blocked || device.kind !== kind || (kind === 'phone' && !device.pcs.includes(target))) return 'denied'
-    return { fingerprint: auth.fingerprint, accountId: device.accountId }
+    // O celular pode estar pareado com PCs de contas diferentes: a conexão dele é da conta do PC que ele procura, e é
+    // o bloqueio dessa conta que a derruba.
+    const accountId = kind === 'phone' ? controlOwners.get(target) ?? device.accountId : device.accountId
+    return { fingerprint: auth.fingerprint, accountId }
   }
   const refuse = (socket: Duplex, status = '404 Not Found'): void => { socket.end(`HTTP/1.1 ${status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`) }
 
@@ -137,6 +153,7 @@ export function createRelay(options: RelayOptions): Relay {
     const id = owner.fingerprint
     controls.get(id)?.terminate()
     controls.set(id, socket)
+    controlOwners.set(id, owner.accountId)
     let counted = Date.now()
     const count = (): void => {
       const now = Date.now()
@@ -147,15 +164,20 @@ export function createRelay(options: RelayOptions): Relay {
     socket.on('close', () => {
       clearInterval(minute)
       count()
-      if (controls.get(id) === socket) controls.delete(id)
+      if (controls.get(id) === socket) {
+        controls.delete(id)
+        controlOwners.delete(id)
+      }
     })
     // Pedidos do PC: {id, ...corpo}; a resposta leva o mesmo id.
     socket.on('message', (raw, binary) => {
       if (binary || sizeOf(raw) > CONTROL_MESSAGE_BYTES || !options.request) return
-      let message: { id?: unknown }
-      try { message = JSON.parse(String(raw)) as { id?: unknown } } catch { return }
-      if (typeof message.id !== 'number') return
-      const { id: requestId, ...body } = message
+      let message: unknown
+      try { message = JSON.parse(String(raw)) } catch { return }
+      // "null", número ou lista também são JSON válido: só objeto com id segue, senão o acesso ao id derrubaria o
+      // processo (e todos os PCs e celulares junto).
+      if (typeof message !== 'object' || message === null || Array.isArray(message) || typeof (message as { id?: unknown }).id !== 'number') return
+      const { id: requestId, ...body } = message as { id: number }
       options.request({ fingerprint: owner.fingerprint, accountId: owner.accountId }, body).then(
         (result) => socket.send(JSON.stringify({ id: requestId, ok: true, result })),
         (error: unknown) => socket.send(JSON.stringify({ id: requestId, ok: false, error: error instanceof Error ? error.message : String(error) }))
@@ -235,12 +257,14 @@ export function createRelay(options: RelayOptions): Relay {
       : null
     const owner = shape ? await authenticate(request, path, shape === 'phone' ? 'phone' : 'pc', id) : 'invalid'
     // Assinatura do PC para o caminho de outro PC também é forjada: ninguém fala em nome de outra impressão digital.
-    if (owner === 'invalid' || (shape !== 'phone' && owner !== 'denied' && owner.fingerprint !== id)) {
+    if (owner === 'invalid' || (shape !== 'phone' && owner !== 'denied' && owner !== 'stale' && owner.fingerprint !== id)) {
       failed(ip)
       return refuse(socket)
     }
     // Celular de outro PC é recusa, não ataque: o dono dele só errou de PC (ou desfez o pareamento).
     if (owner === 'denied') return refuse(socket, '403 Forbidden')
+    // Assinatura certa com o relógio do aparelho fora da hora: 401, sem bloquear o IP (que pode ser o de muita gente).
+    if (owner === 'stale') return refuse(socket, '401 Unauthorized')
     // Celular procurando um PC desligado não é ataque: quem está viajando com o PC fora do ar segue tentando, e não pode
     // estar bloqueado quando o PC voltar. O PC chegando atrasado a uma sessão que já expirou (o celular desistiu) também
     // não. Os dois já provaram quem são.
@@ -294,6 +318,9 @@ export function createRelay(options: RelayOptions): Relay {
     },
     online(): Set<string> {
       return new Set([...controls.keys(), ...[...live.values()]])
+    },
+    dropDevice(fingerprint: string): void {
+      controls.get(fingerprint)?.terminate()
     }
   })
 }

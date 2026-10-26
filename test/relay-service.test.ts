@@ -223,11 +223,79 @@ describe('relay com contas de verdade (Postgres)', () => {
     await expect(adminLink.request({ op: 'admin:bloquear', conta: admin.id })).rejects.toThrow('própria conta')
     await adminLink.request({ op: 'admin:bloquear', conta: user.id, motivo: 'abuso' })
     await until(() => userLink.status.error?.includes('conta ativa') === true)
-    expect(await phoneStatus(userPc, userPhone)).toBe(403)
+    // O PC bloqueado saiu do ar, então o celular dele não acha mais com quem falar.
+    expect(await phoneStatus(userPc, userPhone)).toBe(404)
     const log = await sql<{ action: string; detail: { motivo: string } }[]>`select action, detail from kora_sync.admin_log`
     expect(log).toEqual([{ action: 'bloquear', detail: { motivo: 'abuso' } }])
     await adminLink.request({ op: 'admin:desbloquear', conta: user.id })
     await until(() => userLink.status.state === 'conectado', 8_000)
+  })
+
+  it('trocar a senha tira da conta todos os PCs que entraram com a senha antiga, na hora', async () => {
+    const [mine, intruder] = [createIdentity('Meu PC'), createIdentity('PC de quem descobriu a senha')]
+    await accountWithPc('h@exemplo.com', mine)
+    const login = await api('/a/entrar', { email: 'h@exemplo.com', senha: 'senha-boa-123' }, relayHeaders(intruder, '/a/entrar/h@exemplo.com'))
+    expect(login.status).toBe(200)
+    const intruderLink = pcLink(intruder)
+    await until(() => intruderLink.status.state === 'conectado')
+    await api('/a/esqueci', { email: 'h@exemplo.com' })
+    expect((await api('/a/redefinir', { email: 'h@exemplo.com', codigo: code('h@exemplo.com'), senha: 'outra-senha-boa' })).status).toBe(200)
+    await until(() => intruderLink.status.error?.includes('conta ativa') === true)
+    expect(await sql`select 1 from kora_sync.devices where kind = 'pc'`).toHaveLength(0)
+    // Quem trocou a senha entra de novo com ela (o Kora faz isso sozinho depois de redefinir).
+    expect((await api('/a/entrar', { email: 'h@exemplo.com', senha: 'outra-senha-boa' }, relayHeaders(mine, '/a/entrar/h@exemplo.com'))).status).toBe(200)
+  })
+
+  it('a impressão digital de um PC cadastrada antes como celular por outra conta volta para o dono quando ele entra', async () => {
+    const [squatter, victim] = [createIdentity('PC de outra conta'), createIdentity('PC do dono')]
+    await accountWithPc('outra@exemplo.com', squatter)
+    const squatterLink = pcLink(squatter)
+    await until(() => squatterLink.status.state === 'conectado')
+    await squatterLink.request({ op: 'sincronizar', celulares: [{ fingerprint: victim.fingerprint, name: 'disfarce' }], pareamentoAte: null })
+    await accountWithPc('dono@exemplo.com', victim)
+    const [row] = await sql<{ kind: string; email: string }[]>`
+      select d.kind, a.email from kora_sync.devices d join kora_sync.accounts a on a.id = d.account_id where d.fingerprint = ${victim.fingerprint}`
+    expect(row).toEqual({ kind: 'pc', email: 'dono@exemplo.com' })
+    expect(await sql`select 1 from kora_sync.phone_pcs where phone = ${victim.fingerprint}`).toHaveLength(0)
+    const victimLink = pcLink(victim)
+    await until(() => victimLink.status.state === 'conectado')
+  })
+
+  it('celular pareado com PCs de duas contas: bloquear uma não tira o acesso dele ao PC da outra', async () => {
+    const [mine, friend, phone] = [createIdentity('Meu PC'), createIdentity('PC do amigo'), createIdentity('Celular')]
+    await accountWithPc('eu@exemplo.com', mine)
+    await accountWithPc('amigo@exemplo.com', friend)
+    const myLink = pcLink(mine)
+    const friendLink = pcLink(friend)
+    await until(() => myLink.status.state === 'conectado' && friendLink.status.state === 'conectado')
+    await myLink.request({ op: 'sincronizar', celulares: [{ fingerprint: phone.fingerprint, name: 'Celular' }], pareamentoAte: null })
+    // O amigo sincroniza por último: o celular fica "na conta" dele.
+    await friendLink.request({ op: 'sincronizar', celulares: [{ fingerprint: phone.fingerprint, name: 'Celular' }], pareamentoAte: null })
+    await sql`update kora_sync.accounts set admin = true where email = 'eu@exemplo.com'`
+    const [friendAccount] = await sql<{ id: string }[]>`select id from kora_sync.accounts where email = 'amigo@exemplo.com'`
+    // Sessão aberta com o meu PC antes do bloqueio: ela é da minha conta e não pode cair junto com a do amigo.
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/c/${mine.fingerprint}`, { headers: relayHeaders(phone, `/c/${mine.fingerprint}`) })
+    closers.push(() => ws.terminate())
+    const socket = await sealEnvelope(createWebSocketStream(ws), phone, mine.fingerprint)
+    await myLink.request({ op: 'admin:bloquear', conta: friendAccount!.id })
+    await until(() => friendLink.status.error?.includes('conta ativa') === true)
+    const answer = await new Promise<string>((resolve, reject) => {
+      request({ createConnection: () => socket, method: 'POST', path: '/', headers: { 'content-length': 11 } }, (res) => {
+        let text = ''
+        res.on('data', (chunk) => { text += chunk })
+        res.on('end', () => resolve(text))
+      }).on('error', reject).end('ainda aqui!')
+    })
+    expect(answer).toBe('eco: ainda aqui!')
+    expect(await phoneRequest(mine, phone, 'ainda chego')).toBe('eco: ainda chego')
+  })
+
+  it('login com o relógio do PC errado explica o motivo', async () => {
+    const pc = createIdentity('PC')
+    await api('/a/cadastro', { email: 'r@exemplo.com' })
+    await api('/a/verificar', { email: 'r@exemplo.com', codigo: code('r@exemplo.com'), senha: 'senha-boa-123' })
+    const login = await api('/a/entrar', { email: 'r@exemplo.com', senha: 'senha-boa-123' }, relayHeaders(pc, '/a/entrar/r@exemplo.com', Date.now() - 10 * 60_000))
+    expect(login).toEqual({ status: 400, body: { erro: expect.stringContaining('data e a hora deste PC') } })
   })
 
   it('banco fora do ar: quem já entrou segue entrando pelo cache; aparelho novo recebe 503', async () => {
@@ -270,6 +338,59 @@ describe('relay com contas de verdade (Postgres)', () => {
     await link.request({ op: 'sincronizar', celulares: [{ fingerprint: phone.fingerprint, name: 'Celular' }], pareamentoAte: null })
     await link.request({ op: 'sair' })
     expect(await sql`select 1 from kora_sync.devices`).toHaveLength(0)
+  })
+
+  it('sair pelo Kora vale mesmo com o Fora de casa desligado, e só o próprio PC (assinado) se tira da conta', async () => {
+    const [pc, other] = [createIdentity('PC'), createIdentity('Outro')]
+    await accountWithPc('s@exemplo.com', pc)
+    expect((await api('/a/sair', {}, relayHeaders(other, '/a/entrar/s@exemplo.com'))).status).toBe(400)
+    expect((await api('/a/sair', {})).status).toBe(400)
+    expect(await sql`select 1 from kora_sync.devices where fingerprint = ${pc.fingerprint}`).toHaveLength(1)
+    await accountClient(`ws://127.0.0.1:${port}`, () => pc, 'Notebook', 'windows/1 kora/1').signOut()
+    expect(await sql`select 1 from kora_sync.devices where fingerprint = ${pc.fingerprint}`).toHaveLength(0)
+  })
+
+  it('lista de celulares ausente ou de outro tipo é recusada e não apaga os vínculos que já existem', async () => {
+    const [pc, phone] = [createIdentity('PC'), createIdentity('Celular')]
+    await accountWithPc('l@exemplo.com', pc)
+    const link = pcLink(pc)
+    await until(() => link.status.state === 'conectado')
+    await link.request({ op: 'sincronizar', celulares: [{ fingerprint: phone.fingerprint, name: 'Celular' }], pareamentoAte: null })
+    for (const celulares of [null, undefined, 'x', 5]) await expect(link.request({ op: 'sincronizar', celulares, pareamentoAte: null })).rejects.toThrow('inválida')
+    expect(await sql`select 1 from kora_sync.phone_pcs where phone = ${phone.fingerprint}`).toHaveLength(1)
+  })
+
+  it('bloqueio e auditoria vão juntos: se a auditoria falha, a conta não fica bloqueada pela metade', async () => {
+    const [adminPc, userPc] = [createIdentity('PC do admin'), createIdentity('PC do usuário')]
+    await accountWithPc('admin2@exemplo.com', adminPc)
+    await accountWithPc('usuario2@exemplo.com', userPc)
+    await sql`update kora_sync.accounts set admin = true where email = 'admin2@exemplo.com'`
+    const adminLink = pcLink(adminPc)
+    await until(() => adminLink.status.state === 'conectado')
+    const [user] = await sql<{ id: string }[]>`select id from kora_sync.accounts where email = 'usuario2@exemplo.com'`
+    await sql`alter table kora_sync.admin_log rename to admin_log_fora`
+    try {
+      await expect(adminLink.request({ op: 'admin:bloquear', conta: user!.id })).rejects.toThrow()
+    } finally {
+      await sql`alter table kora_sync.admin_log_fora rename to admin_log`
+    }
+    const [row] = await sql<{ blocked: boolean }[]>`select blocked_at is not null as blocked from kora_sync.accounts where id = ${user!.id}`
+    expect(row!.blocked).toBe(false)
+  })
+
+  it('o painel não conta em dobro o consumo do celular pareado com dois PCs', async () => {
+    const [home, work, phone] = [createIdentity('Casa'), createIdentity('Trabalho'), createIdentity('Celular')]
+    await accountWithPc('p@exemplo.com', home)
+    await accountWithPc('p2@exemplo.com', work)
+    await sql`update kora_sync.accounts set admin = true where email = 'p@exemplo.com'`
+    const homeLink = pcLink(home)
+    const workLink = pcLink(work)
+    await until(() => homeLink.status.state === 'conectado' && workLink.status.state === 'conectado')
+    for (const link of [homeLink, workLink]) await link.request({ op: 'sincronizar', celulares: [{ fingerprint: phone.fingerprint, name: 'Celular' }], pareamentoAte: null })
+    service.usage(phone.fingerprint, { bytesIn: 123, sessions: 2 })
+    const view = await homeLink.request<{ devices: { fingerprint: string; bytes_in_30d: string; sessions_30d: string; pcs: string[] }[] }>({ op: 'admin:visao' })
+    const seen = view.devices.find((device) => device.fingerprint === phone.fingerprint)!
+    expect({ bytes: seen.bytes_in_30d, sessions: seen.sessions_30d, pcs: seen.pcs.length }).toEqual({ bytes: '123', sessions: '2', pcs: 2 })
   })
 
   it('consumo que não conseguiu ir ao banco volta para a fila e entra na gravação seguinte', async () => {
