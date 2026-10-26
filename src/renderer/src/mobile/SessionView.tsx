@@ -103,6 +103,9 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     term.loadAddon(unicode)
     term.unicode.activeVersion = '11'
     term.open(element)
+    // O xterm dá foco ao textarea dele em todo toque (mousedown); no celular isso abriria o teclado para um terminal
+    // que só mostra. Quem escreve é o campo da mensagem.
+    term.textarea?.setAttribute('inputmode', 'none')
     const offTheme = onThemeChange(() => {
       const look = currentTerminalLook()
       term.options.theme = look.theme
@@ -190,7 +193,12 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       }
       if (wheel) wheelTimer = setTimeout(flushWheel, 40)
     }
-    const touchStart = (event: TouchEvent): void => { touchY = event.touches.length === 1 ? event.touches[0]!.clientY : null }
+    const touchStart = (event: TouchEvent): void => {
+      touchY = event.touches.length === 1 ? event.touches[0]!.clientY : null
+      // Tocar no terminal larga o campo: com ele focado, o teclado segura a tela e o navegador puxa o campo de volta
+      // à vista, por cima da rolagem. O rascunho fica no estado; tocar no campo de novo retoma.
+      if (document.activeElement === field.current) field.current?.blur()
+    }
     const touchMove = (event: TouchEvent): void => {
       if (touchY === null || !appScrolls()) return
       const step = (term.dimensions?.css.cell.height || 16) * 1.2
