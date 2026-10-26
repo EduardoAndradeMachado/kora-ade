@@ -474,6 +474,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Cada conexão ao relay assina de novo: a assinatura vale 2 minutos e cobre só o caminho deste PC.
+    private fun abrirEnvelope(relay: String, pc: String): Envelope {
+        val chave = IdentidadeDoCelular.chave()
+        val versao = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty().ifEmpty { "0" }
+        val cabecalhos = cabecalhosDoRelay(chave, "/c/$pc", "android/${Build.VERSION.RELEASE} kora-android/$versao")
+        return Envelope.abrir(http, "wss://$relay/c/$pc", contextoDoEnvelope(chave, pc), PRAZO_RELAY_MS, cabecalhos)
+    }
+
     private fun abrir(kora: Kora, codigo: String? = null) {
         fecharPassagem()
         codigoPendente = codigo
@@ -496,7 +504,7 @@ class MainActivity : ComponentActivity() {
         val relay = salvo.relay ?: return
         fecharPassagem()
         codigoPendente = codigo
-        val nova = Passagem(PORTA_PASSAGEM) { Envelope.abrir(http, "wss://$relay/c/$pc", contextoDoEnvelope(IdentidadeDoCelular.chave(), pc), PRAZO_RELAY_MS) }.iniciar()
+        val nova = Passagem(PORTA_PASSAGEM) { abrirEnvelope(relay, pc) }.iniciar()
         passagem = nova
         atual = Kora(salvo.id, "127.0.0.1", nova.porta, salvo.nome, salvo.edicao, salvo.tailscale, pc, relay)
         preferencias.edit().putString(ULTIMO_PC, salvo.id).apply()
@@ -571,7 +579,7 @@ class MainActivity : ComponentActivity() {
 
     // Pareamento só pelo relay: o /health do PC chega pelo envelope (o PC aceita um certificado novo enquanto o QR vale).
     private fun sondarPeloRelay(relay: String, pc: String): Kora? = runCatching {
-        Envelope.abrir(http, "wss://$relay/c/$pc", contextoDoEnvelope(IdentidadeDoCelular.chave(), pc), PRAZO_RELAY_MS).use { envelope ->
+        abrirEnvelope(relay, pc).use { envelope ->
             // HTTP/1.0: o PC responde sem dividir o corpo em partes (chunked), e o JSON vem inteiro depois do cabeçalho.
             envelope.saida.write("GET /health HTTP/1.0\r\nHost: kora\r\n\r\n".toByteArray())
             val saude = JSONObject(envelope.entrada.readBytes().decodeToString().substringAfter("\r\n\r\n"))

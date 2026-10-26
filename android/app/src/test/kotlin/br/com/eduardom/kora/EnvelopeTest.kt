@@ -63,6 +63,9 @@ class EnvelopeTest {
 
         private fun url(pc: String) = "ws://127.0.0.1:${dados.getInt("porta")}/c/$pc"
 
+        // A prova da chave que o relay exige, montada pelo código do app e conferida pelo relay de verdade (Node).
+        private fun assinado(nome: String, pc: String, caminho: String = "/c/$pc") = cabecalhosDoRelay(chave(nome), caminho, "android/teste kora-android/teste")
+
         private fun pedir(envelope: Envelope): String {
             envelope.saida.write("GET /eco HTTP/1.1\r\nHost: kora\r\nX-Quem: celular\r\nConnection: close\r\n\r\n".toByteArray())
             envelope.saida.flush()
@@ -73,7 +76,7 @@ class EnvelopeTest {
     @Test
     fun oCelularPareadoFalaComOPcPeloRelay() {
         val pc = dados.getString("pc")
-        val envelope = Envelope.abrir(cliente, url(pc), contextoDoEnvelope(chave("celular"), pc), 10_000)
+        val envelope = Envelope.abrir(cliente, url(pc), contextoDoEnvelope(chave("celular"), pc), 10_000, assinado("celular", pc))
         val resposta = pedir(envelope)
         assertTrue(resposta, resposta.startsWith("HTTP/1.1 200"))
         assertTrue(resposta, resposta.endsWith("eco do PC para celular"))
@@ -85,7 +88,7 @@ class EnvelopeTest {
         // O app espera outro PC (outra impressão digital), mas o relay entrega o PC que está lá.
         val outro = pc.reversed()
         try {
-            Envelope.abrir(cliente, url(pc), contextoDoEnvelope(chave("celular"), outro), 10_000)
+            Envelope.abrir(cliente, url(pc), contextoDoEnvelope(chave("celular"), outro), 10_000, assinado("celular", pc))
             fail("o envelope abriu com um PC que não é o do pareamento")
         } catch (erro: IOException) {
             assertTrue(erro.toString(), generateSequence<Throwable>(erro) { it.cause }.any { it.message?.contains("não é o do pareamento") == true })
@@ -95,10 +98,23 @@ class EnvelopeTest {
     @Test
     fun oPcRecusaUmCelularQueNaoFoiPareado() {
         val pc = dados.getString("pc")
-        val resposta = runCatching { pedir(Envelope.abrir(cliente, url(pc), contextoDoEnvelope(chave("estranho"), pc), 10_000)) }
+        val resposta = runCatching { pedir(Envelope.abrir(cliente, url(pc), contextoDoEnvelope(chave("estranho"), pc), 10_000, assinado("estranho", pc))) }
         // No TLS 1.3 o celular termina o aperto de mãos antes de o PC conferir o certificado dele: a recusa chega logo
         // depois, como erro ou conexão fechada, e o pedido nunca é atendido.
         assertFalse(resposta.toString(), resposta.getOrNull()?.contains("eco do PC") == true)
+    }
+
+    @Test
+    fun oRelayRecusaQuemNaoProvaAChaveOuAssinaOutroCaminho() {
+        val pc = dados.getString("pc")
+        for (cabecalhos in listOf(emptyMap(), assinado("celular", pc, "/c/${pc.reversed()}"))) {
+            try {
+                pedir(Envelope.abrir(cliente, url(pc), contextoDoEnvelope(chave("celular"), pc), 10_000, cabecalhos))
+                fail("o relay deixou passar sem a prova da chave")
+            } catch (erro: IOException) {
+                assertTrue(erro.toString(), generateSequence<Throwable>(erro) { it.cause }.any { it.message?.contains("relay") == true })
+            }
+        }
     }
 
     @Test

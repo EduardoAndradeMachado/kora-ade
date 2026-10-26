@@ -48,7 +48,7 @@ class PassagemTest {
                 CertificateFactory.getInstance("X.509").generateCertificate(ByteArrayInputStream(identidade.getString("cert").toByteArray())) as X509Certificate
             )
             val pc = dados.getString("pc")
-            passagem = Passagem { Envelope.abrir(cliente, "ws://127.0.0.1:${dados.getInt("porta")}/c/$pc", contextoDoEnvelope(chave, pc), 10_000) }.iniciar()
+            passagem = Passagem { Envelope.abrir(cliente, "ws://127.0.0.1:${dados.getInt("porta")}/c/$pc", contextoDoEnvelope(chave, pc), 10_000, cabecalhosDoRelay(chave, "/c/$pc", "android/teste kora-android/teste")) }.iniciar()
         }
 
         @AfterClass @JvmStatic

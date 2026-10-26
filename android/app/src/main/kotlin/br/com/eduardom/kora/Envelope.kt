@@ -227,15 +227,16 @@ class Envelope(private val engine: SSLEngine, private val transporte: Transporte
         private val FIM = ByteArray(0)
         private const val PRAZO_ESCRITA_MS = 15_000L
 
-        /** Abre o WebSocket até o relay e, por dentro dele, o envelope com o PC. */
-        fun abrir(cliente: OkHttpClient, url: String, contexto: SSLContext, prazoMs: Long): Envelope {
+        /** Abre o WebSocket até o relay (com a prova da chave nos cabeçalhos) e, por dentro dele, o envelope com o PC. */
+        fun abrir(cliente: OkHttpClient, url: String, contexto: SSLContext, prazoMs: Long, cabecalhos: Map<String, String> = emptyMap()): Envelope {
             val socket = AtomicReference<WebSocket>()
             val envelope = Envelope(contexto.createSSLEngine(), object : Transporte {
                 override fun enviar(bytes: ByteArray) = socket.get()?.send(bytes.toByteString()) ?: false
                 override fun fechar() { socket.get()?.cancel() }
             })
             val aberto = CountDownLatch(1)
-            socket.set(cliente.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
+            val pedido = Request.Builder().url(url).apply { cabecalhos.forEach { (nome, valor) -> header(nome, valor) } }.build()
+            socket.set(cliente.newWebSocket(pedido, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) = aberto.countDown()
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) = envelope.recebeu(bytes.toByteArray())
                 // O relay fecha quando a outra ponta sai; o OkHttp só chama onClosed depois de o app responder ao fechamento.
@@ -245,7 +246,13 @@ class Envelope(private val engine: SSLEngine, private val transporte: Transporte
                 }
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = envelope.transporteFechou("O relay fechou a conexão.")
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    envelope.transporteFechou(if (response != null) "O relay recusou a conexão." else "Não foi possível chegar ao relay.")
+                    envelope.transporteFechou(
+                        when {
+                            response == null -> "Não foi possível chegar ao relay."
+                            response.code == 403 -> "O relay não reconhece este celular: abra o app uma vez no Wi-Fi de casa."
+                            else -> "O relay recusou a conexão."
+                        }
+                    )
                     aberto.countDown()
                 }
             }))
