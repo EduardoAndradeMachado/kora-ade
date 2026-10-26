@@ -103,13 +103,16 @@ export class AgentDetector {
   }
 
   // UNREADABLE para a aba cujo agente não deu para ler nesta volta: quem chama mantém o que sabia dela.
+  // A aba é do agente mais de fora: um Codex que o Claude roda como ferramenta (o code review dele, por exemplo) é filho
+  // do Claude e não troca a aba, e vice-versa. Entre agentes lado a lado no terminal, vale o mais novo.
   detect(shellPids: Map<string, number>): Map<string, Detected | typeof UNREADABLE> {
     const all = this.sources.listProcesses()
+    const parentOf = new Map(all.map((p) => [p.pid, p.ppid]))
     const codex = this.codexThreadsByPid()
     const found = new Map<string, Detected | typeof UNREADABLE>()
 
     for (const [tabId, shellPid] of shellPids) {
-      let latest: { detected: Detected; createdMs: number } | null = null
+      const agents = new Map<number, { detected: Detected; proc: ProcInfo }>()
       let unreadable = false
       for (const proc of descendants(shellPid, all)) {
         const lock = codex.get(proc.pid)
@@ -118,6 +121,11 @@ export class AgentDetector {
           : claudeStateForPid(this.sources.claudeSessionsDir, proc.pid)
         if (detected === UNREADABLE) unreadable = true
         if (!detected || detected === UNREADABLE) continue
+        agents.set(proc.pid, { detected, proc })
+      }
+      let latest: { detected: Detected; createdMs: number } | null = null
+      for (const { detected, proc } of agents.values()) {
+        if (insideAnother(proc.pid, shellPid, parentOf, agents)) continue
         const createdMs = this.sources.creationTime(proc) ?? 0
         if (!latest || createdMs >= latest.createdMs) latest = { detected, createdMs }
       }
@@ -152,6 +160,15 @@ export class AgentDetector {
       return null
     }
   }
+}
+
+function insideAnother(pid: number, shellPid: number, parentOf: Map<number, number>, agents: Map<number, unknown>): boolean {
+  const seen = new Set<number>([pid])
+  for (let parent = parentOf.get(pid); parent !== undefined && parent !== shellPid && !seen.has(parent); parent = parentOf.get(parent)) {
+    if (agents.has(parent)) return true
+    seen.add(parent)
+  }
+  return false
 }
 
 // A primeira linha do rollout (session_meta, ~22 KB com as instruções base) não muda depois de gravada.

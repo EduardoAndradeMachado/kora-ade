@@ -161,6 +161,44 @@ describe('AgentDetector de ponta a ponta (pty real + árvore de processos real +
     expect(found.has(tabShell)).toBe(false)
   })
 
+  it('Codex rodado pelo Claude como ferramenta (code review) não troca a aba de Claude para Codex', async () => {
+    const sessionsDir = mkdtempSync(join(tmpdir(), 'kora-sessions-'))
+    const locksDir = mkdtempSync(join(tmpdir(), 'kora-locks-'))
+    const threadId = randomUUID()
+    const lock = join(locksDir, `${threadId}.lock`)
+    writeFileSync(lock, '')
+    const markers = mkdtempSync(join(tmpdir(), 'kora-marker-'))
+    const parentMarker = join(markers, 'claude.txt')
+    const childMarker = join(markers, 'codex.txt')
+    // O "Claude" sobe e, depois, roda um "Codex" filho que segura o lock da conversa dele, como o codex review.
+    const child = `require('fs').openSync(${JSON.stringify(lock)}, 'r+'); require('fs').writeFileSync(${JSON.stringify(childMarker)}, String(process.pid)); setTimeout(() => {}, 20000)`
+    const script = join(markers, 'claude.js')
+    writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(parentMarker)}, String(process.pid)); setTimeout(() => require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(child)}], { stdio: 'ignore' }), 300); setTimeout(() => {}, 20000)`)
+    const tab = randomUUID()
+    terminals.spawn(tab, tmpdir(), 120, 30)
+    terminals.write(tab, `node "${script}"\r`)
+    const start = Date.now()
+    while (!existsSync(parentMarker) || !existsSync(childMarker)) {
+      if (Date.now() - start > 15000) throw new Error('processos falsos não subiram')
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    const claudePid = Number(readFileSync(parentMarker, 'utf8'))
+    const sessionId = randomUUID()
+    writeFileSync(join(sessionsDir, `${claudePid}.json`), claudePidFile(claudePid, sessionId), 'utf8')
+    const rollout = join(mkdtempSync(join(tmpdir(), 'kora-rollout-')), `rollout-2026-10-26T10-00-00-${threadId}.jsonl`)
+    writeFileSync(rollout, '{"type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}\n', 'utf8')
+
+    const detector = new AgentDetector({
+      claudeSessionsDir: sessionsDir,
+      codexLocksDir: locksDir,
+      listProcesses,
+      creationTime: (p) => withCreationTime(p).createdMs,
+      lockHolders: fileHolders,
+      codexRollout: (id) => (id === threadId ? rollout : null)
+    })
+    expect(detector.detect(terminals.pids()).get(tab)).toEqual({ agent: { kind: 'claude', sessionId, name: 'exemplo-75' }, activity: 'waiting' })
+  })
+
   it('Codex com subagente: o mesmo processo segura os dois locks e a aba fica na conversa principal', async () => {
     const locksDir = mkdtempSync(join(tmpdir(), 'kora-locks-'))
     const rolloutsDir = mkdtempSync(join(tmpdir(), 'kora-rollout-'))
