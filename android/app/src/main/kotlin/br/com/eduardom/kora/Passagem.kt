@@ -9,6 +9,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
+import java.net.URLEncoder
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
@@ -76,9 +77,10 @@ class Passagem(portaPreferida: Int = 0, private val prazoCabecalhoMs: Int = 10_0
             // exceção aqui viraria a porta de entrada de outro app do celular para o PC.
             if (!cookieCerto(texto)) return responder(cliente, "403 Forbidden", "")
             // Qualquer falha ao abrir (rede, relay, Keystore do aparelho) vira 502 para a tela: exceção solta numa thread
-            // derrubaria o app inteiro.
+            // derrubaria o app inteiro. O motivo vai em percent-encoding (src/renderer/src/mobile/api.ts): cabeçalho HTTP
+            // não tem charset, e o acento chegaria trocado.
             val envelope = try { abrir() } catch (erro: Exception) {
-                return responder(cliente, "502 Bad Gateway", "X-Kora-Erro: ${erro.message.orEmpty().replace(Regex("[\\r\\n]"), " ")}\r\n")
+                return responder(cliente, "502 Bad Gateway", "X-Kora-Erro: ${motivoNoCabecalho(erro.message)}\r\n")
             }
             envelope.use {
                 envelope.saida.write(cabecalho)
@@ -129,5 +131,7 @@ class Passagem(portaPreferida: Int = 0, private val prazoCabecalhoMs: Int = 10_0
         }
 
         private val FIM = "\r\n\r\n".toByteArray()
+
+        fun motivoNoCabecalho(motivo: String?): String = URLEncoder.encode(motivo.orEmpty(), "UTF-8").replace("+", "%20")
     }
 }

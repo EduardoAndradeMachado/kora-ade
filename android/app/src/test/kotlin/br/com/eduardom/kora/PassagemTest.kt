@@ -134,7 +134,10 @@ class PassagemTest {
             repeat(2) {
                 Socket("127.0.0.1", quebrada.porta).use { socket ->
                     socket.getOutputStream().write("GET /eco HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: ${quebrada.cookie}\r\n\r\n".toByteArray())
-                    assertEquals(502, lerResposta(socket.getInputStream()).status)
+                    val resposta = lerResposta(socket.getInputStream())
+                    assertEquals(502, resposta.status)
+                    // O motivo vai para a tela em percent-encoding: o acento não depende do charset do cabeçalho.
+                    assertTrue(resposta.cabecalhos, resposta.cabecalhos.contains("X-Kora-Erro: Keystore%20indispon%C3%ADvel\r\n"))
                 }
             }
         } finally {
