@@ -73,8 +73,8 @@ export class MobilePairingStore {
   }
 
   get enabled(): boolean { return this.config.enabled }
-  get devices(): { id: string; name: string; pairedAt: string }[] {
-    return this.config.devices.map(({ id, name, pairedAt }) => ({ id, name, pairedAt }))
+  get devices(): { id: string; name: string; pairedAt: string; ready: boolean }[] {
+    return this.config.devices.map(({ id, name, pairedAt, certificate }) => ({ id, name, pairedAt, ready: certificate !== undefined }))
   }
 
   setEnabled(enabled: boolean): void {

@@ -1,6 +1,6 @@
 import { createServer, type Server, type ServerResponse, type IncomingMessage } from 'node:http'
 import { randomBytes } from 'node:crypto'
-import { createReadStream, mkdirSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync } from 'node:fs'
 import { createSocket } from 'node:dgram'
 import { hostname, networkInterfaces } from 'node:os'
 import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -96,6 +96,8 @@ export class MobileServer {
   // Fora de casa: o link com o relay e o atendimento que recebe os envelopes (não escuta porta nenhuma).
   private link: RelayLink | null = null
   private relayHost: string | null = null
+  // O endereço da rota padrão, achado ao ligar a rede local (o status é síncrono e não pode perguntar ao sistema).
+  private lanAddress: string | null = null
   private tunnel: Server | null = null
   private readonly tunnels = new Set<TunnelSocket>()
   private heartbeat: ReturnType<typeof setInterval> | null = null
@@ -133,7 +135,14 @@ export class MobileServer {
       enabled: this.server !== null,
       network: this.server !== null && localAddresses().length > 0,
       remote: this.link ? this.link.status : null,
-      devices: this.pairing.devices.map((device) => ({ ...device, online: this.online(device.id) }))
+      address: this.server ? this.lanAddress : null,
+      tailscale: this.server ? tailscaleAddresses()[0] ?? null : null,
+      invite: this.pairing.remote.invite !== '',
+      devices: this.pairing.devices.map((device) => {
+        const online = this.online(device.id)
+        const relay = [...this.clients].some((client) => client.device === device.id && client.tunnel)
+        return { ...device, online, via: online ? (relay ? 'relay' as const : 'local' as const) : null }
+      })
     }
   }
 
@@ -172,6 +181,7 @@ export class MobileServer {
     })
     this.server = server
     this.port = (server.address() as { port: number }).port
+    this.lanAddress = await preferredAddress()
     this.started = Date.now()
     this.pairing.setEnabled(true)
     if (this.options.audioDir) await this.dropStaleAudio(this.options.audioDir)
@@ -263,7 +273,7 @@ export class MobileServer {
   }
 
   private endClients(which: (client: { tunnel: boolean }) => boolean): void {
-    for (const client of [...this.clients]) if (which(client)) {
+    for (const client of this.clients) if (which(client)) {
       client.response.end()
       this.clients.delete(client)
     }
@@ -285,7 +295,9 @@ export class MobileServer {
     const link = address
       ? `http://${address}:${this.port}/?pc=${pc}${this.relayHost ? `&relay=${this.relayHost}` : ''}#pair=${invitation.code}`
       : `https://${this.relayHost}/?pc=${pc}#pair=${invitation.code}`
-    return { url: link, qr: await QRCode.toDataURL(link, { width: 256, margin: 2, errorCorrectionLevel: 'M' }), expiresAt: new Date(invitation.until).toISOString() }
+    const qr = (text: string): Promise<string> => QRCode.toDataURL(text, { width: 256, margin: 2, errorCorrectionLevel: 'M' })
+    const apk = address && this.options.androidDir && existsSync(join(this.options.androidDir, 'kora-celular.apk')) ? `http://${address}:${this.port}/app/kora-celular.apk` : null
+    return { url: link, qr: await qr(link), expiresAt: new Date(invitation.until).toISOString(), ...(apk ? { app: { url: apk, qr: await qr(apk) } } : {}) }
   }
 
   revoke(id: string): MobileStatus {

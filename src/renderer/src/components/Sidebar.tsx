@@ -11,6 +11,7 @@ import { UsageFooter } from '@/components/UsageFooter'
 import { SizeControl } from '@/components/SizeControl'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { cn } from '@/lib/utils'
+import { useMobileStatus } from '@/lib/use-mobile-status'
 import { copyPath } from '@/lib/copied-path'
 import { Icon, type IconName } from '@/brand/icons'
 import { Wordmark } from '@/brand/Logo'
@@ -62,6 +63,7 @@ interface Props {
   update: UpdateStatus
   onInstallUpdate(): Promise<boolean>
   onOpenSettings(): void
+  onOpenMobile(): void
 }
 
 const THEMES: { theme: ThemePreference; label: string; icon: IconName }[] = [
@@ -470,6 +472,7 @@ export function Sidebar(props: Props): React.JSX.Element {
           >
             <Icon name="engrenagem" className="size-3.5" />
           </button>
+          <MobileButton onClick={props.onOpenMobile} />
           <button
             type="button"
             data-tip="Tema"
@@ -707,5 +710,23 @@ function GroupSection(props: GroupSectionProps): React.JSX.Element {
         </>
       )}
     </div>
+  )
+}
+
+// Celular no rodapé, ao lado da engrenagem: o ponto verde diz que há um celular com o Kora aberto agora.
+function MobileButton({ onClick }: { onClick(): void }): React.JSX.Element {
+  const [status] = useMobileStatus()
+  const online = status?.devices.some((device) => device.online) ?? false
+  return (
+    <button
+      type="button"
+      data-tip={online ? 'Celular (conectado agora)' : 'Celular'}
+      aria-label="Celular"
+      onClick={onClick}
+      className="relative rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+    >
+      <Icon name="celular" className="size-3.5" />
+      {online && <span aria-hidden className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-emerald-500 ring-2 ring-card" />}
+    </button>
   )
 }

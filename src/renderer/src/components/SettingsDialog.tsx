@@ -9,7 +9,7 @@ import { Lockup } from '@/brand/Logo'
 import { cn } from '@/lib/utils'
 import { ipcErrorMessage } from '@/lib/ipc-error'
 import { useWindowDim } from '@/lib/use-window-dim'
-import { MobileConnection } from './MobileConnection'
+import { useMobileStatus } from '@/lib/use-mobile-status'
 import { Toggle } from './Toggle'
 
 const SITE_URL = 'https://kora-ade.vercel.app/'
@@ -26,6 +26,7 @@ export interface SettingsPanelProps {
   onAlertsChange(next: Alerts): void
   onPreviewSound(): void
   support: SupportActions
+  onOpenMobile(): void
 }
 
 export interface SupportActions {
@@ -184,6 +185,26 @@ function Links(): React.JSX.Element {
   )
 }
 
+// O celular tem painel próprio (MobilePanel); aqui fica só o resumo e o caminho até ele.
+function MobileSummary({ onOpen }: { onOpen(): void }): React.JSX.Element {
+  const [status] = useMobileStatus()
+  const devices = status?.devices ?? []
+  const online = devices.filter((device) => device.online).length
+  const routes = [status?.enabled && 'rede de casa', status?.remote && 'fora de casa'].filter(Boolean).join(' e ')
+  const summary = !status ? 'Carregando…'
+    : devices.length === 0 ? (routes ? `Ligado: ${routes}. Nenhum celular vinculado.` : 'Desligado. Nenhum celular vinculado.')
+    : `${devices.length === 1 ? '1 celular vinculado' : `${devices.length} celulares vinculados`}${online ? `, ${online} conectado${online > 1 ? 's' : ''} agora` : ''}. ${routes ? `Ligado: ${routes}.` : 'Desligado.'}`
+  return (
+    <section className="flex items-center justify-between gap-3 border-t px-4 py-3.5">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <h3 className="text-xs font-semibold">Celular</h3>
+        <p className="text-[11px] text-muted-foreground">{summary}</p>
+      </div>
+      <Button variant="secondary" className="shrink-0" onClick={onOpen}><Icon name="celular" />Abrir</Button>
+    </section>
+  )
+}
+
 export function SettingsPanel(props: SettingsPanelProps): React.JSX.Element {
   const { update } = props
   const version = `Versão ${props.version ?? '…'}`
@@ -266,7 +287,7 @@ export function SettingsPanel(props: SettingsPanelProps): React.JSX.Element {
         />
       </section>
 
-      <MobileConnection />
+      <MobileSummary onOpen={props.onOpenMobile} />
       <Support support={props.support} />
 
       <section className="flex flex-wrap gap-x-4 gap-y-1 border-t px-4 py-3 text-xs">

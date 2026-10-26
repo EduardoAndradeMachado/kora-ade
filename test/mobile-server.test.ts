@@ -258,7 +258,8 @@ describe('acesso ao servidor do celular', () => {
     expect(s.server.status().devices.find((device) => device.id === s.device)?.online).toBe(true)
     phone.close()
     await expect.poll(() => s.statuses.at(-1)?.devices.find((device) => device.id === s.device)?.online, { timeout: 6000 }).toBe(false)
-    expect(JSON.stringify(s.server.status())).not.toMatch(/\d+\.\d+\.\d+\.\d+/)
+    // O IP de onde o celular conecta não aparece na tela do PC; o endereço do próprio PC, sim (para achá-lo).
+    expect(JSON.stringify(s.server.status().devices)).not.toMatch(/\d+\.\d+\.\d+\.\d+/)
   })
 
   it('o celular pode ser renomeado pelo PC e por ele mesmo, e o nome persiste', async () => {

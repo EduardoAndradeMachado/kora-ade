@@ -89,3 +89,30 @@ test('R-celular aba aberta, renomeada e fechada pelo celular aparece e some na j
   await expect(ui.barTab(run.page, 'Renomeada no celular')).toHaveCount(0)
   await waitFor(() => readState(env).tabs.length === 0, 'aba fechada no estado salvo')
 })
+
+test('R-celular painel do celular: abre pelo rodapé, mostra o caminho ligado e o celular conectado, e conecta outro', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  // O celular com o Kora aberto: o fluxo de eventos mantém ele "conectado agora".
+  const events = new AbortController()
+  void fetch(`${BASE}/api/events`, { headers: { cookie }, signal: events.signal }).catch(() => {})
+  try {
+    const button = run.page.getByRole('button', { name: 'Celular', exact: true })
+    await button.click()
+    const panel = run.page.getByRole('dialog', { name: 'Celular' })
+    await expect(panel).toBeVisible()
+    await expect(panel.getByRole('switch', { name: 'Rede de casa' })).toHaveAttribute('aria-checked', 'true')
+    await expect(panel.getByRole('switch', { name: 'Fora de casa' })).toHaveAttribute('aria-checked', 'false')
+    await expect(panel.getByText('Celular e2e', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Conectado agora, pela rede de casa')).toBeVisible()
+    await panel.getByRole('button', { name: 'Conectar celular' }).click()
+    await expect(panel.getByRole('img', { name: 'QR code da nova conexão' })).toBeVisible()
+    await expect(panel.getByRole('timer')).toContainText('Expira em')
+    await run.page.screenshot({ path: 'e2e/.results/celular-painel.png' })
+    await run.page.keyboard.press('Escape')
+    await expect(panel).toHaveCount(0)
+  } finally {
+    events.abort()
+  }
+})

@@ -58,15 +58,22 @@ export interface MobileFolders {
 // O nome é conferido no PC (validateEntryName), com a mesma mensagem que o explorador do PC mostra.
 export const FolderCreateSchema = z.object({ parent: z.string().min(1).max(4096), name: z.string().max(255) })
 export interface DesktopSessionState { state: KoraState; tabs: MobileTab[] }
-// online: o celular está com o Kora aberto agora (ligado ao PC pelo fluxo de eventos).
-export interface MobileDevice { id: string; name: string; pairedAt: string; online: boolean }
+// online: o celular está com o Kora aberto agora (ligado ao PC pelo fluxo de eventos); via: por onde (rede de casa,
+// que inclui o Tailscale, ou relay). ready: o app já registrou o certificado e pode entrar de fora pelo relay.
+export interface MobileDevice { id: string; name: string; pairedAt: string; online: boolean; via?: 'local' | 'relay' | null; ready?: boolean }
 export interface MobileStatus {
   enabled: boolean
   // O PC tem um endereço de rede local que o celular alcança; sem ele não dá para parear.
   network: boolean
   // Fora de casa: como está a conexão do PC com o relay; null com ele desligado.
   remote?: { state: 'conectando' | 'conectado' | 'reconectando' | 'parado'; since: number; error: string | null } | null
+  // Onde o celular acha o PC: endereço na rede de casa e no Tailscale (null fora do ar), e se o convite do relay já foi
+  // informado (o código em si nunca sai do main).
+  address?: string | null
+  tailscale?: string | null
+  invite?: boolean
   devices: MobileDevice[]
 }
-export interface MobilePairing { url: string; qr: string; expiresAt: string }
+// app: link e QR para baixar o app Android direto deste PC, para quem ainda não o tem (só pela rede de casa).
+export interface MobilePairing { url: string; qr: string; expiresAt: string; app?: { url: string; qr: string } }
 export const DeviceNameSchema = z.string().trim().min(1).max(60)

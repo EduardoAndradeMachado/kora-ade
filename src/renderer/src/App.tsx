@@ -22,6 +22,7 @@ import { Button } from '@/brand/Button'
 import { SymbolMark } from '@/brand/Logo'
 import { OrphanDialog, type OrphanSurvivor } from '@/components/OrphanDialog'
 import { SettingsDialog } from '@/components/SettingsDialog'
+import { MobileDialog } from '@/components/MobilePanel'
 import { playChime } from '@/lib/chime'
 import { copyPath } from '@/lib/copied-path'
 import { finishedUnseen } from '@/lib/alerts'
@@ -121,6 +122,8 @@ export function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [installing, setInstalling] = useState(false)
   const closeSettings = useCallback(() => setSettingsOpen(false), [])
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const closeMobile = useCallback(() => setMobileOpen(false), [])
   const [errorSummary, setErrorSummary] = useState<ErrorSummary | null>(null)
   const [missing, setMissing] = useState<ReadonlySet<string>>(new Set())
   const checkMissing = useCallback(() => {
@@ -942,6 +945,7 @@ export function App(): React.JSX.Element {
         update={update}
         onInstallUpdate={installUpdate}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenMobile={() => setMobileOpen(true)}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
@@ -1163,8 +1167,13 @@ export function App(): React.JSX.Element {
         }}
       />
 
+      {mobileOpen && <MobileDialog onClose={closeMobile} />}
       {settingsOpen && (
         <SettingsDialog
+          onOpenMobile={() => {
+            setSettingsOpen(false)
+            setMobileOpen(true)
+          }}
           version={appVersion}
           update={update}
           installing={installing}
