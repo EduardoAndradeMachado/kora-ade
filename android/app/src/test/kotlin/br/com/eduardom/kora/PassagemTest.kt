@@ -141,4 +141,19 @@ class PassagemTest {
             quebrada.close()
         }
     }
+
+    @Test
+    fun conexaoMudaQueNaoMandaOCabecalhoCaiNoPrazo() {
+        val curta = Passagem(prazoCabecalhoMs = 300) { error("não deveria abrir") }.iniciar()
+        try {
+            Socket("127.0.0.1", curta.porta).use { muda ->
+                muda.soTimeout = 5_000
+                val inicio = System.currentTimeMillis()
+                assertEquals(-1, muda.getInputStream().read())
+                assertTrue(System.currentTimeMillis() - inicio < 4_000)
+            }
+        } finally {
+            curta.close()
+        }
+    }
 }

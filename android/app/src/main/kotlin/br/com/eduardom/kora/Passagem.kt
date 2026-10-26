@@ -21,7 +21,7 @@ import kotlin.concurrent.thread
  * Outros apps do celular também alcançam 127.0.0.1. Por isso a passagem só atende quem traz o cookie secreto, que a tela
  * recebe ao abrir [inicio] e que o WebView não entrega a ninguém (HttpOnly, só deste endereço).
  */
-class Passagem(portaPreferida: Int = 0, private val abrir: () -> Envelope) : Closeable {
+class Passagem(portaPreferida: Int = 0, private val prazoCabecalhoMs: Int = 10_000, private val abrir: () -> Envelope) : Closeable {
     val segredo: String = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
     // Porta fixa quando livre: a origem da tela fica a mesma e o que ela guarda no celular (tema, rascunhos) não se perde.
     private val servidor = runCatching { ServerSocket(portaPreferida, 50, InetAddress.getByName("127.0.0.1")) }
@@ -38,6 +38,11 @@ class Passagem(portaPreferida: Int = 0, private val abrir: () -> Envelope) : Clo
         thread(isDaemon = true, name = "passagem") {
             while (!fechada) {
                 val cliente = runCatching { servidor.accept() }.getOrNull() ?: break
+                // Teto de conexões abertas: outro app do celular não esgota as threads do Kora abrindo conexões mudas.
+                if (conexoes.size >= MAX_CONEXOES) {
+                    runCatching { cliente.close() }
+                    continue
+                }
                 conexoes += cliente
                 thread(isDaemon = true, name = "passagem-conexao") { atender(cliente) }
             }
@@ -55,7 +60,10 @@ class Passagem(portaPreferida: Int = 0, private val abrir: () -> Envelope) : Clo
     private fun atender(cliente: Socket) {
         try {
             val entrada = BufferedInputStream(cliente.getInputStream())
+            // Quem não manda o cabeçalho a tempo é derrubado; depois de conferido, a conexão pode ficar parada (eventos).
+            cliente.soTimeout = prazoCabecalhoMs
             val cabecalho = lerCabecalho(entrada) ?: return
+            cliente.soTimeout = 0
             val texto = String(cabecalho, Charsets.ISO_8859_1)
             val alvo = texto.substringBefore("\r\n").split(' ').getOrNull(1) ?: return
             val consulta = consulta(alvo)
@@ -104,6 +112,7 @@ class Passagem(portaPreferida: Int = 0, private val abrir: () -> Envelope) : Clo
     companion object {
         private const val COOKIE = "kora-passagem"
         private const val MAX_CABECALHO = 64 * 1024
+        private const val MAX_CONEXOES = 64
 
         /** O cabeçalho do primeiro pedido, até a linha em branco; null se a conexão fechar antes ou ele for grande demais. */
         fun lerCabecalho(entrada: InputStream): ByteArray? {
