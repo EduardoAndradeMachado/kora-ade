@@ -432,8 +432,8 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     expect(await page.evaluate(() => '__buscouAtualizacao' in window)).toBe(true)
     await pc.getByRole('button', { name: 'Trocar de PC', exact: true }).click()
     expect(await page.evaluate(() => '__escolheuPc' in window)).toBe(true)
-    await pc.getByRole('switch', { name: 'Som', exact: true }).click()
-    await browserExpect(pc.getByRole('switch', { name: 'Som', exact: true })).toHaveAttribute('aria-checked', 'false')
+    await pc.getByRole('region', { name: 'Avisos no PC' }).getByRole('switch', { name: 'Som', exact: true }).click()
+    await browserExpect(pc.getByRole('region', { name: 'Avisos no PC' }).getByRole('switch', { name: 'Som', exact: true })).toHaveAttribute('aria-checked', 'false')
     expect(state.settings.alerts).toEqual({ sound: false, windowsNotification: true })
     await pc.getByRole('button', { name: /Renomear$/ }).click()
     await pc.getByRole('textbox', { name: 'Nome deste celular', exact: true }).fill('Galaxy da validação')
@@ -631,7 +631,8 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await browserExpect(page.locator('.file-row').filter({ hasText: 'nota.md' })).toBeVisible()
     await browserExpect(page.getByRole('button', { name: 'Voltar à conversa', exact: true })).toHaveCount(0)
     // A lista de projetos volta rolada onde estava, e não no topo, depois de entrar num projeto.
-    await page.setViewportSize({ width: 350, height: 320 })
+    // Baixa, mas em pé: deitado o cabeçalho com o Início some dentro do projeto.
+    await page.setViewportSize({ width: 310, height: 330 })
     await page.getByRole('button', { name: 'Início', exact: true }).click()
     const projectList = page.locator('.project-list')
     const scrolled = await projectList.evaluate((list) => { list.scrollTop = list.scrollHeight; return list.scrollTop })
