@@ -54,6 +54,8 @@ export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }
   const [loading, setLoading] = useState(true)
   // Versão do arquivo sobre a qual o texto está sendo editado: é ela que o salvar manda para o PC conferir.
   const [base, setBase] = useState(0)
+  // Toque no PDF esconde a barra de página e zoom; com o celular deitado, também a faixa do arquivo (só no CSS).
+  const [immersive, setImmersive] = useState(false)
   const draftRef = useRef(draft)
   draftRef.current = draft
   const baseRef = useRef(base)
@@ -128,7 +130,7 @@ export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }
   const rendered = useMemo(() => (kind === 'markdown' && raw ? markdownHtml(shown, raw) : ''), [kind, shown, raw])
   const switchable = kind === 'markdown' || kind === 'html'
 
-  return <main className="file-page page-enter">
+  return <main className={`file-page page-enter ${immersive ? 'immersive' : ''}`}>
     <div className="file-header">
       <button className="icon-button back-button" aria-label="Voltar" onClick={onBack}><Icon name="expandir" className="back-icon" /></button>
       <span className="file-title"><strong>{name}</strong>{folder && <small>{folder}</small>}</span>
@@ -172,7 +174,7 @@ export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }
         <iframe title={name} className="html-view" sandbox="allow-scripts allow-popups" src={`${raw}?v=${file?.mtimeMs ?? 0}`} />
       </>}
       {kind === 'image' && raw && <div className="image-view"><img src={raw} alt={name} /></div>}
-      {kind === 'pdf' && raw && <PdfPages url={raw} />}
+      {kind === 'pdf' && raw && <PdfPages url={raw} controls={!immersive} onTap={() => setImmersive((hidden) => !hidden)} />}
       {kind === 'external' && <p className="empty-copy">Este tipo de arquivo não abre no celular. Abra pelo PC.</p>}
     </div>
   </main>

@@ -17,6 +17,8 @@ const RENDER_DELAY_MS = 150
 const MAX_CANVAS_PIXELS = 16 * 1024 * 1024
 // Sem resposta do pdf.js nesse tempo, mostra o erro em vez de ficar carregando para sempre.
 const OPEN_TIMEOUT_MS = 20_000
+// O toque simples espera passar a janela do duplo toque (que é zoom) antes de esconder ou mostrar a barra.
+const DOUBLE_TAP_MS = 300
 
 const clampZoom = (scale: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale))
 
@@ -27,7 +29,7 @@ interface Anchor { fx: number; fy: number; px: number; py: number }
 const failure = (error: unknown): string =>
   error instanceof Error && error.name === 'PasswordException' ? 'o PDF é protegido por senha.' : error instanceof Error ? error.message : String(error)
 
-export function PdfPages({ url }: { url: string }): React.JSX.Element {
+export function PdfPages({ url, controls, onTap }: { url: string; controls: boolean; onTap(): void }): React.JSX.Element {
   const [state, setState] = useState<DocState>({ kind: 'loading' })
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
@@ -37,6 +39,8 @@ export function PdfPages({ url }: { url: string }): React.JSX.Element {
   // Onde a leitura estava quando o PDF foi recarregado, para voltar a ela quando as páginas chegarem.
   const resume = useRef<{ fx: number; fy: number } | null>(null)
   const [current, setCurrent] = useState(1)
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(tapTimer.current), [])
 
   const points = state.kind === 'ready' ? state.points : 0
   const fit = points && width > GAP * 2 ? clampZoom((width - GAP * 2) / (points * CSS_PER_POINT)) : 1
@@ -158,21 +162,28 @@ export function PdfPages({ url }: { url: string }): React.JSX.Element {
 
   if (state.kind === 'error') return <p role="alert" className="error pdf-error">Não deu para abrir o PDF: {state.message}</p>
 
+  // Arrastar e pinça não geram clique; o segundo toque de um duplo toque cancela o primeiro.
+  const tap = (event: MouseEvent<HTMLDivElement>): void => {
+    clearTimeout(tapTimer.current)
+    if (event.detail > 1 || (event.target as Element).closest('a, button')) return
+    tapTimer.current = setTimeout(onTap, DOUBLE_TAP_MS)
+  }
   // Duplo toque alterna entre a página na largura da tela e o dobro dela, ampliando sob o dedo.
   const toggleZoom = (event: MouseEvent<HTMLDivElement>): void => {
+    clearTimeout(tapTimer.current)
     if (zoom === 'fit') zoomTo(fit * 2, { x: event.clientX, y: event.clientY })
     else fitToScreen()
   }
 
   return <div className="pdf-view">
-    <div className="pdf-scroller" ref={(element) => { scrollerRef.current = element; setScroller(element) }} style={{ padding: GAP }} onDoubleClick={toggleZoom}>
+    <div className="pdf-scroller" ref={(element) => { scrollerRef.current = element; setScroller(element) }} style={{ padding: GAP }} onClick={tap} onDoubleClick={toggleZoom}>
       {state.kind === 'loading' ? <Loading label="Abrindo o PDF…" /> : width > 0 && (
         <div className="pdf-pages" style={{ gap: GAP }} aria-label={`PDF com ${state.doc.numPages} ${state.doc.numPages === 1 ? 'página' : 'páginas'}`}>
           {Array.from({ length: state.doc.numPages }, (_, index) => <PdfPage key={index} doc={state.doc} number={index + 1} width={pageWidth} ratio={state.ratio} root={scroller} />)}
         </div>
       )}
     </div>
-    {state.kind === 'ready' && width > 0 && <div className="pdf-zoom" role="group" aria-label="Zoom">
+    {state.kind === 'ready' && width > 0 && <div className={`pdf-zoom ${controls ? '' : 'hidden'}`} role="group" aria-label="Zoom">
       <span className="pdf-count" aria-label={`Página ${current} de ${state.doc.numPages}`}>{current} / {state.doc.numPages}</span>
       <button aria-label="Reduzir" disabled={scale <= MIN_ZOOM} onClick={() => zoomTo(scale / STEP)}><Icon name="menos" /></button>
       <button aria-label="Ajustar à tela" onClick={fitToScreen}>{Math.round(scale * 100)}%</button>

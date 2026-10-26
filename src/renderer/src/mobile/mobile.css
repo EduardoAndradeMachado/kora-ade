@@ -333,7 +333,8 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .pdf-pages { display: flex; flex-direction: column; align-items: center; min-width: 100%; width: max-content; }
 .pdf-page { flex-shrink: 0; overflow: hidden; border-radius: 2px; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / .35); }
 .pdf-page canvas { display: block; }
-.pdf-zoom { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: 0 4px 16px rgb(0 0 0 / .3); }
+.pdf-zoom { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: 0 4px 16px rgb(0 0 0 / .3); transition: opacity .2s, transform .2s, visibility .2s; }
+.pdf-zoom.hidden { opacity: 0; visibility: hidden; transform: translate(-50%, 12px); }
 .pdf-zoom button { min-height: 36px; min-width: 40px; padding: 0 8px; border: 0; background: transparent; font-size: 12px; font-variant-numeric: tabular-nums; }
 .pdf-zoom button svg { width: 16px; height: 16px; }
 .pdf-count { display: flex; align-items: center; padding: 0 8px 0 6px; margin-right: 2px; border-right: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -352,3 +353,31 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .theme-choice button { flex: 1; min-height: 40px; gap: 6px; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); font-size: 13px; transition: none; }
 .theme-choice button svg { width: 16px; height: 16px; }
 .theme-choice button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); font-weight: 600; }
+
+/* Celular deitado sobra pouca altura: dentro de um projeto o cabeçalho do Kora sai e fica só a faixa da tela, que
+   já tem o voltar, mais baixa e com o nome numa linha. Vem depois do min-width: 768px, que também vale deitado. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .mobile-app.inside-project { padding-top: env(safe-area-inset-top); }
+  .mobile-app.inside-project > .mobile-header { display: none; }
+  .session-list { padding: 8px 16px max(12px, env(safe-area-inset-bottom)); }
+  .project-heading { gap: 10px; margin-bottom: 8px; }
+  .project-heading > svg, .project-heading > img { width: 22px; height: 22px; }
+  .project-heading h1 { font-size: 15px; }
+  .project-panels { margin-bottom: 8px; }
+  .project-panels button { min-height: 30px; }
+  .session-strip { min-height: 34px; }
+  .session-name { min-height: 32px; }
+  .session-strip .icon-button { width: 34px; height: 32px; min-height: 32px; }
+  .back-button { width: 32px; height: 32px; min-height: 32px; }
+  .chat-return { width: 36px; height: 30px; min-height: 30px; }
+  .terminal-keys { padding: 3px 10px; }
+  .terminal-keys button { min-height: 30px; padding: 4px 10px; }
+  .file-header { min-height: 0; max-height: 60px; gap: 6px; padding: 2px 8px 2px 12px; transition: max-height .2s, opacity .2s, padding .2s, visibility .2s; }
+  .file-page.immersive .file-header { max-height: 0; padding-block: 0; border-bottom-width: 0; opacity: 0; visibility: hidden; overflow: hidden; }
+  .file-title { flex-direction: row; align-items: baseline; gap: 8px; }
+  .file-title strong { flex-shrink: 0; max-width: 70%; font-size: 13px; }
+  .file-title small { flex: 1; min-width: 0; }
+  .file-header .icon-button:not(.back-button, .chat-return) { width: 36px; height: 32px; min-height: 32px; }
+  .file-mode button { min-height: 26px; }
+  .save-button { min-height: 30px; }
+}

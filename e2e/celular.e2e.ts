@@ -1,5 +1,8 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import type { CDPSession, Page } from '@playwright/test'
 import { test, expect } from './harness'
-import { MOBILE_PORT, newTab, readState, starts, typeLine, ui, waitFor, type KoraRun } from './kora'
+import { MOBILE_PORT, newTab, pdfBytes, readState, starts, typeLine, ui, waitFor, type KoraRun } from './kora'
 
 // O celular de verdade é uma página no navegador; aqui ele é a mesma API HTTP, chamada direto pelo teste.
 const BASE = `http://127.0.0.1:${MOBILE_PORT}`
@@ -180,4 +183,197 @@ test('R-celular-sino sessão que para com o app do celular aberto: sininho no lu
   await work()
   await expect(bell).toHaveCount(1, { timeout: 20_000 })
   expect(await chimes(), 'som desligado no celular não toca, o sininho continua').toBe(1)
+})
+
+// Toque de verdade, pelo mesmo caminho de entrada do navegador: rola o que estiver embaixo do dedo, como no celular.
+async function drag(cdp: CDPSession, path: [number, number][]): Promise<void> {
+  const [first, ...rest] = path
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: first![0], y: first![1] }] })
+  let [x, y] = first!
+  for (const [nx, ny] of rest) {
+    for (let step = 1; step <= 6; step++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + ((nx - x) * step) / 6, y: y + ((ny - y) * step) / 6 }] })
+    }
+    ;[x, y] = [nx, ny]
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+}
+
+// Tela de toque, como no celular: sem ela o xterm não liga a rolagem por arrasto dele (Gesture.isTouchDevice).
+async function openPhone(run: KoraRun, cookie: string, size: { width: number; height: number }): Promise<{ phone: Page; cdp: CDPSession }> {
+  const [name, value] = cookie.split('=') as [string, string]
+  const opened = run.app.waitForEvent('window')
+  await run.app.evaluate(async ({ BrowserWindow, session }, { url, name, value, size }) => {
+    await session.defaultSession.cookies.set({ url, name, value })
+    void new BrowserWindow({ ...size, useContentSize: true }).loadURL(url)
+  }, { url: `${BASE}/`, name, value, size })
+  const phone = await opened
+  const cdp = await phone.context().newCDPSession(phone)
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+  await phone.reload()
+  return { phone, cdp }
+}
+
+async function tapAt(cdp: CDPSession, x: number, y: number): Promise<void> {
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+}
+
+test('R-celular-gestos arrastar de lado: conversa → arquivos e de volta, conversa → lista; vertical, diagonal, borda e área que rola de lado não navegam', async ({ kora }) => {
+  const env = kora.env()
+  writeFileSync(join(env.project, 'largo.md'), ['# Largo', '', '```', 'codigo_largo '.repeat(60), '```', ''].join('\n'))
+  writeFileSync(join(env.project, 'doc.pdf'), pdfBytes())
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  await newTab(run.page, 'Terminal')
+  await waitFor(() => readState(env).tabs.length === 1, 'aba Terminal no estado salvo')
+
+  const { phone, cdp } = await openPhone(run, cookie, { width: 360, height: 720 })
+  const { width, height } = await phone.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
+  const middle = Math.round(height / 2)
+  const row = phone.locator('.tree-tab').filter({ hasText: 'Terminal' })
+  const strip = phone.locator('.session-strip')
+  const files = phone.locator('.files-panel')
+  const toChat = phone.getByRole('button', { name: 'Voltar à conversa' })
+  const left: [number, number][] = [[width - 50, middle], [50, middle]]
+  const right: [number, number][] = [[50, middle], [width - 50, middle]]
+  // Um gesto que não deve navegar: dá tempo de a tela trocar, se fosse trocar, e confere que ficou.
+  const stays = async (path: [number, number][], message: string): Promise<void> => {
+    await drag(cdp, path)
+    await phone.waitForTimeout(400)
+    await expect(strip, message).toBeVisible()
+    await expect(files, message).toHaveCount(0)
+  }
+
+  await row.click()
+  await expect(strip).toBeVisible()
+  await expect(phone.locator('.xterm-screen')).toBeVisible()
+
+  await stays([[width / 2, middle - 150], [width / 2, middle + 150]], 'rolar o terminal na vertical não navega')
+  await stays([[width - 60, middle - 60], [width - 200, middle + 60]], 'diagonal (140 de lado, 120 para baixo) não navega')
+  await stays([[width - 60, middle], [width - 60, middle + 40], [60, middle + 40]], 'começou rolando na vertical: virar de lado depois não navega')
+  await stays([[8, middle], [width - 50, middle]], 'arrastar a partir da borda é o voltar do Android, não o do Kora')
+  // Pinça: o segundo dedo chega depois do primeiro, e os dois andam para a esquerda.
+  const pinch = async (): Promise<void> => {
+    const fingers = (x: number): { x: number; y: number; id: number }[] => [{ x, y: middle - 60, id: 0 }, { x: x - 20, y: middle + 60, id: 1 }]
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [fingers(width - 60)[0]!] })
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: fingers(width - 60) })
+    for (let x = width - 90; x >= 60; x -= 30) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: fingers(x) })
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await phone.waitForTimeout(400)
+    await expect(strip, 'dois dedos de lado é pinça, não navega').toBeVisible()
+    await expect(files).toHaveCount(0)
+  }
+  await pinch()
+
+  await drag(cdp, left)
+  await expect(files, 'conversa: dedo para a esquerda abre os arquivos').toBeVisible()
+  await expect(toChat).toBeVisible()
+  await drag(cdp, right)
+  await expect(strip, 'arquivos: dedo para a direita volta à conversa').toBeVisible()
+  await expect(files).toHaveCount(0)
+
+  await drag(cdp, left)
+  await files.locator('.file-row').filter({ hasText: 'largo.md' }).click()
+  const code = phone.locator('.markdown-view pre')
+  await expect(code).toBeVisible()
+  const box = (await code.boundingBox())!
+  const onCode: [number, number][] = [[50, box.y + box.height / 2], [width - 50, box.y + box.height / 2]]
+  await code.evaluate((element) => { element.scrollLeft = 300 })
+  await drag(cdp, onCode)
+  await phone.waitForTimeout(400)
+  await expect(code, 'código largo que ainda rola para a esquerda: o arrastar rola, não navega').toBeVisible()
+  await code.evaluate((element) => { element.scrollLeft = 0 })
+  await drag(cdp, onCode)
+  await expect(strip, 'arquivo aberto vindo da conversa: dedo para a direita volta direto à conversa').toBeVisible()
+  await expect(code).toHaveCount(0)
+
+  // PDF: toque simples alterna a barra de página e zoom; duplo toque é zoom e não esconde nada.
+  await drag(cdp, left)
+  await files.locator('.file-row').filter({ hasText: 'doc.pdf' }).click()
+  const bar = phone.locator('.pdf-zoom')
+  const zoom = bar.getByRole('button', { name: 'Ajustar à tela' })
+  const header = phone.locator('.file-header')
+  await expect(bar, 'o PDF abre com a barra à mostra').toBeVisible()
+  await expect(phone.locator('.pdf-page canvas')).toBeVisible()
+  const tap = async (times = 1): Promise<void> => {
+    const page = (await phone.locator('.pdf-scroller').boundingBox())!
+    for (let i = 0; i < times; i++) await tapAt(cdp, page.x + page.width / 2, page.y + page.height / 2)
+  }
+  await tap()
+  await expect(bar, 'um toque esconde a barra').toBeHidden()
+  await expect(header, 'em pé a faixa do arquivo fica').toBeVisible()
+  await tap()
+  await expect(bar, 'outro toque mostra a barra').toBeVisible()
+  const fitted = await zoom.textContent()
+  await tap(2)
+  await expect(zoom, 'duplo toque amplia').not.toHaveText(fitted!)
+  await phone.waitForTimeout(600)
+  await expect(bar, 'duplo toque não esconde a barra').toBeVisible()
+  await zoom.click()
+  await expect(zoom).toHaveText(fitted!)
+
+  const resize = (size: { width: number; height: number }): Promise<void> => run.app.evaluate(({ BrowserWindow }, { base, size }) => {
+    BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().startsWith(base))!.setContentSize(size.width, size.height)
+  }, { base: BASE, size })
+  await resize({ width: 780, height: 360 })
+  await expect.poll(() => phone.evaluate(() => window.matchMedia('(orientation: landscape)').matches)).toBe(true)
+  await expect(phone.locator('.mobile-header'), 'deitado, o cabeçalho do Kora sai').toBeHidden()
+  await expect(header).toBeVisible()
+  // Longe do clique no zoom: dois toques dentro da janela do duplo toque contariam como um duplo.
+  await phone.waitForTimeout(600)
+  await tap()
+  await expect(bar).toBeHidden()
+  await expect(header, 'deitado, o toque esconde também a faixa do arquivo').toBeHidden()
+  await tap()
+  await expect(header).toBeVisible()
+  await expect(bar).toBeVisible()
+  await resize({ width: 360, height: 720 })
+  await expect(phone.locator('.mobile-header'), 'em pé, o cabeçalho do Kora volta').toBeVisible()
+  await drag(cdp, right)
+  await expect(strip).toBeVisible()
+
+  await drag(cdp, right)
+  await expect(row, 'conversa: dedo para a direita volta à lista').toBeVisible()
+  await expect(strip).toHaveCount(0)
+})
+
+test('R-celular-rolagem campo da mensagem focado: arrastar no terminal larga o campo, rola o histórico sem voltar ao fim e o rascunho fica', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  await newTab(run.page, 'Terminal')
+  await waitFor(() => readState(env).tabs.length === 1, 'aba Terminal no estado salvo')
+  await typeLine(run.page, '1..300 | % { "linha $_" }')
+
+  const { phone, cdp } = await openPhone(run, cookie, { width: 360, height: 720 })
+  const width = await phone.evaluate(() => window.innerWidth)
+  await phone.locator('.tree-tab').filter({ hasText: 'Terminal' }).click()
+  await expect(phone.locator('.xterm-rows')).toContainText('linha 300')
+  // Número da primeira linha do histórico à mostra: menor é mais para cima.
+  const top = (): Promise<number> => phone.evaluate(() => Number(/linha (\d+)/.exec(document.querySelector('.xterm-rows > div')?.textContent ?? '')?.[1]))
+  const field = phone.getByRole('textbox', { name: 'Mensagem para a sessão' })
+  const box = (await field.boundingBox())!
+
+  await tapAt(cdp, box.x + 40, box.y + box.height / 2)
+  await expect(field).toBeFocused()
+  await phone.keyboard.type('rascunho')
+  const bottom = await top()
+  await drag(cdp, [[width / 2, 150], [width / 2, 450]])
+  await expect(field, 'arrastar no terminal larga o campo: o teclado fecha e não puxa a tela de volta').not.toBeFocused()
+  expect(await top(), 'o dedo para baixo mostra o histórico de cima').toBeLessThan(bottom)
+  // O xterm segue rolando por inércia depois de soltar o dedo; parado, o histórico continua onde ficou.
+  await phone.waitForTimeout(1500)
+  const settled = await top()
+  console.log(`rolagem: fim ${bottom}, depois de assentar ${settled}`)
+  await phone.waitForTimeout(1000)
+  expect(await top(), 'nada leva de volta ao fim enquanto se lê o histórico').toBe(settled)
+  expect(settled).toBeLessThan(bottom)
+  await expect(field, 'o rascunho fica').toHaveValue('rascunho')
+
+  await tapAt(cdp, box.x + 40, box.y + box.height / 2)
+  await expect(field, 'tocar no campo retoma a digitação').toBeFocused()
+  await phone.keyboard.press('End')
+  await phone.keyboard.type(' mais')
+  await expect(field).toHaveValue('rascunho mais')
 })

@@ -22,6 +22,7 @@ import type { ThemePreference } from '@shared/state'
 import type { IconName } from '@/brand/icons'
 import { SessionView, type SessionFeed, type TerminalChunk } from './SessionView'
 import { saveSound, savedSound, useFinishedAlerts } from './alerts'
+import { useSwipe, type SwipeActions } from './swipe'
 
 const THEMES: { theme: ThemePreference; label: string; icon: IconName }[] = [
   { theme: 'system', label: 'Sistema', icon: 'temaSistema' },
@@ -177,6 +178,16 @@ export function MobileApp(): React.JSX.Element {
     void run(async () => { const result = await command({ type: 'create', projectId: project, kind, ...START_SIZE }); await refresh(); if (result.tabId) replace({ projectId: project, tabId: result.tabId, picker: null }) })
   }
   const resume = (id: string): Promise<void> => run(async () => { await command({ type: 'resume', tabId: id, ...START_SIZE }); await refresh() })
+  const chat = route.chat
+  const toChat = chat && state?.tabs.some((tab) => tab.id === chat.tabId) ? () => returnTo(chat) : undefined
+  const chatFiles = (chatTab: string): void => { if (projectId) navigate({ projectId, tabId: null, picker: null, files: folderOf(projectId), chat: { tabId: chatTab, ...historyMark() } }) }
+  // Os mesmos caminhos dos botões da faixa: voltar, arquivos do projeto e voltar à conversa. Com folha aberta, nada.
+  const sheetOpen = Boolean(route.picker || route.pc || route.newTab || route.actions || route.rename)
+  const swipe: SwipeActions = !projectId || sheetOpen ? {}
+    : route.file !== undefined || !tabId ? { right: toChat }
+    : selectedTab ? { left: () => chatFiles(selectedTab.id), right: back } : {}
+  const [appElement, setAppElement] = useState<HTMLDivElement | null>(null)
+  useSwipe(appElement, swipe)
 
   if (pairCode) return <main className="pair-screen"><div className="pair-card">
     <Wordmark height={36} />
@@ -202,13 +213,11 @@ export function MobileApp(): React.JSX.Element {
   </div></main>
 
   const project = state.projects.find((project) => project.id === projectId)
-  const chat = route.chat
-  const toChat = chat && state.tabs.some((tab) => tab.id === chat.tabId) ? () => returnTo(chat) : undefined
   const tabs = state.tabs.filter((tab) => tab.projectId === projectId)
   const missing = projectId ? state.missingProjectIds.includes(projectId) : false
   const actionTab = state.tabs.find((tab) => tab.id === (route.actions ?? route.rename))
   const saved = sessions.filter((session) => !tabs.some((tab) => tab.agent?.sessionId === session.sessionId && tab.agent.kind === session.kind))
-  return <div className="mobile-app">
+  return <div className={`mobile-app ${projectId ? 'inside-project' : ''}`} ref={setAppElement}>
     <header className="mobile-header">
       <button className="home-button" aria-label="Início" onClick={() => { if (projectId) navigate({ projectId: null, tabId: null, picker: null }) }}><Wordmark height={28} /></button>
       <span role="status" className={`connection-dot ${connected ? 'online' : ''}`} aria-label={connected ? 'PC conectado' : 'Reconectando ao PC'} title={connected ? 'PC conectado' : 'Reconectando ao PC'} />
@@ -245,7 +254,7 @@ export function MobileApp(): React.JSX.Element {
         {saved.map((session) => <button className="session-row" disabled={busy || !connected || missing} key={`${session.kind}:${session.sessionId}`} onClick={() => void run(async () => { const result = await command({ type: 'open-session', projectId, agent: { kind: session.kind, sessionId: session.sessionId }, ...START_SIZE }); await refresh(); if (result.tabId) open(result.tabId) })}><AgentIcon kind={session.kind} /><span><strong>{session.title}</strong><small>{agentLabel(session.kind)} · {new Date(session.updatedAt).toLocaleDateString('pt-BR')}</small></span><Icon name="expandir" /></button>)}
       </>}
     </main> : !selectedTab ? <main className="session-message"><Icon name="sessoes" /><p>Esta aba foi fechada.</p><button onClick={back}>Voltar às conversas</button></main> : <>
-      <div className="session-strip"><button className="icon-button back-button" aria-label="Voltar" onClick={back}><Icon name="expandir" className="back-icon" /></button><TabIcon tab={selectedTab} /><button className="session-name" aria-label={`Renomear ${selectedTab.title}`} onClick={() => navigate({ ...route, rename: selectedTab.id })}><span>{selectedTab.title}</span><Icon name="editar" /></button><button className="icon-button" aria-label="Arquivos do projeto" onClick={() => navigate({ projectId, tabId: null, picker: null, files: folderOf(projectId), chat: { tabId: selectedTab.id, ...historyMark() } })}><Icon name="projeto" /></button></div>
+      <div className="session-strip"><button className="icon-button back-button" aria-label="Voltar" onClick={back}><Icon name="expandir" className="back-icon" /></button><TabIcon tab={selectedTab} /><button className="session-name" aria-label={`Renomear ${selectedTab.title}`} onClick={() => navigate({ ...route, rename: selectedTab.id })}><span>{selectedTab.title}</span><Icon name="editar" /></button><button className="icon-button" aria-label="Arquivos do projeto" onClick={() => chatFiles(selectedTab.id)}><Icon name="projeto" /></button></div>
       {live
         ? <SessionView key={selectedTab.id} tab={selectedTab} device={device} connected={connected} connection={connection} feed={feed} command={command} onError={showError} />
         : <main className="session-message page-enter"><div className="message-symbol"><Icon name="pausar" active /></div><h1>Sessão suspensa</h1><p className="muted">Continue para abrir o agente de novo.</p>{missing && <button onClick={() => picker(projectId)}>Revincular pasta</button>}<button className="primary" disabled={busy || !connected || missing} onClick={() => void resume(selectedTab.id)}><Icon name="retomar" active />Continuar conversa</button></main>}

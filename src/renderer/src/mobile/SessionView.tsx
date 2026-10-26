@@ -385,7 +385,8 @@ export function SessionView({ tab, device, connected, connection, feed, command,
         {uploading > 0 && <figure className="uploading" aria-label="Enviando imagem ao PC"><span /></figure>}
       </div>
       // Caixa única, como no app do Claude e do ChatGPT: miniaturas e texto dentro, imagem e enviar embaixo.
-      return <form className="composer" onSubmit={(event) => { event.preventDefault(); submit() }}>
+      // Sair da tela descarta a gravação e a transcrição em curso: ditando, o arrastar de lado não navega.
+      return <form className="composer" data-no-swipe data-swipe-lock={voice === 'idle' ? undefined : ''} onSubmit={(event) => { event.preventDefault(); submit() }}>
         <input ref={picker} type="file" accept="image/*" multiple hidden aria-label="Escolher imagem" onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void attach(files) }} />
         <div className="composer-box">
           {composerError && <p role="alert" className="composer-error"><Icon name="alerta" /><span>{composerError}</span><button type="button" aria-label="Dispensar aviso" onClick={() => setComposerError(null)}><Icon name="fechar" /></button></p>}
