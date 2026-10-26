@@ -125,4 +125,19 @@ class PassagemTest {
         val resposta = pedir("GET /raw/chave/pagina.html HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").single()
         assertEquals(404, resposta.status)
     }
+
+    @Test
+    fun falhaQueNaoEDeRedeAoAbrirViraErroParaATelaENaoDerrubaOApp() {
+        val quebrada = Passagem { throw IllegalStateException("Keystore indisponível") }.iniciar()
+        try {
+            repeat(2) {
+                Socket("127.0.0.1", quebrada.porta).use { socket ->
+                    socket.getOutputStream().write("GET /eco HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: ${quebrada.cookie}\r\n\r\n".toByteArray())
+                    assertEquals(502, lerResposta(socket.getInputStream()).status)
+                }
+            }
+        } finally {
+            quebrada.close()
+        }
+    }
 }

@@ -67,7 +67,9 @@ class Passagem(portaPreferida: Int = 0, private val abrir: () -> Envelope) : Clo
             // /raw/ é o link de leitura de um arquivo do projeto, autorizado pela chave dele (o HTML aberto no navegador
             // pelo Abrir página inteira não tem o cookie da tela).
             if (!cookieCerto(texto) && !alvo.startsWith("/raw/")) return responder(cliente, "403 Forbidden", "")
-            val envelope = try { abrir() } catch (erro: IOException) {
+            // Qualquer falha ao abrir (rede, relay, Keystore do aparelho) vira 502 para a tela: exceção solta numa thread
+            // derrubaria o app inteiro.
+            val envelope = try { abrir() } catch (erro: Exception) {
                 return responder(cliente, "502 Bad Gateway", "X-Kora-Erro: ${erro.message.orEmpty().replace(Regex("[\\r\\n]"), " ")}\r\n")
             }
             envelope.use {
@@ -79,7 +81,7 @@ class Passagem(portaPreferida: Int = 0, private val abrir: () -> Envelope) : Clo
                 }
                 runCatching { envelope.entrada.copyTo(cliente.getOutputStream()) }
             }
-        } catch (_: IOException) {
+        } catch (_: Exception) {
         } finally {
             runCatching { cliente.close() }
             conexoes -= cliente
