@@ -242,7 +242,7 @@ function AccountForm({ busy, onSubmit }: { busy: boolean; onSubmit(action: Accou
     <span className="font-medium text-foreground">{title}</span>
     {notice && <span role="status">{notice}</span>}
     {withCode
-      ? <input autoFocus inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="Código de 6 números" aria-label="Código do e-mail" className={cn(input, 'tracking-widest')} />
+      ? <input autoFocus inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="Código de 6 números" aria-label="Código do e-mail" className={cn(input, 'tracking-widest')} />
       : <input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="seu@email.com" aria-label="E-mail" className={input} />}
     {(step === 'entrar' || withCode) && <input type="password" autoComplete={step === 'entrar' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)}
       placeholder={step === 'entrar' ? 'Senha' : 'Nova senha, 10 caracteres ou mais'} aria-label={step === 'entrar' ? 'Senha' : 'Nova senha'} className={input} />}

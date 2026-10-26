@@ -64,7 +64,12 @@ test('R-conta Fora de casa: cria a conta pelo painel do celular, liga, e o dono 
     await panel.getByRole('button', { name: 'Criar conta e ligar' }).click()
     await expect(panel.getByRole('alert').filter({ hasText: 'Código incorreto ou vencido' })).toBeVisible()
 
-    await panel.getByLabel('Código do e-mail').fill(code[1]! + code[2]!)
+    // Colado como vem no e-mail ("482 913", com espaço e sobra em volta): o campo fica só com os 6 dígitos.
+    const field = panel.getByLabel('Código do e-mail')
+    await field.fill('')
+    await field.focus()
+    await page.keyboard.insertText(` ${code[0]} `)
+    await expect(field).toHaveValue(code[1]! + code[2]!)
     await panel.getByRole('button', { name: 'Criar conta e ligar' }).click()
     await expect(away).toHaveAttribute('aria-checked', 'true')
     await expect(panel.getByText('No ar: o celular alcança este PC de qualquer rede.')).toBeVisible({ timeout: 15_000 })
