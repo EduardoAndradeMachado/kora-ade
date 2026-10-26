@@ -35,18 +35,23 @@ export type AgentActivity = 'working' | 'waiting'
 
 export type Startup =
   | { kind: 'claude'; mode: 'new'; sessionId: string }
-  | { kind: 'claude' | 'codex'; mode: 'resume'; sessionId: string }
+  | { kind: 'claude' | 'codex'; mode: 'resume'; sessionId: string; afterUpdate?: boolean }
   | { kind: 'codex'; mode: 'new' }
   | { kind: 'opencode'; mode: 'new' | 'resume'; sessionId: string }
 
 // Retorna o comando que o PowerShell roda ao abrir a aba. O ID vai direto na linha de comando,
 // então só passa se tiver o formato do agente.
+// Vai junto da retomada das abas que o Kora reabre depois de se atualizar: o agente sabe que caiu no meio e segue.
+// Texto fixo e sem aspas simples, para ir entre aspas simples na linha de comando do PowerShell.
+export const AFTER_UPDATE_MESSAGE = 'O Kora reiniciou para se atualizar e esta conversa foi retomada. Continue de onde parou.'
+
 export function startupCommand(startup: Startup): string {
   if ('sessionId' in startup && !validSessionId(startup.kind, startup.sessionId)) {
     throw new Error(`ID de sessão inválido: ${startup.sessionId}`)
   }
   if (startup.kind === 'claude') {
-    return startup.mode === 'new' ? `claude --session-id ${startup.sessionId}` : `claude --resume ${startup.sessionId}`
+    if (startup.mode === 'new') return `claude --session-id ${startup.sessionId}`
+    return `claude --resume ${startup.sessionId}${startup.afterUpdate ? ` '${AFTER_UPDATE_MESSAGE}'` : ''}`
   }
   if (startup.kind === 'opencode') {
     // --standalone: o servidor do OpenCode fica dentro da árvore da aba (e do Job Object do Kora),
@@ -55,5 +60,6 @@ export function startupCommand(startup: Startup): string {
   }
   // Desde o 0.157 o Codex sobe um servidor em segundo plano e é ele quem grava a conversa e segura o lock dela;
   // o Kora liga a aba à conversa pelo processo dono do lock, que precisa ser descendente da aba.
-  return startup.mode === 'new' ? 'codex --no-daemon' : `codex resume ${startup.sessionId} --no-daemon`
+  if (startup.mode === 'new') return 'codex --no-daemon'
+  return `codex resume ${startup.sessionId} --no-daemon${startup.afterUpdate ? ` '${AFTER_UPDATE_MESSAGE}'` : ''}`
 }

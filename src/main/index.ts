@@ -489,7 +489,9 @@ function launchTerminal(tab: TabRef, cols: number, rows: number, launch: Launch)
     bindAgent(tab.id, { kind: 'opencode', sessionId })
   } else if (launch.type === 'resume') {
     const agent = AgentSessionSchema.parse(launch.agent)
-    startup = { kind: agent.kind, mode: 'resume', sessionId: agent.sessionId }
+    startup = agent.kind === 'opencode'
+      ? { kind: agent.kind, mode: 'resume', sessionId: agent.sessionId }
+      : { kind: agent.kind, mode: 'resume', sessionId: agent.sessionId, afterUpdate: launch.afterUpdate === true }
   }
   // A interface pode achar que a aba está adormecida enquanto o pty antigo ainda vive
   // (ex.: renderer recarregado); o pedido novo substitui o antigo em vez de falhar.

@@ -1,4 +1,4 @@
-﻿import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { FILE_FONT, GROUP_NAME_MAX, stepValue, TERMINAL_FONT, ZOOM, type KoraState, type Project, type ProjectGroup } from '@shared/state'
 import type { AgentSession } from '@shared/agent'
 import { viewerFor } from '@shared/file-kind'
@@ -216,7 +216,7 @@ export function App(): React.JSX.Element {
       for (const [projectId, list] of Object.entries(restored)) {
         restored[projectId] = list.map((tab) => {
           if (tab.kind !== 'terminal' || !resume.includes(tab.id)) return tab
-          const how: Launch = tab.agent ? { type: 'resume', agent: tab.agent } : { type: 'shell' }
+          const how: Launch = tab.agent ? { type: 'resume', agent: tab.agent, afterUpdate: true } : { type: 'shell' }
           pendingLaunch.current.set(tab.id, { tab: { id: tab.id, projectId, title: tab.title }, how })
           terminalBus.expect(tab.id)
           return { ...tab, live: true }
