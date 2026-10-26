@@ -23,6 +23,11 @@ android {
         // O Kora do PC compara este número com o do app instalado para oferecer a atualização.
         versionCode = 14
         versionName = "0.4.3"
+        resValue("string", "app_name", "Kora")
+    }
+
+    buildFeatures {
+        resValues = true
     }
 
     signingConfigs {
@@ -37,6 +42,11 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.findByName("release")
+        }
+        // O app de desenvolvimento é outro app no celular: instala ao lado do Kora de verdade sem nunca substituí-lo.
+        debug {
+            applicationIdSuffix = ".dev"
+            resValue("string", "app_name", "Kora Dev")
         }
     }
 
@@ -57,6 +67,8 @@ dependencies {
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     // O leitor de QR traz o fragment 1.0, que perde o resultado de registerForActivityResult (a galeria da imagem).
     implementation("androidx.fragment:fragment:1.9.1")
+    // WebSocket até o relay; o TLS do envelope de dentro é o SSLEngine da própria plataforma.
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
     testImplementation("junit:junit:4.13.2")
     // O org.json do Android é só um esboço nos testes de JVM; este é o de verdade, com o mesmo pacote.
     testImplementation("org.json:json:20250517")

@@ -11,7 +11,7 @@
     <!-- usesCleartextTraffic: o Kora do PC fala HTTP na rede de casa (porta 43127), sem certificado. -->
     <application
         android:icon="@mipmap/ic_launcher"
-        android:label="Kora"
+        android:label="@string/app_name"
         android:supportsRtl="false"
         android:usesCleartextTraffic="true"
         android:theme="@style/Kora">
