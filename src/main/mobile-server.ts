@@ -543,7 +543,8 @@ export class MobileServer {
         }
         if (url.pathname === '/api/device') {
           if (request.method === 'DELETE') {
-            this.revoke(device)
+            // Pelo relay, revogar derruba o túnel deste mesmo pedido: a resposta precisa sair antes.
+            response.once('finish', () => this.revoke(device))
             response.setHeader('set-cookie', `${this.cookieName()}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`)
             return json(response, 200, {})
           }

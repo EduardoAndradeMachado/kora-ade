@@ -182,3 +182,35 @@ describe('celular que já estava pareado', () => {
     expect(state.json['deviceId']).toBe(server.pairing.devices[0]!.id)
   })
 })
+
+describe('o que só o celular dono do pareamento pode fazer', () => {
+  it('pelo cookie da rede local, o certificado entra uma vez e não é trocado por outro', async () => {
+    const { server, relay, lan, pc } = await setup()
+    server.startRemote(relay, TOKEN)
+    const { code } = server.pairing.invite()
+    const paired = await fetch(`${lan}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, name: 'Celular' }) })
+    const cookie = paired.headers.get('set-cookie')!.split(';')[0]!
+    const register = (certificado: string): Promise<Response> => fetch(`${lan}/api/device/certificate`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ certificado }) })
+    const [phone, intruder] = [createIdentity('Celular'), createIdentity('Quem pegou o cookie')]
+    expect((await register(phone.fingerprint)).status).toBe(200)
+    expect((await register(phone.fingerprint)).status).toBe(200)
+    expect((await register(intruder.fingerprint)).status).toBe(400)
+    await until(() => server.status().remote?.state === 'conectado')
+    expect((await ask(await envelope(relay, pc, phone), '/api/state')).status).toBe(200)
+    await expect(envelope(relay, pc, intruder).then((socket) => ask(socket, '/api/state'))).rejects.toThrow()
+  })
+
+  it('o celular que se desvincula pelo relay recebe a resposta antes de o túnel cair', async () => {
+    const { server, relay, lan, pc } = await setup()
+    const phone = createIdentity('Celular')
+    await pairAtHome(server, lan, phone)
+    server.startRemote(relay, TOKEN)
+    await until(() => server.status().remote?.state === 'conectado')
+    const socket = await envelope(relay, pc, phone)
+    const left = await new Promise<number>((resolve, reject) => {
+      request({ createConnection: () => socket, method: 'DELETE', path: '/api/device', headers: { host: 'kora.app', origin: 'https://kora.app' } }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode!)) }).on('error', reject).end()
+    })
+    expect(left).toBe(200)
+    expect(server.pairing.devices).toEqual([])
+  })
+})

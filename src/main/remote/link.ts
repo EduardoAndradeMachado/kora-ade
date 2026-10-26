@@ -30,6 +30,7 @@ const SILENCE_MS = 70_000
 
 export class RelayLink {
   private control: WebSocket | null = null
+  private readonly pending = new Set<WebSocket>()
   private retry: NodeJS.Timeout | null = null
   private watchdog: NodeJS.Timeout | null = null
   private attempts = 0
@@ -51,6 +52,8 @@ export class RelayLink {
     this.clearTimers()
     this.control?.terminate()
     this.control = null
+    for (const data of this.pending) data.terminate()
+    this.pending.clear()
     this.report('parado', null)
   }
 
@@ -112,8 +115,16 @@ export class RelayLink {
   private session(id: string): void {
     const data = new WebSocket(`${this.options.url}/s/${this.options.identity.fingerprint}/${id}`, { headers: { authorization: `Bearer ${this.options.token}` } })
     data.on('error', () => {})
+    this.pending.add(data)
     openEnvelope(createWebSocketStream(data), this.options.identity, this.options.accepts)
-      .then((socket) => this.options.deliver(socket, peerFingerprint(socket)!), () => data.terminate())
+      .then((socket) => {
+        this.pending.delete(data)
+        if (this.running) this.options.deliver(socket, peerFingerprint(socket)!)
+        else socket.destroy()
+      }, () => {
+        this.pending.delete(data)
+        data.terminate()
+      })
   }
 
   private clearTimers(): void {
