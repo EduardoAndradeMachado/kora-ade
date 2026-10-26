@@ -55,6 +55,8 @@ export interface MobileFolders {
   folders: { name: string; path: string }[]
   shortcuts: { name: string; path: string }[]
 }
+// O nome é conferido no PC (validateEntryName), com a mesma mensagem que o explorador do PC mostra.
+export const FolderCreateSchema = z.object({ parent: z.string().min(1).max(4096), name: z.string().max(255) })
 export interface DesktopSessionState { state: KoraState; tabs: MobileTab[] }
 // online: o celular está com o Kora aberto agora (ligado ao PC pelo fluxo de eventos).
 export interface MobileDevice { id: string; name: string; pairedAt: string; online: boolean }

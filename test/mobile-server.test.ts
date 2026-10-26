@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, utimesSync, writeFileSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, statSync, utimesSync, writeFileSync, readFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { createServer, request, type Server } from 'node:http'
@@ -441,6 +441,31 @@ describe('acesso ao servidor do celular', () => {
     expect(data.uptime_seconds).toBeGreaterThanOrEqual(0)
     expect(data.app).toBe('kora')
     expect(data.name).toBe(hostname())
+  })
+
+  it('cria pasta vazia no PC pelo seletor e recusa nome que sairia da pasta escolhida', async () => {
+    const { url, cookie } = await setup()
+    const root = mkdtempSync(join(tmpdir(), 'kora-mobile-new-folder-'))
+    const create = (parent: string, name: string, headers: Record<string, string> = { cookie }): Promise<Response> =>
+      fetch(`${url}/api/folders`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ parent, name }) })
+    expect((await create(root, 'Sem login', {})).status).toBe(401)
+    expect(existsSync(join(root, 'Sem login'))).toBe(false)
+    const created = await create(root, '  Projeto novo ')
+    expect(created.status).toBe(200)
+    const listing = await created.json()
+    expect(listing.path).toBe(join(root, 'Projeto novo'))
+    expect(listing.folders).toEqual([])
+    expect(statSync(join(root, 'Projeto novo')).isDirectory()).toBe(true)
+    const again = await create(root, 'Projeto novo')
+    expect(again.status).toBe(400)
+    expect((await again.json()).error).toBe('Já existe "Projeto novo" nessa pasta.')
+    for (const name of ['..\\Fora', '../Fora', 'a\\b', '..', '', 'nome.', 'CON']) {
+      expect((await create(join(root, 'Projeto novo'), name)).status).toBe(400)
+    }
+    expect(readdirSync(root)).toEqual(['Projeto novo'])
+    expect(readdirSync(join(root, 'Projeto novo'))).toEqual([])
+    expect((await create(join(root, 'não existe'), 'X')).status).toBe(400)
+    expect(existsSync(join(root, 'não existe'))).toBe(false)
   })
 
   it('cadastra uma pasta real, detecta quando ela some e revincula preservando as abas', async () => {

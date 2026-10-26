@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Terminals } from './terminals'
 import { addProject, relocateProject, missingProjectIds, namedSessions, mergeTabs } from './projects'
-import { browseMobileFolders, isMobileDirectory, mobileDirectory } from './mobile-folders'
+import { browseMobileFolders, createMobileFolder, isMobileDirectory, mobileDirectory } from './mobile-folders'
 import { listProjectSessions } from './sessions'
 import { listDir, readText, resolveInside, writeText } from './files'
 import { gitStatus } from './git'
@@ -106,6 +106,10 @@ export class MobileRuntime {
 
   folders(path?: string): ReturnType<typeof browseMobileFolders> {
     return browseMobileFolders(path, this.host.state().projects.map((project) => project.path))
+  }
+
+  async createFolder(parent: string, name: string): ReturnType<typeof browseMobileFolders> {
+    return this.folders(await createMobileFolder(parent, name))
   }
 
   async projectIcon(id: string): Promise<string | null> {

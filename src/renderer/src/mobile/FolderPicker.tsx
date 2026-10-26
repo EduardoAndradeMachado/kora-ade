@@ -26,24 +26,31 @@ export function FolderPicker({ projectName, busy, onClose, onSelect }: {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [typing, setTyping] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [folderName, setFolderName] = useState('')
   const version = useRef(0)
   const trail = useRef<HTMLElement>(null)
   // Caminho fundo não cabe: a trilha abre rolada até a pasta atual.
   useEffect(() => { trail.current?.scrollTo({ left: trail.current.scrollWidth }) }, [listing])
-  const load = async (path?: string): Promise<void> => {
+  const show = async (fetch: () => Promise<MobileFolders>): Promise<void> => {
     const request = ++version.current
     setLoading(true)
     setError(null)
     try {
-      const next = await api<MobileFolders>(`folders${path ? `?path=${encodeURIComponent(path)}` : ''}`)
+      const next = await fetch()
       if (request !== version.current) return
       setListing(next)
       setPath(next.path)
       setFilter('')
       setTyping(false)
+      setCreating(false)
+      setFolderName('')
     } catch (error) { if (request === version.current) setError(error instanceof Error ? error.message : String(error)) }
     finally { if (request === version.current) setLoading(false) }
   }
+  const load = (path?: string): Promise<void> => show(() => api<MobileFolders>(`folders${path ? `?path=${encodeURIComponent(path)}` : ''}`))
+  // A pasta nasce vazia dentro da atual e já fica escolhida: falta só tocar em Adicionar projeto.
+  const createFolder = (): Promise<void> => show(() => api<MobileFolders>('folders', { parent: listing!.path, name: folderName }))
   useEffect(() => { void load(); return () => { version.current++ } }, [])
   useEffect(() => {
     const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
@@ -63,10 +70,11 @@ export function FolderPicker({ projectName, busy, onClose, onSelect }: {
           {index > 0 && <span aria-hidden="true">›</span>}
           <button aria-current={index === all.length - 1 ? 'location' : undefined} disabled={loading || busy} onClick={() => void load(crumb.path)}>{crumb.name}</button>
         </Fragment>)}</nav>
-        <button className="icon-button" aria-label="Digitar caminho" aria-pressed={typing} onClick={() => setTyping((open) => !open)}><Icon name="editar" /></button>
+        <button className="icon-button" aria-label="Digitar caminho" aria-pressed={typing} onClick={() => { setTyping((open) => !open); setCreating(false) }}><Icon name="editar" /></button>
       </div>
       {typing && <form className="path-form" onSubmit={(event) => { event.preventDefault(); void load(path.trim()) }}><label htmlFor="pc-folder-path">Caminho no PC</label><div><input id="pc-folder-path" autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder="C:\Users\…\projeto" autoComplete="off" autoCapitalize="off" spellCheck={false} /><button aria-label="Abrir caminho" disabled={loading || busy || !path.trim()}><Icon name="expandir" /></button></div></form>}
-      <div className="folder-toolbar"><button disabled={!listing?.parent || loading || busy} onClick={() => void load(listing?.parent ?? undefined)}><Icon name="setaCima" />Pasta acima</button><label className="folder-filter"><Icon name="buscar" /><input aria-label="Filtrar pastas" placeholder="Filtrar pastas" value={filter} onChange={(event) => setFilter(event.target.value)} /></label></div>
+      {creating && <form className="path-form" onSubmit={(event) => { event.preventDefault(); void createFolder() }}><label htmlFor="pc-folder-name">Nova pasta em “{listing && (crumbs(listing.path).at(-1)?.name ?? listing.path)}”</label><div><input id="pc-folder-name" autoFocus value={folderName} maxLength={255} onChange={(event) => setFolderName(event.target.value)} placeholder="Nome da pasta" autoComplete="off" spellCheck={false} /><button aria-label="Criar pasta" disabled={loading || busy || !folderName.trim()}><Icon name="ok" /></button></div></form>}
+      <div className="folder-toolbar"><button disabled={!listing?.parent || loading || busy} onClick={() => void load(listing?.parent ?? undefined)}><Icon name="setaCima" />Pasta acima</button><button aria-pressed={creating} disabled={!listing || loading || busy} onClick={() => { setCreating((open) => !open); setTyping(false) }}><Icon name="novoProjeto" />Nova pasta</button><label className="folder-filter"><Icon name="buscar" /><input aria-label="Filtrar pastas" placeholder="Filtrar" value={filter} onChange={(event) => setFilter(event.target.value)} /></label></div>
       {error && <p className="folder-error" role="alert"><Icon name="alerta" />{error}</p>}
       <div className="folder-entries" aria-busy={loading}>
         {loading ? <p className="empty-copy">Carregando pastas…</p> : folders.map((folder) => <button className="folder-entry" key={folder.path} onClick={() => void load(folder.path)} disabled={busy}><Icon name="projeto" /><span>{folder.name}</span><Icon name="expandir" /></button>)}

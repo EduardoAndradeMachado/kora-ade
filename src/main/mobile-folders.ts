@@ -1,8 +1,9 @@
-import { readdir, stat } from 'node:fs/promises'
+import { mkdir, readdir, stat } from 'node:fs/promises'
 import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import type { MobileFolders } from '../shared/mobile'
+import { validateEntryName } from './file-actions'
 
 export function isMobileDirectory(path: string): boolean {
   try { return statSync(path).isDirectory() } catch { return false }
@@ -13,6 +14,14 @@ export async function mobileDirectory(path: string): Promise<string> {
   const resolved = resolve(path)
   if (!(await stat(resolved).catch(() => null))?.isDirectory()) throw new Error('Pasta não encontrada no PC. Escolha outra pasta.')
   return resolved
+}
+
+export async function createMobileFolder(parent: string, name: string): Promise<string> {
+  const path = join(await mobileDirectory(parent), validateEntryName(name))
+  await mkdir(path).catch((error: NodeJS.ErrnoException) => {
+    throw new Error(error.code === 'EEXIST' ? `Já existe "${basename(path)}" nessa pasta.` : 'Não foi possível criar a pasta. Verifique a permissão no PC.')
+  })
+  return path
 }
 
 export async function browseMobileFolders(path: string | undefined, projectPaths: string[]): Promise<MobileFolders> {

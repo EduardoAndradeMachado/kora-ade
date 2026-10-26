@@ -7,7 +7,7 @@ import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { extname, join, resolve, sep } from 'node:path'
 import QRCode from 'qrcode'
 import { z } from 'zod'
-import { DeviceNameSchema, FileSaveSchema, MobileCommandSchema, type MobilePairing, type MobileStatus, type TerminalSizeEvent } from '../shared/mobile'
+import { DeviceNameSchema, FileSaveSchema, FolderCreateSchema, MobileCommandSchema, type MobilePairing, type MobileStatus, type TerminalSizeEvent } from '../shared/mobile'
 import { MobilePairingStore } from './mobile-pairing'
 import { MAX_PASTED_IMAGE_BYTES, savePastedImage } from './pasted-image'
 import { ConflictError } from './files'
@@ -402,6 +402,10 @@ export class MobileServer {
         if (url.pathname === '/api/folders' && request.method === 'GET') {
           const path = z.string().max(4096).optional().parse(url.searchParams.get('path') ?? undefined)
           return json(response, 200, await this.options.runtime.folders(path))
+        }
+        if (url.pathname === '/api/folders' && request.method === 'POST') {
+          const { parent, name } = FolderCreateSchema.parse(await this.body(request))
+          return json(response, 200, await this.options.runtime.createFolder(parent, name))
         }
         if (url.pathname === '/api/project-icon' && request.method === 'GET') return json(response, 200, { icon: await this.options.runtime.projectIcon(url.searchParams.get('project') ?? '') })
         if (url.pathname === '/api/usage' && request.method === 'GET') return json(response, 200, await this.options.runtime.usage())
