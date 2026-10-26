@@ -12,12 +12,14 @@ import { Loading } from './Loading'
 
 export type PcView = 'usage' | 'settings'
 
-export function PcSheet({ view, themes, theme, onTheme, alerts, connected, onClose, onSwitchAccount, onAlerts, onError }: {
+export function PcSheet({ view, themes, theme, onTheme, alerts, sound, onSound, connected, onClose, onSwitchAccount, onAlerts, onError }: {
   view: PcView
   themes: { theme: ThemePreference; label: string; icon: IconName }[]
   theme: ThemePreference
   onTheme(theme: ThemePreference): void
   alerts: Alerts
+  sound: boolean
+  onSound(on: boolean): void
   connected: boolean
   onClose(): void
   onSwitchAccount(id: string): Promise<void>
@@ -90,6 +92,13 @@ export function PcSheet({ view, themes, theme, onTheme, alerts, connected, onClo
         <div className="theme-choice" role="group" aria-label="Tema do celular">
           {themes.map((option) => <button key={option.theme} aria-pressed={theme === option.theme} onClick={() => onTheme(option.theme)}><Icon name={option.icon} />{option.label}</button>)}
         </div>
+      </section>
+      <section aria-labelledby="phone-alerts-title">
+        <div className="pc-heading"><h2 id="phone-alerts-title">Avisos neste celular</h2></div>
+        <p className="pc-note">Com o app aberto, quando uma sessão para e fica esperando você. Vale só para este celular.</p>
+        <button className="action-row switch-row" role="switch" aria-checked={sound} onClick={() => onSound(!sound)}>
+          <span>Som</span><span className="switch" aria-hidden="true" />
+        </button>
       </section>
       <section aria-labelledby="alerts-title">
         <div className="pc-heading"><h2 id="alerts-title">Avisos no PC</h2></div>

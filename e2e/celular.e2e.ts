@@ -1,5 +1,5 @@
 import { test, expect } from './harness'
-import { MOBILE_PORT, newTab, readState, typeLine, ui, waitFor, type KoraRun } from './kora'
+import { MOBILE_PORT, newTab, readState, starts, typeLine, ui, waitFor, type KoraRun } from './kora'
 
 // O celular de verdade é uma página no navegador; aqui ele é a mesma API HTTP, chamada direto pelo teste.
 const BASE = `http://127.0.0.1:${MOBILE_PORT}`
@@ -115,4 +115,69 @@ test('R-celular painel do celular: abre pelo rodapé, mostra o caminho ligado e 
   } finally {
     events.abort()
   }
+})
+
+test('R-celular-sino sessão que para com o app do celular aberto: sininho no lugar do modelo e som da corda; abrir limpa; som desliga só no celular', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  await newTab(run.page, 'Claude')
+  await waitFor(() => starts(env, 'claude')[0], 'claude falso subiu')
+  await waitFor(() => readState(env).tabs.some((tab) => tab.agent?.kind === 'claude'), 'aba do Claude no estado salvo')
+
+  // O celular é a página servida pelo PC, numa janela à parte com o cookie do pareamento.
+  const [name, value] = cookie.split('=') as [string, string]
+  const opened = run.app.waitForEvent('window')
+  await run.app.evaluate(async ({ BrowserWindow, session }, { url, name, value }) => {
+    await session.defaultSession.cookies.set({ url, name, value })
+    void new BrowserWindow({ width: 400, height: 800 }).loadURL(url)
+  }, { url: `${BASE}/`, name, value })
+  const phone = await opened
+  const row = phone.locator('.tree-tab').filter({ hasText: 'Claude' })
+  await expect(row).toBeVisible()
+  await phone.evaluate(() => {
+    const g = window as unknown as { __chimes: number }
+    g.__chimes = 0
+    const Audio = window.AudioContext
+    window.AudioContext = class extends Audio {
+      override createBufferSource(): AudioBufferSourceNode {
+        g.__chimes++
+        return super.createBufferSource()
+      }
+    }
+  })
+  const chimes = (): Promise<number> => phone.evaluate(() => (window as unknown as { __chimes: number }).__chimes)
+  // O primeiro toque destrava o áudio, como no app.
+  await phone.locator('.section-heading').click()
+  const bell = row.locator('[data-icon="sino"]')
+
+  // 7 s de trabalho: bem acima do mínimo de 3 s mesmo com a detecção atrasada pela máquina carregada.
+  const work = async (): Promise<void> => {
+    await ui.sideTab(run.page, /Claude/).click()
+    await typeLine(run.page, 'trabalhe 7')
+    await expect(row.locator('small')).toContainText('Trabalhando', { timeout: 10_000 })
+  }
+
+  await work()
+  await expect(bell).toHaveCount(1, { timeout: 20_000 })
+  await expect(row.locator('svg[aria-label="Claude"]'), 'o sininho fica no lugar do modelo').toHaveCount(0)
+  await expect(row.locator('small')).toContainText('Esperando você')
+  expect(await chimes()).toBe(1)
+
+  await row.click()
+  await phone.getByRole('button', { name: 'Voltar' }).first().click()
+  await expect(row).toBeVisible()
+  await expect(bell, 'abrir a conversa no celular conta como vista').toHaveCount(0)
+
+  await phone.getByRole('button', { name: 'Configurações' }).click()
+  const sound = phone.getByRole('region', { name: 'Avisos neste celular' }).getByRole('switch', { name: 'Som' })
+  await expect(sound).toHaveAttribute('aria-checked', 'true')
+  await sound.click()
+  await expect(sound).toHaveAttribute('aria-checked', 'false')
+  await phone.getByRole('button', { name: 'Fechar' }).click()
+  expect(readState(env).settings?.alerts?.sound, 'o som do PC não muda com o do celular').not.toBe(false)
+
+  await work()
+  await expect(bell).toHaveCount(1, { timeout: 20_000 })
+  expect(await chimes(), 'som desligado no celular não toca, o sininho continua').toBe(1)
 })

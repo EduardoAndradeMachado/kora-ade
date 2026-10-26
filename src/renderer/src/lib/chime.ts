@@ -26,8 +26,16 @@ function pluck(ctx: AudioContext): AudioBuffer {
   return buffer
 }
 
+// O navegador do celular só libera áudio depois de um toque: o primeiro toque na página cria e destrava o contexto,
+// e a corda que vier depois (sem toque nenhum) consegue soar.
+export function unlockChime(): void {
+  void audio().resume().catch(() => {})
+}
+
 export function playChime(): void {
   const ctx = audio()
+  // O sistema suspende o contexto quando o app vai para o fundo; ao voltar, ele precisa ser retomado.
+  if (ctx.state === 'suspended') void ctx.resume().catch(() => {})
   const source = ctx.createBufferSource()
   source.buffer = pluck(ctx)
   const volume = ctx.createGain()

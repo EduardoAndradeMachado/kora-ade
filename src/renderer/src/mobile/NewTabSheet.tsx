@@ -9,7 +9,9 @@ export type NewTabKind = 'claude' | 'codex' | 'opencode' | 'shell'
 // Fixar uma sessão pelo ID fica só no PC: no celular as conversas salvas já aparecem na tela do projeto.
 const CHOICES = OPTIONS.filter((option): option is typeof option & { choice: NewTabKind } => option.choice !== 'existing')
 
-export function TabIcon({ tab }: { tab: MobileTab }): React.JSX.Element {
+// alert: a sessão parou enquanto você não olhava; o sininho fica no lugar do modelo até a conversa ser aberta.
+export function TabIcon({ tab, alert = false }: { tab: MobileTab; alert?: boolean }): React.JSX.Element {
+  if (alert && tab.live) return <Icon name="sino" active className="tab-alert" />
   return tab.agent ? <AgentIcon kind={tab.agent.kind} className={tab.live ? '' : 'opacity-50'} /> : <Icon name="terminal" active={tab.live} />
 }
 

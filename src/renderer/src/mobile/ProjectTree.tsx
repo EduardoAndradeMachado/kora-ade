@@ -19,10 +19,11 @@ const savedExpanded = (): Record<string, boolean> => {
   } catch { return {} }
 }
 
-export const tabStatus = (tab: MobileTab): string => !tab.live ? 'Suspensa' : tab.activity === 'working' ? 'Trabalhando' : 'Aberta'
+export const tabStatus = (tab: MobileTab, alert = false): string => !tab.live ? 'Suspensa' : tab.activity === 'working' ? 'Trabalhando' : alert ? 'Esperando você' : 'Aberta'
 
-export function ProjectTree({ state, search, onProject, onFiles, onNewTab, onTab, onTabActions, onRelocate }: {
+export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewTab, onTab, onTabActions, onRelocate }: {
   state: MobileState
+  alerted: ReadonlySet<string>
   search: string
   onProject(id: string): void
   onFiles(id: string): void
@@ -56,8 +57,8 @@ export function ProjectTree({ state, search, onProject, onFiles, onNewTab, onTab
       {missing && <div className="tree-missing"><span>Pasta não encontrada</span><button onClick={() => onRelocate(project.id)}>Revincular<Icon name="mover" active /></button></div>}
       {open && tabs.length > 0 && <div className="tree-tabs">
         {tabs.map((tab) => <button className="tree-tab" key={tab.id} onClick={() => onTab(tab)} {...longPress(() => onTabActions(tab))}>
-          <TabIcon tab={tab} /><span><strong>{tab.title || 'Terminal'}</strong><small>{tab.agent ? agentLabel(tab.agent.kind) : 'Terminal'} · {tabStatus(tab)}</small></span>
-          <span className={`activity-dot ${tab.live ? tab.activity === 'working' ? 'working' : 'live' : ''}`} aria-label={tabStatus(tab)} />
+          <TabIcon tab={tab} alert={alerted.has(tab.id)} /><span><strong>{tab.title || 'Terminal'}</strong><small>{tab.agent ? agentLabel(tab.agent.kind) : 'Terminal'} · {tabStatus(tab, alerted.has(tab.id))}</small></span>
+          <span className={`activity-dot ${tab.live ? tab.activity === 'working' ? 'working' : 'live' : ''}`} aria-label={tabStatus(tab, alerted.has(tab.id))} />
         </button>)}
         <button className="tree-project-link" onClick={() => onProject(project.id)}><Icon name="sessoes" />Conversas e novas abas<Icon name="expandir" /></button>
         {!missing && <button className="tree-project-link" onClick={() => onFiles(project.id)}><Icon name="arquivo" />Arquivos do projeto<Icon name="expandir" /></button>}
