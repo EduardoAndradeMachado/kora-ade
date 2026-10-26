@@ -3,6 +3,7 @@ import { hostname, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { createServer, request, type Server } from 'node:http'
 import { execFileSync } from 'node:child_process'
+import { brotliDecompressSync, gunzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MobileServer } from '../src/main/mobile-server'
 import { MobileRuntime } from '../src/main/mobile-runtime'
@@ -127,6 +128,41 @@ function desktopTab(s: Setup, id: string, cols: number, rows: number): void {
 const width = (tag: string): string => `Write-Output ('${tag}=' + $Host.UI.RawUI.WindowSize.Width)\r`
 
 describe('terminal compartilhado entre o PC e o celular', () => {
+  it('o código da página vai comprimido e fica em cache no celular; a página em si nunca fica em cache', async () => {
+    const s = await setup()
+    // Pedido cru: o fetch do Node descomprime sozinho e esconderia a compressão.
+    const raw = (path: string, encoding: string): Promise<{ headers: Record<string, unknown>; body: Buffer }> => new Promise((done, fail) => {
+      request(`${s.url}${path}`, { headers: { 'accept-encoding': encoding } }, (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (chunk: Buffer) => chunks.push(chunk))
+        res.on('end', () => done({ headers: res.headers, body: Buffer.concat(chunks) }))
+      }).on('error', fail).end()
+    })
+    mkdirSync(join(s.dir, 'assets'))
+    const code = 'export const kora = "celular";\n'.repeat(4000)
+    writeFileSync(join(s.dir, 'assets', 'mobile-Ab12Cd.js'), code)
+    writeFileSync(join(s.dir, 'assets', 'foto-Ab12Cd.png'), Buffer.alloc(2000, 7))
+
+    const br = await raw('/assets/mobile-Ab12Cd.js', 'gzip, deflate, br')
+    expect(br.headers['content-encoding']).toBe('br')
+    expect(br.headers['cache-control']).toBe('public, max-age=31536000, immutable')
+    expect(brotliDecompressSync(br.body).toString()).toBe(code)
+    expect(br.body.length).toBeLessThan(code.length / 10)
+    const gz = await raw('/assets/mobile-Ab12Cd.js', 'gzip')
+    expect(gz.headers['content-encoding']).toBe('gzip')
+    expect(gunzipSync(gz.body).toString()).toBe(code)
+    const plain = await raw('/assets/mobile-Ab12Cd.js', '')
+    expect(plain.headers['content-encoding']).toBeUndefined()
+    expect(plain.body.toString()).toBe(code)
+    // Imagem já vem comprimida: vai como está, mas também fica em cache.
+    const image = await raw('/assets/foto-Ab12Cd.png', 'br')
+    expect(image.headers['content-encoding']).toBeUndefined()
+    expect(image.headers['cache-control']).toBe('public, max-age=31536000, immutable')
+    const page = await raw('/', 'br')
+    expect(page.headers['cache-control']).toBe('no-store')
+    expect(brotliDecompressSync(page.body).toString()).toBe('<html>Kora mobile</html>')
+  })
+
   it('o que o PC e o celular digitam vai para o mesmo shell e a saída chega aos dois', async () => {
     const s = await setup()
     desktopTab(s, 't', 100, 30)

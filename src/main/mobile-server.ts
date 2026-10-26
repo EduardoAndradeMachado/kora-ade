@@ -5,6 +5,8 @@ import { createSocket } from 'node:dgram'
 import { hostname, networkInterfaces } from 'node:os'
 import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { extname, join, resolve, sep } from 'node:path'
+import { promisify } from 'node:util'
+import { brotliCompress, constants as zlibConstants, gzip } from 'node:zlib'
 import QRCode from 'qrcode'
 import { z } from 'zod'
 import { DeviceNameSchema, FileSaveSchema, FolderCreateSchema, MobileCommandSchema, type MobilePairing, type MobileStatus, type TerminalSizeEvent } from '../shared/mobile'
@@ -58,6 +60,10 @@ const contentTypes: Record<string, string> = {
   '.md': 'text/plain; charset=utf-8', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wasm': 'application/wasm'
 }
 const PDFJS_DIRS = new Set(['wasm', 'cmaps', 'standard_fonts', 'iccs'])
+// Texto comprime bem (o JavaScript da página cai para menos de um terço); imagem e fonte já vêm comprimidas.
+const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.svg', '.json', '.webmanifest'])
+const brotli = promisify(brotliCompress)
+const gzipAsync = promisify(gzip)
 const AUDIO_EXTENSIONS: Record<string, string> = { 'audio/ogg': 'ogg', 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/mpeg': 'mp3', 'audio/wav': 'wav' }
 // O app para de gravar em 15 minutos, uns 3 MB em Opus a 24 kbps. O corpo tem 60 s para chegar (requestTimeout):
 // 8 MB ainda sobem num Wi-Fi de 1 Mbps.
@@ -643,7 +649,7 @@ export class MobileServer {
         return json(response, 404, { error: 'Operação não encontrada.' })
       }
       if (request.method !== 'GET') return json(response, 405, { error: 'Método não permitido.' })
-      await this.asset(url.pathname === '/' ? '/mobile.html' : url.pathname + url.search, response)
+      await this.asset(url.pathname === '/' ? '/mobile.html' : url.pathname + url.search, response, String(request.headers['accept-encoding'] ?? ''))
     } catch (error) {
       if (response.headersSent) response.end()
       // Arquivo ou pasta apagados (o agente pode ter mexido): aviso claro, sem o erro do Node com o caminho do PC.
@@ -653,7 +659,10 @@ export class MobileServer {
     }
   }
 
-  private async asset(path: string, response: ServerResponse): Promise<void> {
+  // Versão comprimida de cada arquivo da página, feita uma vez: os arquivos só mudam com uma versão nova do Kora.
+  private readonly compressed = new Map<string, Promise<Buffer>>()
+
+  private async asset(path: string, response: ServerResponse, acceptEncoding = ''): Promise<void> {
     const pathname = path.split('?')[0]!
     if (this.options.devUrl) {
       const fsPath = pathname.startsWith('/@fs/') ? resolve(decodeURIComponent(pathname.slice(5))) : null
@@ -671,12 +680,31 @@ export class MobileServer {
     const root = resolve(this.options.rendererDir)
     const file = resolve(root, `.${decodeURIComponent(pathname)}`)
     if (!file.startsWith(root + sep) || !(pathname === '/mobile.html' || pathname === '/mobile.webmanifest' || pathname === '/mobile-icon.svg' || pathname.startsWith('/assets/'))) return json(response, 404, { error: 'Arquivo não encontrado.' })
+    let content: Buffer
     try {
-      const content = await readFile(file)
-      response.writeHead(200, { 'content-type': contentTypes[extname(file)] ?? 'application/octet-stream' })
-      response.end(content)
+      content = await readFile(file)
     } catch {
-      json(response, 404, { error: 'Arquivo não encontrado.' })
+      return json(response, 404, { error: 'Arquivo não encontrado.' })
     }
+    const headers: Record<string, string> = { 'content-type': contentTypes[extname(file)] ?? 'application/octet-stream' }
+    // Fora de casa tudo passa pelo upload da casa, pela VPS e pelo 4G: sem cache, o app baixava todo o código da
+    // página a cada abertura e ficava em branco esperando. Em /assets/ o nome muda a cada versão (leva o hash do
+    // conteúdo), então guardar para sempre é seguro; a mobile.html segue sem cache e aponta sempre para a versão certa.
+    if (pathname.startsWith('/assets/')) headers['cache-control'] = 'public, max-age=31536000, immutable'
+    const encoding = COMPRESSIBLE.has(extname(file)) ? (/\bbr\b/.test(acceptEncoding) ? 'br' : /\bgzip\b/.test(acceptEncoding) ? 'gzip' : null) : null
+    if (encoding) {
+      const key = `${encoding}:${file}`
+      let packed = this.compressed.get(key)
+      if (!packed) {
+        packed = encoding === 'br' ? brotli(content, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 9 } }) : gzipAsync(content)
+        this.compressed.set(key, packed)
+        packed.catch(() => this.compressed.delete(key))
+      }
+      content = await packed
+      headers['content-encoding'] = encoding
+      headers['vary'] = 'accept-encoding'
+    }
+    response.writeHead(200, headers)
+    response.end(content)
   }
 }
