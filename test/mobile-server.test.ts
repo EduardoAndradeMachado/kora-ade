@@ -379,6 +379,15 @@ describe('acesso ao servidor do celular', () => {
     const huge = await post({ cookie: s.cookie, 'content-type': 'image/jpeg' }, Buffer.alloc(21 * 1024 * 1024))
     expect(huge.status).toBe(413)
     expect(existsSync(join(s.dir, 'imagens'))).toBe(true)
+    // Só o caminho que o PC devolveu vai junto da mensagem: outro arquivo do PC não é anexado à conversa.
+    writeFileSync(join(s.dir, 'segredo.txt'), 'CHAVE')
+    for (const images of [[join(s.dir, 'segredo.txt')], [join(s.dir, 'imagens', '..', 'segredo.txt')], [join(s.dir, 'imagens', 'nao-existe.png')]]) {
+      const refused = await action(s.url, s.cookie, { type: 'send', tabId: 't', text: 'veja', images })
+      expect(refused.status).toBe(400)
+      expect((await refused.json()).error).toContain('Imagem desconhecida')
+    }
+    const accepted = await action(s.url, s.cookie, { type: 'send', tabId: 't', text: 'veja', images: [path] })
+    expect((await accepted.json()).error ?? '').not.toContain('Imagem desconhecida')
   })
 
   it('transcreve o áudio do celular pelo Transcritor do PC e não deixa o arquivo para trás', async () => {

@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { ConflictError, MoveConflictError, importEntries, listDir, moveEntry, readText, writeText } from '../src/main/files'
+import { ConflictError, MoveConflictError, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from '../src/main/files'
 
 let parent: string
 let root: string
@@ -16,6 +16,20 @@ beforeEach(() => {
   writeFileSync(join(root, 'b.txt'), 'b', 'utf8')
   writeFileSync(join(root, 'src', 'index.ts'), 'x', 'utf8')
   writeFileSync(join(parent, 'segredo.env'), 'TOKEN=123', 'utf8')
+})
+
+describe('raiz do projeto', () => {
+  it('link (junção) dentro do projeto apontando para fora não abre caminho para fora: nem ler, nem listar, nem criar', () => {
+    mkdirSync(join(parent, 'fora'))
+    writeFileSync(join(parent, 'fora', 'id_rsa'), 'CHAVE', 'utf8')
+    // Junção não pede administrador no Windows; um repositório clonado pode trazer um link assim.
+    symlinkSync(join(parent, 'fora'), join(root, 'atalho'), 'junction')
+    expect(() => readText(root, 'atalho/id_rsa')).toThrow('fora do projeto')
+    expect(() => listDir(root, 'atalho')).toThrow('fora do projeto')
+    expect(() => resolveInside(root, 'atalho/novo.txt')).toThrow('fora do projeto')
+    expect(resolveInside(root, 'src/novo.ts')).toBe(join(root, 'src', 'novo.ts'))
+    expect(readText(root, 'src/index.ts').content).toBe('x')
+  })
 })
 
 describe('explorador de arquivos', () => {

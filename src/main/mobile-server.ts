@@ -1,10 +1,10 @@
 import { createServer, type Server, type ServerResponse, type IncomingMessage } from 'node:http'
 import { randomBytes } from 'node:crypto'
-import { createReadStream, existsSync, mkdirSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, realpathSync, statSync } from 'node:fs'
 import { createSocket } from 'node:dgram'
 import { hostname, networkInterfaces } from 'node:os'
 import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { extname, join, resolve, sep } from 'node:path'
+import { dirname, extname, join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { brotliCompress, constants as zlibConstants, gzip } from 'node:zlib'
 import QRCode from 'qrcode'
@@ -448,6 +448,19 @@ export class MobileServer {
     json(response, 200, { path: savePastedImage(this.options.imageDir, Buffer.concat(chunks), mime) })
   }
 
+  // O caminho que vai colado no prompt do agente precisa ser de uma imagem que o próprio PC gravou (/api/image), pelo
+  // caminho real: sem isso, o pedido poderia anexar qualquer arquivo do PC à conversa com o provedor.
+  private pastedImage(path: string): boolean {
+    if (!this.options.imageDir || !existsSync(path)) return false
+    try {
+      const folder = realpathSync.native(this.options.imageDir)
+      const file = realpathSync.native(path)
+      return dirname(file) === folder && statSync(file).isFile()
+    } catch {
+      return false
+    }
+  }
+
   // O Kora instalado e o Dev usam a mesma pasta temporária: só sai o que nenhuma transcrição em andamento usa.
   private async dropStaleAudio(dir: string): Promise<void> {
     for (const name of await readdir(dir).catch(() => [])) {
@@ -620,6 +633,7 @@ export class MobileServer {
         }
         if (url.pathname === '/api/action' && request.method === 'POST') {
           const command = MobileCommandSchema.parse(await this.body(request))
+          if (command.type === 'send' && !command.images.every((path) => this.pastedImage(path))) return json(response, 400, { error: 'Imagem desconhecida: envie de novo pelo app.' })
           return json(response, 200, await this.options.runtime.execute(device, command))
         }
         if (url.pathname === '/api/events' && request.method === 'GET') {

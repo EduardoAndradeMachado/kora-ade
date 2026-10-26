@@ -1,4 +1,4 @@
-import { cpSync, openSync, readdirSync, readFileSync, readSync, closeSync, lstatSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, openSync, readdirSync, readFileSync, readSync, closeSync, lstatSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import type { Stats } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { FileEntry, TextFile } from '../shared/ipc'
@@ -7,12 +7,20 @@ const HIDDEN = new Set(['.git'])
 const MAX_TEXT_BYTES = 5 * 1024 * 1024
 
 // O renderer só manda caminhos relativos ao projeto; qualquer coisa que resolva para fora da raiz é recusada.
+// Links simbólicos e junções também: um repositório clonado pode trazer um link apontando para fora (o git guarda
+// links), e o texto do caminho continuaria "dentro". Vale o caminho real do que existe (para arquivo novo, o da pasta
+// mais próxima que já existe).
 export function resolveInside(root: string, rel: string): string {
   const target = resolve(root, rel)
-  const fromRoot = relative(resolve(root), target)
-  if (fromRoot.startsWith('..') || isAbsolute(fromRoot)) {
-    throw new Error(`Caminho fora do projeto: ${rel}`)
+  const outside = (base: string, path: string): boolean => {
+    const fromRoot = relative(base, path)
+    return fromRoot.startsWith('..') || isAbsolute(fromRoot)
   }
+  if (outside(resolve(root), target)) throw new Error(`Caminho fora do projeto: ${rel}`)
+  if (!existsSync(root)) return target
+  let existing = target
+  while (!existsSync(existing) && dirname(existing) !== existing) existing = dirname(existing)
+  if (outside(realpathSync.native(root), realpathSync.native(existing))) throw new Error(`Caminho fora do projeto: ${rel}`)
   return target
 }
 
