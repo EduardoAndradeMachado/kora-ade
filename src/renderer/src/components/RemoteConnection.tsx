@@ -36,7 +36,7 @@ export function RemoteConnection({ status, onStatus }: { status: MobileStatus | 
     <Toggle
       checked={remote !== null}
       label="Fora de casa"
-      detail="Use este PC pelo celular de qualquer rede, cifrado de ponta a ponta. Enquanto ligado, o PC não suspende."
+      detail="Use este PC pelo celular de qualquer rede, cifrado de ponta a ponta. Enquanto ligado, o PC não suspende sozinho (a tela pode apagar) e o Kora abre com o Windows. Desligar, reiniciar ou suspender pelo menu tiram o PC do ar até alguém entrar nele."
       onChange={(enabled) => { if (!busy) void turn(enabled) }}
     />
     {asking && remote === null && <form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); if (invite.trim()) void turn(true, invite) }}>

@@ -509,13 +509,21 @@ function setRemoteEnabled(enabled: boolean, invite?: string): MobileStatus {
   if (!enabled) {
     if (keepAwake !== null) powerSaveBlocker.stop(keepAwake)
     keepAwake = null
+    startWithWindows(false)
     terminals.setMirroring(server.pairing.enabled)
     return server.stopRemote()
   }
   terminals.setMirroring(true)
   // Longe de casa por dias: o PC suspenso some do relay até alguém voltar para acordá-lo.
   keepAwake ??= powerSaveBlocker.start('prevent-app-suspension')
+  // Reinício do Windows Update no meio da viagem: o Kora volta sozinho quando alguém entra no Windows.
+  startWithWindows(true)
   return server.startRemote(RELAY_URL, code)
+}
+
+// No desenvolvimento quem abriria com o Windows seria o electron.exe solto, sem o Kora: só o instalado se registra.
+function startWithWindows(enabled: boolean): void {
+  if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: enabled })
 }
 
 // Com a conexão ligada o main mantém a cópia das telas; desligada, o custo de interpretar a saída some.
