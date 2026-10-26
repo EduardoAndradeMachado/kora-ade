@@ -95,11 +95,25 @@ class PcsTest {
         assertEquals(listOf(ligado), lerPcs(escreverPcs(listOf(ligado))))
         // Kora antigo, que não fala do relay: o que já se sabia continua.
         assertEquals("kora-sync.eduardom.com.br", lembrar(listOf(ligado), prod).single().relay)
-        // O PC informou que Fora de casa está desligado: o app para de tentar pelo relay.
+        // O PC informou que Fora de casa está desligado: esquece o servidor que ele tinha informado, mas segue
+        // tentando pelo publicado. Quem pareou antes de ligar o Fora de casa caía aqui e nunca mais tentava de fora.
         val desligado = lembrar(listOf(ligado), prod.copy(pc = pc, relay = "")).single()
         assertEquals(null, desligado.relay)
-        assertEquals(false, desligado.peloRelay)
+        assertEquals(true, desligado.peloRelay)
+        assertEquals(RELAY_PADRAO, desligado.relayOuPadrao)
         assertEquals(pc, desligado.pc)
+    }
+
+    @Test
+    fun pareadoAntesDeLigarOForaDeCasaTentaPeloServidorPublicado() {
+        val pc = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        val pareado = lembrar(emptyList(), prod.copy(pc = pc, relay = "")).single()
+        assertTrue(pareado.peloRelay)
+        assertEquals("kora-sync.eduardom.com.br", pareado.relayOuPadrao)
+        // Sem a impressão digital do PC não há como conferir quem atende do outro lado: aí não tenta.
+        assertEquals(false, lembrar(emptyList(), prod).single().peloRelay)
+        // O servidor que o PC informou vale mais que o publicado.
+        assertEquals("relay.exemplo.com", lembrar(emptyList(), prod.copy(pc = pc, relay = "relay.exemplo.com")).single().relayOuPadrao)
     }
 
     @Test

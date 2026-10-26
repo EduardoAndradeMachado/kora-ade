@@ -501,7 +501,7 @@ class MainActivity : ComponentActivity() {
     // Fora de casa: a tela abre na passagem local, e cada conexão dela vai cifrada até o PC pelo relay.
     private fun abrirPeloRelay(salvo: PcSalvo, codigo: String? = null) {
         val pc = salvo.pc ?: return
-        val relay = salvo.relay ?: return
+        val relay = salvo.relayOuPadrao
         fecharPassagem()
         codigoPendente = codigo
         val nova = Passagem(PORTA_PASSAGEM) { abrirEnvelope(relay, pc) }.iniciar()

@@ -7,14 +7,20 @@ import org.json.JSONObject
  * Um Kora em que o celular já entrou. O id vem do próprio Kora (o instalado e o Dev do mesmo PC têm ids diferentes),
  * e o endereço pode mudar quando o roteador troca o IP do PC. apelido é o nome que a pessoa deu no celular.
  */
-// pc e relay: com os dois o app entra de fora pelo relay, conferindo o PC pela impressão digital. host vazio: o PC foi
-// pareado só pelo relay e ainda não apareceu na rede local.
+// pc: com ele o app entra de fora pelo relay, conferindo o PC pela impressão digital. relay: o servidor que o PC
+// informou; sem ele vale o publicado, porque o celular pode ter pareado antes de o Fora de casa ligar (o PC ainda não
+// tinha servidor para informar) e nunca mais tentaria de fora. host vazio: o PC foi pareado só pelo relay e ainda não
+// apareceu na rede local.
 data class PcSalvo(val id: String, val host: String, val porta: Int, val nome: String, val apelido: String? = null, val edicao: String = "", val pc: String? = null, val relay: String? = null) {
-    val peloRelay: Boolean get() = pc != null && relay != null
+    val peloRelay: Boolean get() = pc != null
+    val relayOuPadrao: String get() = relay ?: RELAY_PADRAO
 
     val exibido: String get() = apelido ?: nome
     val tipo: String get() = if (edicao == "dev") "Kora Dev" else "Kora"
 }
+
+// O servidor do Kora publicado. Com o Fora de casa desligado no PC, a tentativa por ele só não acha o PC.
+const val RELAY_PADRAO = "kora-sync.eduardom.com.br"
 
 fun lerPcs(json: String?): List<PcSalvo> {
     val lista = runCatching { JSONArray(json ?: "[]") }.getOrNull() ?: return emptyList()
