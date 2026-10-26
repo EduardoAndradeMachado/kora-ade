@@ -471,8 +471,9 @@ export class MobileServer {
         const minutes = Math.floor((uptime % 3600) / 60)
         const human = uptime < 60 ? `${uptime}s` : hours ? `${hours}h ${minutes}m` : `${minutes}m`
         // app e name: o app do celular varre a rede atrás deste endereço e mostra o PC pelo nome. tailscale: o app guarda
-        // esse endereço junto do de casa e o usa, com o mesmo pareamento, quando o de casa não responde.
-        return json(response, 200, { app: 'kora', id: this.pairing.serverId, name: hostname(), edition: this.options.edition ?? 'prod', tailscale: tailscaleAddresses()[0] ?? null, started_at: new Date(this.started).toISOString(), uptime_seconds: uptime, uptime_human: human })
+        // esse endereço junto do de casa e o usa, com o mesmo pareamento, quando o de casa não responde. pc e relay: com
+        // eles o app que já está pareado passa a entrar de fora pelo relay, sem ler outro QR (a impressão digital é pública).
+        return json(response, 200, { app: 'kora', id: this.pairing.serverId, name: hostname(), edition: this.options.edition ?? 'prod', tailscale: tailscaleAddresses()[0] ?? null, pc: this.pairing.identity().fingerprint, relay: this.relayHost, started_at: new Date(this.started).toISOString(), uptime_seconds: uptime, uptime_human: human })
       }
       // Sem pareamento: o app precisa se atualizar mesmo antes de parear de novo, e o APK não tem nada secreto.
       if ((url.pathname === '/app/android.json' || url.pathname === '/app/kora-celular.apk') && request.method === 'GET') {
@@ -532,6 +533,13 @@ export class MobileServer {
             if (error instanceof ConflictError) return json(response, 409, { error: 'O arquivo mudou no PC depois que você abriu.', conflict: true })
             throw error
           }
+        }
+        // O app registra o certificado dele no pareamento que já existe (feito pela rede local, com o cookie), para depois
+        // entrar pelo relay sem parear de novo.
+        if (url.pathname === '/api/device/certificate' && request.method === 'POST') {
+          const { certificado } = z.object({ certificado: z.string().regex(/^[0-9a-f]{64}$/) }).parse(await this.body(request))
+          this.pairing.setCertificate(device, certificado)
+          return json(response, 200, {})
         }
         if (url.pathname === '/api/device') {
           if (request.method === 'DELETE') {

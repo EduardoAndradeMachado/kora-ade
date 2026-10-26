@@ -55,6 +55,16 @@ export class MobilePairingStore {
   // Enquanto o QR está valendo, o PC aceita o aperto de mãos de um certificado novo: é o celular que vai parear.
   get pairingOpen(): boolean { return this.invitation !== null && Date.now() <= this.invitation.until }
 
+  // Um certificado é de um celular só: registrar num pareamento tira de qualquer outro que o tivesse.
+  setCertificate(id: string, certificate: string): void {
+    if (!FINGERPRINT.test(certificate)) throw new Error('Certificado inválido.')
+    const device = this.config.devices.find((d) => d.id === id)
+    if (!device) throw new Error('Este celular não está mais vinculado.')
+    for (const other of this.config.devices) if (other !== device && other.certificate === certificate) delete other.certificate
+    device.certificate = certificate
+    this.save()
+  }
+
   deviceByCertificate(fingerprint: string): string | null {
     return this.config.devices.find((device) => device.certificate === fingerprint)?.id ?? null
   }

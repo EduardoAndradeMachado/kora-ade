@@ -160,3 +160,25 @@ describe('QR do pareamento', () => {
     await expect(server.invite()).rejects.toThrow('Ative a conexão antes.')
   })
 })
+
+describe('celular que já estava pareado', () => {
+  it('registra o certificado pelo pareamento de casa e passa a entrar pelo relay, sem ler outro QR', async () => {
+    const { server, relay, lan, pc } = await setup()
+    server.startRemote(relay, TOKEN)
+    const health = await (await fetch(`${lan}/health`)).json() as Record<string, unknown>
+    expect(health['pc']).toBe(pc)
+    expect(health['relay']).toBe(new URL(relay).host)
+    // Pareado pelo app antigo: sem certificado. O relay ainda não deixa entrar.
+    const { code } = server.pairing.invite()
+    const paired = await fetch(`${lan}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, name: 'Celular de antes' }) })
+    const cookie = paired.headers.get('set-cookie')!.split(';')[0]!
+    await until(() => server.status().remote?.state === 'conectado')
+    const phone = createIdentity('Celular de antes')
+    await expect(envelope(relay, pc, phone).then((socket) => ask(socket, '/api/state'))).rejects.toThrow()
+    expect((await fetch(`${lan}/api/device/certificate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ certificado: phone.fingerprint }) })).status).toBe(401)
+    expect((await fetch(`${lan}/api/device/certificate`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ certificado: phone.fingerprint }) })).status).toBe(200)
+    const state = await ask(await envelope(relay, pc, phone), '/api/state')
+    expect(state.status).toBe(200)
+    expect(state.json['deviceId']).toBe(server.pairing.devices[0]!.id)
+  })
+})
