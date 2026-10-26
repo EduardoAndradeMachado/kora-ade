@@ -90,6 +90,11 @@ describe('identidade do aparelho', () => {
     expect(new Date(cert.validTo).getUTCFullYear()).toBeGreaterThan(2100)
     expect(createIdentity('Eduardo · PC').fingerprint).not.toBe(me.fingerprint)
   })
+
+  it('todo certificado gerado é aceito pelo OpenSSL (o número de série sai no DER mínimo)', () => {
+    // Antes, 1 em 256 saía com zero à esquerda no número de série e o OpenSSL recusava: aqui seriam ~8 casos.
+    for (let i = 0; i < 2000; i++) expect(() => createIdentity('PC')).not.toThrow()
+  })
 })
 
 describe('envelope de dentro pelo relay', () => {

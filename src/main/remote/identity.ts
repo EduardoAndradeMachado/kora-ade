@@ -34,7 +34,8 @@ const time = (date: Date): Buffer => {
 export function createIdentity(label: string): Identity {
   const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
   const serial = randomBytes(16)
-  serial[0] = serial[0]! & 0x7f
+  // Primeiro byte entre 0x40 e 0x7f: positivo e sem zero à esquerda, que o DER proíbe (o OpenSSL recusaria o certificado).
+  serial[0] = (serial[0]! & 0x3f) | 0x40
   const now = Date.now()
   const tbs = sequence(
     tlv(0x02, serial),
