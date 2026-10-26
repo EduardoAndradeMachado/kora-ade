@@ -222,7 +222,17 @@ function AccountForm({ busy, onSubmit }: { busy: boolean; onSubmit(action: Accou
         setNotice(`Se ${email.trim().toLowerCase()} puder receber, um código acabou de chegar lá. Confira também o spam.`)
       }
     } catch (failure) {
-      setError(ipcErrorMessage(failure))
+      const message = ipcErrorMessage(failure)
+      // A senha valeu e só o login de depois falhou: o código já foi usado, então o caminho agora é Entrar.
+      if (message.startsWith('Senha gravada')) {
+        setStep('entrar')
+        setPassword('')
+        setCode('')
+        setError(null)
+        setNotice(message)
+        return
+      }
+      setError(message)
     }
   }
   const submit = (): void => {

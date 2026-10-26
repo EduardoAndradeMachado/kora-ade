@@ -247,8 +247,10 @@ export class MobileServer {
   }
 
   // Sair da conta: o relay esquece este PC (e os celulares que só ele tinha), e o Fora de casa desliga.
-  async signOut(): Promise<MobileStatus> {
-    await this.link?.request({ op: 'sair' }).catch(() => {})
+  // Sair da conta só aqui no PC, depois de o relay confirmar (signOutRemote): sair sem avisar deixaria o PC e os
+  // celulares na conta lá.
+  async signOut(signOutRemote: () => Promise<void>): Promise<MobileStatus> {
+    await signOutRemote()
     this.pairing.setRemote(false, null)
     this.admin = false
     return this.stopRemote()
@@ -264,10 +266,18 @@ export class MobileServer {
 
   // O relay só deixa passar os celulares que este PC informa, e um celular novo só durante o QR aberto. Vai a lista
   // inteira a cada vez: o relay troca a dele por esta, então pareamento desfeito some de lá também.
+  // Falhou (banco do relay fora, prazo): tenta de novo em 30 s, senão o celular recém-pareado ficaria de fora até a
+  // conexão cair e voltar.
   private syncRelay(): void {
+    if (this.syncRetry) clearTimeout(this.syncRetry)
+    this.syncRetry = null
     if (this.link?.status.state !== 'conectado') return
-    void this.link.request({ op: 'sincronizar', celulares: this.pairing.relayDevices, pareamentoAte: this.pairing.pairingUntil }).catch(() => {})
+    void this.link.request({ op: 'sincronizar', celulares: this.pairing.relayDevices, pareamentoAte: this.pairing.pairingUntil }).catch(() => {
+      this.syncRetry = setTimeout(() => this.syncRelay(), 30_000)
+      this.syncRetry.unref()
+    })
   }
+  private syncRetry: NodeJS.Timeout | null = null
 
   acceptTunnel(socket: TLSSocket, certificate: string): void {
     const tunnel = socket as TunnelSocket

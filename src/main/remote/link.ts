@@ -136,6 +136,7 @@ export class RelayLink {
       this.current = {
         ...this.current,
         error: response.statusCode === 403 ? 'Este PC não está ligado a uma conta ativa do Kora.'
+          : response.statusCode === 401 ? 'A data e a hora deste PC estão erradas: ligue o ajuste automático do relógio no Windows.'
           : response.statusCode === 404 ? 'O servidor do Kora recusou este PC.'
           : `O servidor do Kora respondeu ${response.statusCode}.`
       }

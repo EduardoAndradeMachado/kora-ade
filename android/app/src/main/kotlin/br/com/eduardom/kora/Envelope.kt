@@ -250,6 +250,7 @@ class Envelope(private val engine: SSLEngine, private val transporte: Transporte
                         when {
                             response == null -> "Não foi possível chegar ao relay."
                             response.code == 403 -> "O relay não reconhece este celular: abra o app uma vez no Wi-Fi de casa."
+                            response.code == 401 -> "A data e a hora do celular estão erradas: ligue o ajuste automático do relógio."
                             else -> "O relay recusou a conexão."
                         }
                     )

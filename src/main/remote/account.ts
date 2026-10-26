@@ -8,6 +8,8 @@ import type { Identity } from './identity'
 export interface AccountClient {
   // Resolve com o corpo da resposta; o erro já vem com a mensagem do relay, pronta para a tela.
   send(action: AccountAction): Promise<{ ok: true; admin?: boolean }>
+  // Tira este PC (e os celulares que só ele tinha) da conta, assinado com a chave dele; vale com o Fora de casa desligado.
+  signOut(): Promise<void>
 }
 
 export function accountClient(relayUrl: string, identity: () => Identity, name: string, client: string): AccountClient {
@@ -38,6 +40,9 @@ export function accountClient(relayUrl: string, identity: () => Identity, name: 
         case 'redefinir': return post('/a/redefinir', { email, codigo: action.codigo, senha: action.senha })
         case 'entrar': return post('/a/entrar', { email, senha: action.senha, nome: name }, relayHeaders(identity(), `/a/entrar/${email}`))
       }
+    },
+    async signOut() {
+      await post('/a/sair', {}, relayHeaders(identity(), '/a/sair'))
     }
   }
 }

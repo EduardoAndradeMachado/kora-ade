@@ -529,7 +529,10 @@ async function mobileAccount(action: AccountAction): Promise<MobileStatus> {
   const client = accountClient(RELAY_URL, () => server.pairing.identity(), hostname(), RELAY_CLIENT)
   await client.send(action)
   if (action.acao === 'cadastro' || action.acao === 'esqueci') return server.status()
-  if (action.acao !== 'entrar') await client.send({ acao: 'entrar', email: action.email, senha: action.senha })
+  // O código já foi usado: se só o login de depois falhar, a tela precisa saber que a senha valeu (e pedir Entrar).
+  if (action.acao !== 'entrar') await client.send({ acao: 'entrar', email: action.email, senha: action.senha }).catch((error: Error) => {
+    throw new Error(`Senha gravada. Não deu para entrar agora (${error.message}); use Entrar.`)
+  })
   server.pairing.setRemote(true, action.email.trim().toLowerCase())
   return setRemoteEnabled(true)
 }
@@ -932,7 +935,8 @@ function registerIpc(): void {
   ipcMain.handle('mobile:remote', (_e, enabled: unknown) => setRemoteEnabled(z.boolean().parse(enabled)))
   ipcMain.handle('mobile:account', (_e, action: unknown) => mobileAccount(AccountActionSchema.parse(action)))
   ipcMain.handle('mobile:signout', async () => {
-    await mobileServer!.signOut()
+    const server = mobileServer!
+    await server.signOut(() => accountClient(RELAY_URL, () => server.pairing.identity(), hostname(), RELAY_CLIENT).signOut())
     return setRemoteEnabled(false)
   })
   ipcMain.handle('mobile:admin', (_e, request: unknown) => mobileServer!.adminRequest(AdminRequestSchema.parse(request)))
