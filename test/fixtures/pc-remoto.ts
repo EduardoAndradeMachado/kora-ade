@@ -14,6 +14,12 @@ const estranho = createIdentity('Celular estranho')
 
 const app = createServer((request, response) => {
   if (request.url === '/eco') return void response.end(`eco do PC para ${request.headers['x-quem'] ?? 'alguém'}`)
+  if (request.url === '/cabecalhos') return void response.end(JSON.stringify({ host: request.headers.host, cookie: request.headers.cookie ?? null }))
+  if (request.url === '/corpo') {
+    let body = ''
+    request.on('data', (chunk) => { body += chunk })
+    return void request.on('end', () => response.end(`recebi: ${body}`))
+  }
   response.writeHead(404).end()
 })
 const relay = createRelay({ token })
