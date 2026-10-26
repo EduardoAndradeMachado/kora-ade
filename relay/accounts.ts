@@ -41,8 +41,16 @@ export const passwordProblem = (password: string): string | null =>
 export class Accounts {
   private readonly failures = new Map<string, { count: number; rounds: number; lockedUntil: number }>()
   private readonly now: () => number
+  private readonly sql: Sql
+  private readonly mailer: Mailer
+  private readonly options: AccountsOptions
 
-  constructor(private readonly sql: Sql, private readonly mailer: Mailer, private readonly options: AccountsOptions) {
+  // Sem "private readonly" nos parâmetros: o Node do contêiner roda o TypeScript só tirando os tipos, e essa sintaxe
+  // gera código.
+  constructor(sql: Sql, mailer: Mailer, options: AccountsOptions) {
+    this.sql = sql
+    this.mailer = mailer
+    this.options = options
     this.now = options.now ?? Date.now
   }
 
