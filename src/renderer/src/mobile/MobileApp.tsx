@@ -179,7 +179,7 @@ export function MobileApp(): React.JSX.Element {
     <Wordmark height={36} />
     <h1>Conectar ao seu PC</h1>
     <p>Depois do pareamento, este navegador poderá ver e usar as sessões do Kora na mesma rede.</p>
-    <form onSubmit={(event) => { event.preventDefault(); void run(async () => { await api('pair', { code: pairCode, name }); setPairCode(null); await refresh() }) }}>
+    <form onSubmit={(event) => { event.preventDefault(); void run(async () => { await api('pair', { code: pairCode, name, certificado: koraApp()?.certificado?.() || undefined }); setPairCode(null); await refresh() }) }}>
       <label>Nome deste dispositivo<input value={name} maxLength={60} onChange={(event) => setName(event.target.value)} /></label>
       <button className="primary" disabled={busy}>Vincular celular</button>
     </form>

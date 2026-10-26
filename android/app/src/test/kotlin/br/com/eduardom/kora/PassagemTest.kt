@@ -95,6 +95,16 @@ class PassagemTest {
     }
 
     @Test
+    fun oInicioPodeLevarATelaDiretoAoPareamentoMasNuncaParaForaDaPassagem() {
+        val pareamento = pedir("GET /?k=${passagem.segredo}&ir=%2F%23pair%3Dabc HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").single()
+        assertTrue(pareamento.cabecalhos, pareamento.cabecalhos.contains("Location: /#pair=abc\r\n"))
+        for (fora in listOf("%2F%2Fexemplo.com", "https%3A%2F%2Fexemplo.com", "%2F%0D%0ASet-Cookie%3A+x%3Dy")) {
+            val resposta = pedir("GET /?k=${passagem.segredo}&ir=$fora HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").single()
+            assertTrue(resposta.cabecalhos, resposta.cabecalhos.contains("Location: /\r\n"))
+        }
+    }
+
+    @Test
     fun comOCookieOsPedidosChegamAoPcPeloRelayInclusiveVariosNaMesmaConexao() {
         val corpo = "mensagem do celular"
         val respostas = pedir(
@@ -107,5 +117,12 @@ class PassagemTest {
         assertEquals("recebi: $corpo", respostas[1].corpo)
         // O PC recebe o Host da tela (127.0.0.1:porta), que é a origem que ela usa nos pedidos.
         assertEquals("127.0.0.1:${passagem.porta}", JSONObject(respostas[2].corpo).getString("host"))
+    }
+
+    @Test
+    fun oLinkDeArquivoDoProjetoPassaSemOCookieDaTela() {
+        // O HTML aberto no navegador (Abrir página inteira) não tem o cookie; o /raw/ chega ao PC, que confere a chave.
+        val resposta = pedir("GET /raw/chave/pagina.html HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").single()
+        assertEquals(404, resposta.status)
     }
 }

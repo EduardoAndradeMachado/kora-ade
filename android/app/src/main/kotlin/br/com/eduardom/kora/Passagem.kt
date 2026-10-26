@@ -8,6 +8,7 @@ import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.URLDecoder
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
@@ -20,14 +21,18 @@ import kotlin.concurrent.thread
  * Outros apps do celular também alcançam 127.0.0.1. Por isso a passagem só atende quem traz o cookie secreto, que a tela
  * recebe ao abrir [inicio] e que o WebView não entrega a ninguém (HttpOnly, só deste endereço).
  */
-class Passagem(private val abrir: () -> Envelope) : Closeable {
+class Passagem(portaPreferida: Int = 0, private val abrir: () -> Envelope) : Closeable {
     val segredo: String = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
-    private val servidor = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+    // Porta fixa quando livre: a origem da tela fica a mesma e o que ela guarda no celular (tema, rascunhos) não se perde.
+    private val servidor = runCatching { ServerSocket(portaPreferida, 50, InetAddress.getByName("127.0.0.1")) }
+        .getOrElse { ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")) }
     private val conexoes = ConcurrentHashMap.newKeySet<Socket>()
     @Volatile private var fechada = false
 
     val porta: Int get() = servidor.localPort
     val inicio: String get() = "http://127.0.0.1:$porta/?k=$segredo"
+    // Para os pedidos que o próprio app faz pela passagem (conferir a atualização).
+    val cookie: String get() = "$COOKIE=$segredo"
 
     fun iniciar(): Passagem {
         thread(isDaemon = true, name = "passagem") {
@@ -53,10 +58,15 @@ class Passagem(private val abrir: () -> Envelope) : Closeable {
             val cabecalho = lerCabecalho(entrada) ?: return
             val texto = String(cabecalho, Charsets.ISO_8859_1)
             val alvo = texto.substringBefore("\r\n").split(' ').getOrNull(1) ?: return
-            if (alvo == "/?k=$segredo") {
-                return responder(cliente, "302 Found", "Location: /\r\nSet-Cookie: $COOKIE=$segredo; Path=/; HttpOnly; SameSite=Strict\r\n")
+            val consulta = consulta(alvo)
+            if (alvo.substringBefore('?') == "/" && consulta["k"] == segredo) {
+                // ir: onde a tela abre depois de receber o cookie (o #pair= do pareamento pelo relay); só caminho local.
+                val destino = consulta["ir"]?.takeIf { it.startsWith("/") && !it.startsWith("//") && it.none { c -> c == '\r' || c == '\n' } } ?: "/"
+                return responder(cliente, "302 Found", "Location: $destino\r\nSet-Cookie: $COOKIE=$segredo; Path=/; HttpOnly; SameSite=Strict\r\n")
             }
-            if (!cookieCerto(texto)) return responder(cliente, "403 Forbidden", "")
+            // /raw/ é o link de leitura de um arquivo do projeto, autorizado pela chave dele (o HTML aberto no navegador
+            // pelo Abrir página inteira não tem o cookie da tela).
+            if (!cookieCerto(texto) && !alvo.startsWith("/raw/")) return responder(cliente, "403 Forbidden", "")
             val envelope = try { abrir() } catch (erro: IOException) {
                 return responder(cliente, "502 Bad Gateway", "X-Kora-Erro: ${erro.message.orEmpty().replace(Regex("[\\r\\n]"), " ")}\r\n")
             }
@@ -75,6 +85,10 @@ class Passagem(private val abrir: () -> Envelope) : Closeable {
             conexoes -= cliente
         }
     }
+
+    private fun consulta(alvo: String): Map<String, String> = alvo.substringAfter('?', "").split('&')
+        .mapNotNull { par -> par.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to runCatching { URLDecoder.decode(it[1], "UTF-8") }.getOrDefault("") } }
+        .toMap()
 
     private fun cookieCerto(cabecalho: String): Boolean = cabecalho.split("\r\n")
         .filter { it.startsWith("cookie:", ignoreCase = true) }

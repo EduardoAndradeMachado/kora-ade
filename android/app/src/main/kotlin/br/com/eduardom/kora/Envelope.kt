@@ -1,5 +1,6 @@
 package br.com.eduardom.kora
 
+import android.annotation.SuppressLint
 import java.io.Closeable
 import java.io.EOFException
 import java.io.IOException
@@ -35,7 +36,7 @@ fun impressaoDigital(certificado: X509Certificate): String =
     MessageDigest.getInstance("SHA-256").digest(certificado.encoded).joinToString("") { "%02x".format(it) }
 
 /** A chave deste celular (no Keystore, no app; de um arquivo, nos testes) apresentada ao PC no aperto de mãos. */
-class ChaveDoCelular(private val chave: PrivateKey, private val certificado: X509Certificate) : X509ExtendedKeyManager() {
+class ChaveDoCelular(private val chave: PrivateKey, val certificado: X509Certificate) : X509ExtendedKeyManager() {
     override fun chooseClientAlias(keyType: Array<String>?, issuers: Array<Principal>?, socket: Socket?) = ALIAS
     override fun chooseEngineClientAlias(keyType: Array<String>?, issuers: Array<Principal>?, engine: SSLEngine?) = ALIAS
     override fun getCertificateChain(alias: String?) = arrayOf(certificado)
@@ -51,6 +52,8 @@ class ChaveDoCelular(private val chave: PrivateKey, private val certificado: X50
  * Só aceita o PC cujo certificado veio no QR. A conferência acontece dentro do aperto de mãos: com outro certificado ele
  * falha antes de qualquer dado sair do celular. Cadeia e validade não importam; a confiança vem do pareamento.
  */
+// O lint avisa de todo X509TrustManager próprio porque o erro comum é aceitar qualquer certificado; este só aceita um.
+@SuppressLint("CustomX509TrustManager")
 class SoOPcPareado(private val esperado: String) : X509TrustManager {
     override fun checkServerTrusted(chain: Array<X509Certificate>?, authType: String?) {
         val certificado = chain?.firstOrNull() ?: throw CertificateException("O PC não apresentou certificado.")

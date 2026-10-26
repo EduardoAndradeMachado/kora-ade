@@ -5,6 +5,7 @@ import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -13,6 +14,7 @@ import android.net.Uri
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -32,6 +34,7 @@ import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -53,14 +56,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import okhttp3.OkHttpClient
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.io.File
 import java.net.URL
+import java.net.URLEncoder
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.math.log10
 import kotlin.math.roundToInt
 
@@ -83,6 +89,11 @@ private const val CONECTAR_MS = 400
 private const val LER_MS = 1500
 // Se a página não avisar que está pronta (versão antiga do Kora no PC), ela aparece assim mesmo.
 private const val ESPERA_PAGINA_MS = 6000L
+// Fora de casa: a passagem local da tela (porta fixa quando livre) e o prazo para abrir o envelope pelo relay.
+private const val PORTA_PASSAGEM = 43190
+private const val PRAZO_RELAY_MS = 15_000L
+// Troca de rede (Wi-Fi para 4G): espera a rede nova assentar antes de decidir o caminho.
+private const val ESPERA_REDE_MS = 1_500L
 private const val MICROFONE_PAROU = "O microfone parou no meio da gravação. Tente de novo."
 
 class MainActivity : ComponentActivity() {
@@ -91,6 +102,17 @@ class MainActivity : ComponentActivity() {
     private lateinit var inicio: View
     private lateinit var conteudo: LinearLayout
     private val principal = Handler(Looper.getMainLooper())
+    // Fora de casa: a passagem que leva a tela ao PC pelo relay (null pela rede de casa) e o WebSocket até o relay.
+    private var passagem: Passagem? = null
+    private val http by lazy { OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).pingInterval(25, TimeUnit.SECONDS).build() }
+    private val certificadosRegistrados = mutableSetOf<String>()
+    private val reavaliar = Runnable { reavaliarCaminho(voltouParaFrente = false) }
+    private val voltou = Runnable { reavaliarCaminho(voltouParaFrente = true) }
+    // Wi-Fi caiu, entrou o 4G, voltou para casa: o caminho até o PC é refeito sem precisar fechar e abrir o app.
+    private val redes = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) = trocouDeRede()
+        override fun onLost(network: Network) = trocouDeRede()
+    }
     // A página pede imagem pelo <input type="file">; a WebView só abre a galeria se o app atender o pedido.
     private var escolhaDeArquivo: ValueCallback<Array<Uri>>? = null
     private val escolherArquivo = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultado ->
@@ -210,6 +232,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContentView(raiz)
+        getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(redes)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -232,7 +255,14 @@ class MainActivity : ComponentActivity() {
                 val kora = if (ultimo != null) sondarSalvo(ultimo)
                 else PORTAS.firstNotNullOfOrNull { sondar(antigo!!, it) }
                 val pareado = kora?.let(::pareado)
-                principal.post { if (kora != null && pareado != false) abrir(kora) else procurar() }
+                principal.post {
+                    when {
+                        kora != null && pareado != false -> abrir(kora)
+                        // Longe de casa: a rede local não responde, mas o PC está no relay.
+                        kora == null && ultimo?.peloRelay == true -> abrirPeloRelay(ultimo)
+                        else -> procurar()
+                    }
+                }
             }.start()
         }
     }
@@ -242,6 +272,13 @@ class MainActivity : ComponentActivity() {
         CookieManager.getInstance().flush()
     }
 
+    override fun onStart() {
+        super.onStart()
+        // De volta ao app depois de mudar de lugar: o caminho é conferido de novo.
+        principal.removeCallbacks(voltou)
+        principal.postDelayed(voltou, 300)
+    }
+
     override fun onStop() {
         super.onStop()
         pararGravacao(enviar = false)
@@ -249,6 +286,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         busca?.shutdownNow()
+        runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(redes) }
+        fecharPassagem()
         super.onDestroy()
     }
 
@@ -289,6 +328,10 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun pronto() = runOnUiThread { mostrarPagina() }
+
+        // O pareamento leva a impressão digital do certificado deste celular, para depois entrar pelo relay.
+        @JavascriptInterface
+        fun certificado(): String = runCatching { IdentidadeDoCelular.impressaoDigital() }.getOrDefault("")
 
         @JavascriptInterface
         fun versao(): String = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
@@ -389,6 +432,7 @@ class MainActivity : ComponentActivity() {
         // evaluateJavascript roda só no documento principal: o iframe do visualizador não recebe a chave.
         override fun onPageFinished(view: WebView, url: String?) {
             view.evaluateJavascript("window.koraChaveAudio = '$chaveDoAudio'", null)
+            if (passagem == null) atual?.let(::registrarCertificado)
             super.onPageFinished(view, url)
         }
 
@@ -406,7 +450,21 @@ class MainActivity : ComponentActivity() {
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
             if (!request.isForMainFrame) return
             Log.w(TAG, "falha ao abrir ${request.url}: ${error.errorCode} ${error.description}")
+            // A rede local não respondeu e o PC está no relay: tenta por ele antes de mostrar a lista de PCs.
+            val salvo = pcs.find { it.id == atual?.id }
+            if (salvo != null && salvo.peloRelay && passagem == null) return abrirPeloRelay(salvo)
             val motivo = "Não consegui abrir o Kora${atual?.let { " do PC ${exibido(it)}" } ?: ""}. O PC está ligado, com a conexão do celular ativa?"
+            fecharPassagem()
+            atual = null
+            tela = Tela.PCS
+            procurar(motivo)
+        }
+
+        // Pela passagem, o relay ou o PC fora do ar viram 502: a mesma saída de quando a rede local não responde.
+        override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+            if (!request.isForMainFrame || passagem == null || errorResponse.statusCode != 502) return
+            val motivo = "O ${atual?.let(::exibido) ?: "PC"} não respondeu pelo ponto de encontro. O Kora está aberto lá, com Fora de casa ligado?"
+            fecharPassagem()
             atual = null
             tela = Tela.PCS
             procurar(motivo)
@@ -414,6 +472,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun abrir(kora: Kora, codigo: String? = null) {
+        fecharPassagem()
         atual = kora
         pcs = lembrar(pcs, kora)
         preferencias.edit().putString(ULTIMO_PC, kora.id).remove(HOST_ANTIGO).apply()
@@ -425,6 +484,128 @@ class MainActivity : ComponentActivity() {
         // A query força uma navegação nova: só trocar o #pair numa página já aberta não a recarregaria.
         web.loadUrl(if (codigo == null) "http://${kora.host}:${kora.porta}/" else "http://${kora.host}:${kora.porta}/?convite=${System.currentTimeMillis()}#pair=$codigo")
         principal.postDelayed({ if (minha == geracao && web.visibility != View.VISIBLE) mostrarPagina() }, ESPERA_PAGINA_MS)
+    }
+
+    // Fora de casa: a tela abre na passagem local, e cada conexão dela vai cifrada até o PC pelo relay.
+    private fun abrirPeloRelay(salvo: PcSalvo, codigo: String? = null) {
+        val pc = salvo.pc ?: return
+        val relay = salvo.relay ?: return
+        fecharPassagem()
+        val nova = Passagem(PORTA_PASSAGEM) { Envelope.abrir(http, "wss://$relay/c/$pc", contextoDoEnvelope(IdentidadeDoCelular.chave(), pc), PRAZO_RELAY_MS) }.iniciar()
+        passagem = nova
+        atual = Kora(salvo.id, "127.0.0.1", nova.porta, salvo.nome, salvo.edicao, salvo.tailscale, pc, relay)
+        preferencias.edit().putString(ULTIMO_PC, salvo.id).apply()
+        busca?.shutdownNow()
+        val minha = ++geracao
+        mostrarAbertura()
+        web.visibility = View.INVISIBLE
+        web.loadUrl(nova.inicio + (codigo?.let { "&ir=" + URLEncoder.encode("/#pair=$it", "UTF-8") } ?: ""))
+        principal.postDelayed({ if (minha == geracao && web.visibility != View.VISIBLE) mostrarPagina() }, ESPERA_PAGINA_MS)
+    }
+
+    private fun fecharPassagem() {
+        passagem?.close()
+        passagem = null
+    }
+
+    private fun trocouDeRede() {
+        principal.removeCallbacks(reavaliar)
+        principal.postDelayed(reavaliar, ESPERA_REDE_MS)
+    }
+
+    // Pela rede de casa e ela sumiu: passa ao relay (ou ao Tailscale, se ele responder). Pelo relay e a casa voltou a
+    // responder: volta para a rede local, mais rápida, mas só quando o app volta para a frente, para uma troca de Wi-Fi
+    // não recarregar a tela no meio de uma mensagem.
+    private fun reavaliarCaminho(voltouParaFrente: Boolean) {
+        val salvo = pcs.find { it.id == atual?.id } ?: return
+        if (web.visibility != View.VISIBLE) return
+        val peloRelay = passagem != null
+        if (peloRelay && !voltouParaFrente) return
+        val atualAgora = atual
+        Thread {
+            val local = sondarSalvo(salvo)
+            principal.post {
+                if (atual !== atualAgora || isFinishing) return@post
+                when {
+                    peloRelay && local != null -> abrir(local)
+                    !peloRelay && local == null && salvo.peloRelay -> abrirPeloRelay(salvo)
+                    !peloRelay && local != null && local.host != atualAgora?.host -> abrir(local)
+                }
+            }
+        }.start()
+    }
+
+    // O pareamento feito pela rede local (pela página, ou pelo app de antes) ganha o certificado deste celular: assim ele
+    // passa a entrar pelo relay sem ler outro QR. Kora antigo não tem a rota e só responde 404.
+    private fun registrarCertificado(kora: Kora) {
+        if (kora.pc == null || !certificadosRegistrados.add(kora.id)) return
+        Thread {
+            val registrado = runCatching {
+                val endereco = "http://${kora.host}:${kora.porta}"
+                val cookies = CookieManager.getInstance().getCookie(endereco) ?: return@runCatching false
+                val conexao = URL("$endereco/api/device/certificate").openConnection() as HttpURLConnection
+                conexao.requestMethod = "POST"
+                conexao.doOutput = true
+                conexao.setRequestProperty("Cookie", cookies)
+                conexao.setRequestProperty("Content-Type", "application/json")
+                conexao.connectTimeout = 2000
+                conexao.readTimeout = 3000
+                try {
+                    conexao.outputStream.use { it.write(JSONObject().put("certificado", IdentidadeDoCelular.impressaoDigital()).toString().toByteArray()) }
+                    conexao.responseCode == 200
+                } finally {
+                    conexao.disconnect()
+                }
+            }.getOrDefault(false)
+            if (!registrado) principal.post { certificadosRegistrados.remove(kora.id) }
+        }.start()
+    }
+
+    // Pareamento só pelo relay: o /health do PC chega pelo envelope (o PC aceita um certificado novo enquanto o QR vale).
+    private fun sondarPeloRelay(relay: String, pc: String): Kora? = runCatching {
+        Envelope.abrir(http, "wss://$relay/c/$pc", contextoDoEnvelope(IdentidadeDoCelular.chave(), pc), PRAZO_RELAY_MS).use { envelope ->
+            envelope.saida.write("GET /health HTTP/1.1\r\nHost: kora\r\nConnection: close\r\n\r\n".toByteArray())
+            val saude = JSONObject(envelope.entrada.readBytes().decodeToString().substringAfter("\r\n\r\n"))
+            val edicao = saude.optString("edition")
+            Kora(saude.getString("id"), "", 0, nomeDoPc(saude.optString("name").ifEmpty { "PC" }, edicao), edicao, saude.optString("tailscale").takeIf { !saude.isNull("tailscale") && it.isNotEmpty() }, pc, relay)
+        }
+    }.getOrNull()
+
+    // QR lido pela câmera ou convite colado (o link que aparece embaixo do QR no PC).
+    private fun usarConvite(texto: String?) {
+        val convite = texto?.let(::lerConvite)
+        if (convite == null) {
+            aviso = "Esse convite não é do Kora. No PC, use Configurações → Celular → Nova conexão."
+            mostrarInicio()
+            return
+        }
+        mostrarAbertura()
+        Thread {
+            val pc = convite.pc
+            val relay = convite.relay
+            val local = convite.host?.let { sondar(it, convite.porta) }
+            // Kora de antes, sem relay no convite: abre a página mesmo sem resposta, como sempre foi.
+            val pelaRede = local ?: convite.host?.takeIf { relay == null }?.let { Kora("$it:${convite.porta}", it, convite.porta, "PC") }
+            val peloRelay = if (pelaRede == null && pc != null && relay != null) sondarPeloRelay(relay, pc) else null
+            principal.post {
+                when {
+                    pelaRede != null -> abrir(pelaRede.copy(pc = pelaRede.pc ?: pc, relay = pelaRede.relay ?: relay), convite.codigo)
+                    peloRelay != null -> {
+                        pcs = lembrar(pcs, peloRelay)
+                        abrirPeloRelay(pcs.first { it.id == peloRelay.id }, convite.codigo)
+                    }
+                    else -> {
+                        aviso = "Não consegui falar com o PC desse convite. O Kora está aberto lá, e o convite ainda vale (2 minutos)?"
+                        mostrarInicio()
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun colarConvite() {
+        val texto = getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+        usarConvite(texto)
     }
 
     private fun mostrarAbertura() {
@@ -456,6 +637,7 @@ class MainActivity : ComponentActivity() {
             val pareado = kora?.let(::pareado)
             principal.post {
                 when {
+                    kora == null && salvo.peloRelay -> abrirPeloRelay(salvo)
                     kora == null -> procurar("O ${salvo.exibido} não respondeu. No PC, o Kora precisa estar aberto, com a conexão do celular ligada (Configurações → Celular).")
                     pareado == false -> parear(salvo.exibido)
                     else -> abrir(kora)
@@ -483,6 +665,7 @@ class MainActivity : ComponentActivity() {
         Thread {
             val consulta = runCatching {
                 val conexao = URL("http://${kora.host}:${kora.porta}/app/android.json").openConnection() as HttpURLConnection
+                passagem?.takeIf { kora.host == "127.0.0.1" }?.let { conexao.setRequestProperty("Cookie", it.cookie) }
                 conexao.connectTimeout = 2000
                 conexao.readTimeout = 3000
                 try {
@@ -519,6 +702,7 @@ class MainActivity : ComponentActivity() {
                 val pasta = File(cacheDir, "atualizacao").apply { mkdirs() }
                 val destino = File(pasta, "kora.apk")
                 val conexao = URL("http://${kora.host}:${kora.porta}/app/kora-celular.apk").openConnection() as HttpURLConnection
+                passagem?.takeIf { kora.host == "127.0.0.1" }?.let { conexao.setRequestProperty("Cookie", it.cookie) }
                 conexao.connectTimeout = 2000
                 conexao.readTimeout = 15000
                 try {
@@ -649,6 +833,7 @@ class MainActivity : ComponentActivity() {
         for (kora in naRede) conteudo.addView(linhaNaRede(kora))
         if (!buscando && naRede.isEmpty()) texto("Nenhum PC novo nesta rede. Se o seu não aparecer, leia o QR code dele.")
         conteudo.addView(botao("Ler QR code de um PC", principal = true, espaco = 22) { lerQrCode() })
+        conteudo.addView(botao("Colar convite do PC") { colarConvite() })
         if (!primeira) conteudo.addView(botao("Voltar para os PCs") { mudarTela(Tela.PCS) })
     }
 
@@ -663,6 +848,7 @@ class MainActivity : ComponentActivity() {
             setPadding(0, dp(14), 0, 0)
         })
         conteudo.addView(botao("Ler QR code", principal = true, espaco = 22) { lerQrCode() })
+        conteudo.addView(botao("Colar convite do PC") { colarConvite() })
         conteudo.addView(botao("Voltar para os PCs") { mudarTela(Tela.PCS) })
     }
 
@@ -846,6 +1032,7 @@ class MainActivity : ComponentActivity() {
         pareados.remove(pc.id)
         if (preferencias.getString(ULTIMO_PC, null) == pc.id) preferencias.edit().remove(ULTIMO_PC).apply()
         if (atual?.id == pc.id) {
+            fecharPassagem()
             atual = null
             web.loadUrl("about:blank")
         }
@@ -878,7 +1065,10 @@ class MainActivity : ComponentActivity() {
             val id = saude.optString("id").ifEmpty { "$host:$porta" }
             val edicao = saude.optString("edition")
             val tailscale = if (saude.isNull("tailscale")) null else saude.optString("tailscale").ifEmpty { null }
-            Kora(id, host, porta, nomeDoPc(saude.optString("name").ifEmpty { host }, edicao), edicao, tailscale)
+            val pc = saude.optString("pc").takeIf { IMPRESSAO_DIGITAL.matches(it) }
+            // relay ausente: Kora antigo, nada a dizer (null). Presente e nulo: o PC desligou Fora de casa ("").
+            val relay = if (!saude.has("relay")) null else if (saude.isNull("relay")) "" else relayValido(saude.optString("relay")) ?: ""
+            Kora(id, host, porta, nomeDoPc(saude.optString("name").ifEmpty { host }, edicao), edicao, tailscale, pc, relay)
         } finally {
             conexao.disconnect()
         }
@@ -893,20 +1083,7 @@ class MainActivity : ComponentActivity() {
     private fun lerQrCode() {
         val opcoes = GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
         GmsBarcodeScanning.getClient(this, opcoes).startScan()
-            .addOnSuccessListener { codigo ->
-                val convite = codigo.rawValue?.let(::lerConvite)
-                if (convite == null) {
-                    aviso = "Esse QR code não é do Kora. No PC, use Configurações → Celular → Nova conexão."
-                    mostrarInicio()
-                }
-                else {
-                    mostrarAbertura()
-                    Thread {
-                        val kora = sondar(convite.host, convite.porta) ?: Kora("${convite.host}:${convite.porta}", convite.host, convite.porta, "PC")
-                        principal.post { abrir(kora, convite.codigo) }
-                    }.start()
-                }
-            }
+            .addOnSuccessListener { codigo -> usarConvite(codigo.rawValue) }
             .addOnFailureListener { erro ->
                 aviso = "Não deu para ler o QR code: ${erro.message}"
                 mostrarInicio()

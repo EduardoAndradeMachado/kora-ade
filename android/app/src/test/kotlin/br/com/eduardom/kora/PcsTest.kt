@@ -1,6 +1,7 @@
 package br.com.eduardom.kora
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PcsTest {
@@ -94,5 +95,41 @@ class PcsTest {
     fun soOsCookiesDePareamentoDoKoraVaoParaOEnderecoDoTailscale() {
         assertEquals(listOf("kora-device-abc=t1", "kora-device=t0"), cookiesDePareamento("outro=x; kora-device-abc=t1;kora-device=t0"))
         assertEquals(emptyList<String>(), cookiesDePareamento(null))
+    }
+
+    @Test
+    fun oPcEORelayVemDoHealthESomemQuandoOPcDesligaForaDeCasa() {
+        val pc = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        val ligado = lembrar(emptyList(), prod.copy(pc = pc, relay = "kora-sync.eduardom.com.br")).single()
+        assertTrue(ligado.peloRelay)
+        assertEquals(listOf(ligado), lerPcs(escreverPcs(listOf(ligado))))
+        // Kora antigo, que não fala do relay: o que já se sabia continua.
+        assertEquals("kora-sync.eduardom.com.br", lembrar(listOf(ligado), prod).single().relay)
+        // O PC informou que Fora de casa está desligado: o app para de tentar pelo relay.
+        val desligado = lembrar(listOf(ligado), prod.copy(pc = pc, relay = "")).single()
+        assertEquals(null, desligado.relay)
+        assertEquals(false, desligado.peloRelay)
+        assertEquals(pc, desligado.pc)
+    }
+
+    @Test
+    fun pcPareadoSoPeloRelayFicaSalvoSemEnderecoDeCasa() {
+        val soRelay = PcSalvo("id-prod", "", 43127, "Eduardo", pc = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", relay = "kora-sync.eduardom.com.br")
+        assertEquals(listOf(soRelay), lerPcs(escreverPcs(listOf(soRelay))))
+        assertEquals(emptyList<String>(), enderecos(soRelay))
+        // Quando ele aparece na rede de casa, ganha o endereço e mantém o relay.
+        val emCasa = lembrar(listOf(soRelay), prod).single()
+        assertEquals("192.168.0.7", emCasa.host)
+        assertTrue(emCasa.peloRelay)
+    }
+
+    @Test
+    fun oHealthQueChegaPeloRelayNaoApagaOEnderecoDeCasa() {
+        val emCasa = lembrar(emptyList(), prod.copy(pc = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", relay = "kora-sync.eduardom.com.br")).single()
+        // O /health lido pelo envelope não traz endereço nem porta da rede local.
+        val peloRelay = lembrar(listOf(emCasa), Kora("id-prod", "", 0, "Eduardo", pc = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", relay = "kora-sync.eduardom.com.br")).single()
+        assertEquals("192.168.0.7", peloRelay.host)
+        assertEquals(43127, peloRelay.porta)
+        assertTrue(peloRelay.peloRelay)
     }
 }

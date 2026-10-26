@@ -27,4 +27,19 @@ class DescobertaTest {
         assertNull(lerConvite("http://192.168.0.10:43127/#outra=abc"))
         assertNull(lerConvite("texto qualquer"))
     }
+
+    @Test
+    fun conviteLevaOPcEORelayEOAppAtualContinuaLendoOMesmo() {
+        val pc = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        assertEquals(Convite("192.168.0.10", 43127, "abc", pc, "kora-sync.eduardom.com.br"), lerConvite("http://192.168.0.10:43127/?pc=$pc&relay=kora-sync.eduardom.com.br#pair=abc"))
+        assertEquals(Convite("192.168.0.10", 43127, "abc", pc, null), lerConvite("http://192.168.0.10:43127/?pc=$pc#pair=abc"))
+        // Só com Fora de casa ligado o QR aponta para o relay.
+        assertEquals(Convite(null, 0, "abc", pc, "kora-sync.eduardom.com.br"), lerConvite("https://kora-sync.eduardom.com.br/?pc=$pc#pair=abc"))
+        // Pelo relay sem a impressão digital do PC, o app não teria como conferir quem responde: não é convite.
+        assertNull(lerConvite("https://kora-sync.eduardom.com.br/#pair=abc"))
+        assertNull(lerConvite("https://kora-sync.eduardom.com.br/?pc=curto#pair=abc"))
+        assertNull(lerConvite("https://kora-sync.eduardom.com.br:8443/?pc=$pc#pair=abc"))
+        // Relay com cara de outra coisa é ignorado, e o convite da rede local continua valendo.
+        assertEquals(Convite("192.168.0.10", 43127, "abc", pc, null), lerConvite("http://192.168.0.10:43127/?pc=$pc&relay=javascript:alert(1)#pair=abc"))
+    }
 }

@@ -7,9 +7,16 @@ import java.net.URI
 val PORTAS = listOf(43127, 43128)
 
 // tailscale: o endereço do PC no Tailscale, que o /health informa; com ele o celular chega ao PC fora de casa.
-data class Kora(val id: String, val host: String, val porta: Int, val nome: String, val edicao: String = "", val tailscale: String? = null)
+// pc e relay: a impressão digital do certificado do PC e o relay em que ele está (Fora de casa). relay null quer dizer
+// que o /health não falou dele (Kora antigo); vazio, que o PC informou que Fora de casa está desligado.
+data class Kora(val id: String, val host: String, val porta: Int, val nome: String, val edicao: String = "", val tailscale: String? = null, val pc: String? = null, val relay: String? = null)
 
-data class Convite(val host: String, val porta: Int, val codigo: String)
+// host null: o QR veio só pelo relay (Fora de casa ligado, rede local desligada); o pareamento vai pelo relay.
+data class Convite(val host: String?, val porta: Int, val codigo: String, val pc: String? = null, val relay: String? = null)
+
+val IMPRESSAO_DIGITAL = Regex("^[0-9a-f]{64}$")
+private val DOMINIO = Regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\\d{1,5})?$")
+fun relayValido(host: String?): String? = host?.lowercase()?.takeIf { DOMINIO.matches(it) }
 
 private fun ipv4(texto: String): List<Int>? {
     val partes = texto.split('.')
@@ -30,11 +37,18 @@ fun vizinhos(ip: String): List<String> {
 /** O instalado e o Dev do mesmo PC têm o mesmo nome de computador: o Dev ganha a marca. */
 fun nomeDoPc(nome: String, edicao: String): String = if (edicao == "dev") "$nome (Dev)" else nome
 
-/** O QR code do PC: http://<ip>:<porta do Kora>/#pair=<código>. Qualquer outra coisa não é convite do Kora. */
+/**
+ * O QR code do PC (src/main/mobile-server.ts, invite). Pela rede local: http://<ip>:<porta do Kora>/?pc=…&relay=…#pair=…,
+ * em que pc e relay só existem com Fora de casa. Só pelo relay: https://<relay>/?pc=…#pair=…. Outra coisa não é do Kora.
+ */
 fun lerConvite(texto: String): Convite? {
     val uri = runCatching { URI(texto.trim()) }.getOrNull() ?: return null
-    if (uri.scheme != "http" || uri.port !in PORTAS) return null
-    val host = uri.host?.takeIf { ipv4(it) != null } ?: return null
     val codigo = uri.rawFragment?.removePrefix("pair=")?.takeIf { it != uri.rawFragment && it.isNotBlank() } ?: return null
-    return Convite(host, uri.port, codigo)
+    val consulta = uri.rawQuery.orEmpty().split('&').mapNotNull { par -> par.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toMap()
+    val pc = consulta["pc"]?.takeIf { IMPRESSAO_DIGITAL.matches(it) }
+    return when {
+        uri.scheme == "http" && uri.port in PORTAS && uri.host?.let(::ipv4) != null -> Convite(uri.host, uri.port, codigo, pc, relayValido(consulta["relay"]))
+        uri.scheme == "https" && uri.port == -1 && pc != null && relayValido(uri.host) != null -> Convite(null, 0, codigo, pc, relayValido(uri.host))
+        else -> null
+    }
 }
