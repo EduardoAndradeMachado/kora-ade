@@ -8,6 +8,9 @@ const HANDSHAKE_MS = 15_000
 
 const fingerprint = (peer: PeerCertificate): string | null => peer.fingerprint256 ? peer.fingerprint256.replaceAll(':', '').toLowerCase() : null
 
+// O ID do outro lado de um envelope já aberto (o certificado que ele apresentou no aperto de mãos).
+export const peerFingerprint = (socket: TLSSocket): string | null => fingerprint(socket.getPeerCertificate())
+
 function settle(socket: TLSSocket, event: 'secure' | 'secureConnect', check: () => boolean): Promise<TLSSocket> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => fail(new Error('O aperto de mãos com o outro lado não terminou a tempo.')), HANDSHAKE_MS)

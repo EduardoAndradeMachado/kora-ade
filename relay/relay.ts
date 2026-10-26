@@ -165,10 +165,14 @@ export function createRelay(options: RelayOptions): Server {
     })
   })
 
-  server.on('close', () => {
+  // O close do Node espera as conexões acabarem, e as do WebSocket não acabam sozinhas: sem derrubá-las antes, o
+  // desligamento (SIGTERM do redeploy) ficaria parado até o Docker matar o processo.
+  const close = server.close.bind(server)
+  server.close = (callback) => {
     clearInterval(sweep)
     for (const socket of sockets.clients) socket.terminate()
     for (const entry of waiting.values()) clearTimeout(entry.timer)
-  })
+    return close(callback)
+  }
   return server
 }
