@@ -3,6 +3,7 @@ import { Accounts, type Mailer } from '../relay/accounts'
 import { connect, migrate, type Sql } from '../relay/db'
 import type { Email } from '../relay/emails'
 import { startTestDatabase } from '../relay/testing/pg'
+import { hashPassword, scryptPeak } from '../relay/passwords'
 
 let database: Awaited<ReturnType<typeof startTestDatabase>>
 let sql: Sql
@@ -152,6 +153,17 @@ describe('contas do relay', () => {
     // 5 por hora contando todos os códigos da conta: o do cadastro, um minuto antes, já gastou um.
     expect(sent).toHaveLength(4)
   })
+
+  it('código errado não calcula o hash da senha, e o relay nunca roda mais de 2 cálculos ao mesmo tempo', async () => {
+    await accounts.signup('caro@exemplo.com')
+    const code = lastCode('caro@exemplo.com')
+    // Código errado responde na hora: o hash (centenas de ms) nem começa.
+    const started = performance.now()
+    await Promise.all(Array.from({ length: 4 }, () => accounts.verifySignup('caro@exemplo.com', wrong(code), PASSWORD)))
+    expect(performance.now() - started).toBeLessThan(250)
+    await Promise.all(Array.from({ length: 6 }, () => hashPassword('senha-qualquer-123')))
+    expect(scryptPeak()).toBeLessThanOrEqual(2)
+  }, 30_000)
 
   it('se gravar a senha falha, o código continua valendo: usar o mesmo código de novo funciona', async () => {
     await accounts.signup('falha@exemplo.com')

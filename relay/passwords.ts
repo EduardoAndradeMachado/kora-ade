@@ -11,10 +11,28 @@ const KEY_BYTES = 32
 export const PASSWORD_MIN = 10
 export const PASSWORD_MAX = 128
 
-function scrypt(password: string, salt: Buffer, n: number, r: number, p: number): Promise<Buffer> {
-  return new Promise((resolve, reject) =>
-    scryptCallback(password.normalize('NFKC'), salt, KEY_BYTES, { N: n, r, p, maxmem: 256 * n * r }, (error, key) => (error ? reject(error) : resolve(key)))
-  )
+// No máximo 2 cálculos ao mesmo tempo, no relay inteiro: cada um ocupa ~128 MiB e um dos 4 threads do Node, e uma
+// enxurrada de logins ou códigos travaria o resto (inclusive a conexão com o banco). Os outros esperam na fila.
+const SLOTS = 2
+let running = 0
+let peak = 0
+const queue: (() => void)[] = []
+
+// Maior número de cálculos simultâneos já visto (para o teste conferir o teto).
+export const scryptPeak = (): number => peak
+
+async function scrypt(password: string, salt: Buffer, n: number, r: number, p: number): Promise<Buffer> {
+  if (running >= SLOTS) await new Promise<void>((resolve) => queue.push(resolve))
+  running++
+  peak = Math.max(peak, running)
+  try {
+    return await new Promise((resolve, reject) =>
+      scryptCallback(password.normalize('NFKC'), salt, KEY_BYTES, { N: n, r, p, maxmem: 256 * n * r }, (error, key) => (error ? reject(error) : resolve(key)))
+    )
+  } finally {
+    running--
+    queue.shift()?.()
+  }
 }
 
 export async function hashPassword(password: string): Promise<string> {

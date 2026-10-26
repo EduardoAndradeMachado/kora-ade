@@ -12,7 +12,8 @@ import { RelayService } from './service.ts'
 //   EMAIL_FROM      remetente, ex.: Kora <noreply@eduardom.com.br>
 //   EMAIL_LOGO_URL  endereço público do logotipo em PNG usado nos e-mails
 //   HEALTH_PATH     caminho do health check (ex.: /saude-<aleatório>); obrigatório, para conferir o deploy
-//   TRUST_PROXY     1 quando há proxy na frente (EasyPanel), para bloquear pelo IP de quem pediu e não pelo do proxy
+//   TRUST_PROXY     1 com proxy na frente (EasyPanel), 0 sem; obrigatório. Esquecer atrás do proxy faria todo mundo chegar
+//                   do IP dele, e 20 erros de qualquer um bloqueariam o relay inteiro por 30 min
 //   PORT            porta interna (8080 por padrão)
 const env = (name: string): string => process.env[name] ?? ''
 const problems = [
@@ -21,7 +22,8 @@ const problems = [
   !env('RESEND_API_KEY') && 'RESEND_API_KEY ausente.',
   !/<[^@\s]+@[^>\s]+>$|^[^@\s]+@[^@\s]+$/.test(env('EMAIL_FROM')) && 'EMAIL_FROM ausente, ex.: Kora <noreply@exemplo.com>.',
   !/^https:\/\//.test(env('EMAIL_LOGO_URL')) && 'EMAIL_LOGO_URL ausente: endereço https do logotipo em PNG.',
-  !/^\/[\w-]{8,}$/.test(env('HEALTH_PATH')) && 'HEALTH_PATH ausente ou previsível: use algo como /saude-<8+ caracteres aleatórios>.'
+  !/^\/[\w-]{8,}$/.test(env('HEALTH_PATH')) && 'HEALTH_PATH ausente ou previsível: use algo como /saude-<8+ caracteres aleatórios>.',
+  !['0', '1'].includes(env('TRUST_PROXY')) && 'TRUST_PROXY ausente: 1 com proxy na frente (EasyPanel), 0 sem.'
 ].filter(Boolean)
 if (problems.length) {
   for (const problem of problems) console.error(problem)

@@ -76,8 +76,8 @@ export class Accounts {
 
   async verifySignup(rawEmail: string, code: string, password: string): Promise<CodeResult> {
     if (passwordProblem(password)) return { ok: false, reason: 'weak-password' }
-    const hash = await hashPassword(password)
-    const account = await this.pending(rawEmail, 'verify', code, (tx, id) => tx`update kora_sync.accounts set password_hash = ${hash}, verified_at = now() where id = ${id}`)
+    // O hash (caro) só depois de o código bater: código errado não custa nada ao relay.
+    const account = await this.pending(rawEmail, 'verify', code, async (tx, id) => tx`update kora_sync.accounts set password_hash = ${await hashPassword(password)}, verified_at = now() where id = ${id}`)
     return account ? { ok: true, accountId: account } : { ok: false, reason: 'invalid' }
   }
 
@@ -90,8 +90,7 @@ export class Accounts {
 
   async confirmReset(rawEmail: string, code: string, password: string): Promise<CodeResult> {
     if (passwordProblem(password)) return { ok: false, reason: 'weak-password' }
-    const hash = await hashPassword(password)
-    const account = await this.pending(rawEmail, 'reset', code, (tx, id) => tx`update kora_sync.accounts set password_hash = ${hash} where id = ${id}`)
+    const account = await this.pending(rawEmail, 'reset', code, async (tx, id) => tx`update kora_sync.accounts set password_hash = ${await hashPassword(password)} where id = ${id}`)
     return account ? { ok: true, accountId: account } : { ok: false, reason: 'invalid' }
   }
 

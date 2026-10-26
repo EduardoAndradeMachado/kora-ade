@@ -44,8 +44,10 @@ function run(env: Record<string, string>): { child: ChildProcess; output: () => 
 
 describe('relay como roda no contêiner', () => {
   it('recusa subir sem a configuração completa e diz o que falta', async () => {
-    const { output, exit } = run({ ...ENV, CODE_SECRET: 'curto', HEALTH_PATH: '/health' })
+    const { TRUST_PROXY: _, ...withoutProxy } = ENV
+    const { output, exit } = run({ ...withoutProxy, CODE_SECRET: 'curto', HEALTH_PATH: '/health' })
     expect(await exit).toBe(1)
+    expect(output()).toContain('TRUST_PROXY ausente')
     expect(output()).toContain('DATABASE_URL ausente')
     expect(output()).toContain('CODE_SECRET ausente ou curto')
     expect(output()).toContain('HEALTH_PATH ausente ou previsível')
