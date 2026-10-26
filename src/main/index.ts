@@ -1,6 +1,6 @@
 import { basename, dirname, join } from 'node:path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { homedir, release } from 'node:os'
+import { homedir, hostname, release } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray } from 'electron'
 import { is } from '@electron-toolkit/utils'
@@ -32,7 +32,8 @@ import { createErrorLog, errorText } from './error-log'
 import { startUpdates, type Updates } from './updater'
 import { rememberLiveTabs, takeLiveTabs } from './resume-after-update'
 import type { UpdateStatus } from '../shared/update'
-import type { MobileStatus } from '../shared/mobile'
+import { AccountActionSchema, AdminRequestSchema, type AccountAction, type MobileStatus } from '../shared/mobile'
+import { accountClient } from './remote/account'
 import { resolveTerminalLink } from './terminal-links'
 import {
   gitBranches,
@@ -503,11 +504,13 @@ function launchTerminal(tab: TabRef, cols: number, rows: number, launch: Launch)
 const RELAY_URL = process.env['KORA_RELAY_URL'] ?? 'wss://kora-sync.eduardom.com.br'
 let keepAwake: number | null = null
 
-function setRemoteEnabled(enabled: boolean, invite?: string): MobileStatus {
+// Sistema e versão para o painel do dono do servidor (X-Kora-Client): "windows/10.0.26100 kora/0.1.34".
+const RELAY_CLIENT = `${process.platform === 'win32' ? 'windows' : process.platform}/${release()} kora/${app.getVersion()}`
+
+function setRemoteEnabled(enabled: boolean): MobileStatus {
   const server = mobileServer!
-  const code = invite?.trim() || server.pairing.remote.invite
-  if (enabled && !code) throw new Error('Informe o código de convite do ponto de encontro.')
-  server.pairing.setRemote(enabled, code)
+  if (enabled && !server.pairing.remote.email) throw new Error('Entre na sua conta do Kora para ligar o acesso fora de casa.')
+  server.pairing.setRemote(enabled)
   if (!enabled) {
     if (keepAwake !== null) powerSaveBlocker.stop(keepAwake)
     keepAwake = null
@@ -520,7 +523,18 @@ function setRemoteEnabled(enabled: boolean, invite?: string): MobileStatus {
   keepAwake ??= powerSaveBlocker.start('prevent-app-suspension')
   // Reinício do Windows Update no meio da viagem: o Kora volta sozinho quando alguém entra no Windows.
   startWithWindows(true)
-  return server.startRemote(RELAY_URL, code)
+  return server.startRemote(RELAY_URL, RELAY_CLIENT)
+}
+
+// Verificar o código e redefinir a senha já entram em seguida: quem acabou de digitar a senha não digita de novo.
+async function mobileAccount(action: AccountAction): Promise<MobileStatus> {
+  const server = mobileServer!
+  const client = accountClient(RELAY_URL, () => server.pairing.identity(), hostname(), RELAY_CLIENT)
+  await client.send(action)
+  if (action.acao === 'cadastro' || action.acao === 'esqueci') return server.status()
+  if (action.acao !== 'entrar') await client.send({ acao: 'entrar', email: action.email, senha: action.senha })
+  server.pairing.setRemote(true, action.email.trim().toLowerCase())
+  return setRemoteEnabled(true)
 }
 
 // No desenvolvimento quem abriria com o Windows seria o electron.exe solto, sem o Kora: só o instalado se registra.
@@ -914,7 +928,13 @@ function registerIpc(): void {
   ipcMain.on('terminal:kill', (_e, id: string) => terminals.kill(id))
   ipcMain.handle('mobile:status', () => mobileServer!.status())
   ipcMain.handle('mobile:enabled', (_e, enabled: unknown) => setMobileEnabled(z.boolean().parse(enabled)))
-  ipcMain.handle('mobile:remote', (_e, enabled: unknown, invite: unknown) => setRemoteEnabled(z.boolean().parse(enabled), z.string().max(200).optional().parse(invite ?? undefined)))
+  ipcMain.handle('mobile:remote', (_e, enabled: unknown) => setRemoteEnabled(z.boolean().parse(enabled)))
+  ipcMain.handle('mobile:account', (_e, action: unknown) => mobileAccount(AccountActionSchema.parse(action)))
+  ipcMain.handle('mobile:signout', async () => {
+    await mobileServer!.signOut()
+    return setRemoteEnabled(false)
+  })
+  ipcMain.handle('mobile:admin', (_e, request: unknown) => mobileServer!.adminRequest(AdminRequestSchema.parse(request)))
   ipcMain.handle('mobile:pair', () => mobileServer!.invite())
   ipcMain.handle('mobile:revoke', (_e, id: unknown) => mobileServer!.revoke(String(id)))
   ipcMain.handle('mobile:rename', (_e, id: unknown, name: unknown) => mobileServer!.rename(String(id), String(name)))

@@ -2,15 +2,15 @@ import { createServer as createHttpServer, request, type Server, type IncomingMe
 import { createPublicKey, X509Certificate } from 'node:crypto'
 import { createServer as createTcpServer, connect as tcpConnect, type Server as TcpServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
-import { spawn } from 'node:child_process'
-import { resolve } from 'node:path'
+import { duplexPair } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket, createWebSocketStream } from 'ws'
-import { createRelay } from '../relay/relay'
+import { relayHeaders } from '../relay/auth'
+import { createRelay, type DeviceRecord, type Owner, type UsageDelta } from '../relay/relay'
 import { createIdentity, type Identity } from '../src/main/remote/identity'
 import { openEnvelope, sealEnvelope } from '../src/main/remote/envelope'
 
-const TOKEN = 'token-do-relay-de-teste'
+const ACCOUNT = 'conta-de-teste'
 const closers: (() => void)[] = []
 afterEach(() => { while (closers.length) closers.pop()!() })
 
@@ -18,6 +18,17 @@ const listen = async <T extends Server | TcpServer>(server: T): Promise<number> 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   closers.push(() => server.close())
   return (server.address() as AddressInfo).port
+}
+
+// Diretório em memória no lugar do banco: o relay confere a assinatura e o certificado do mesmo jeito.
+function directory(pcs: Identity[], phones: [phone: Identity, pc: Identity][] = []): { find(fingerprint: string): Promise<DeviceRecord | null>; map: Map<string, DeviceRecord> } {
+  const map = new Map<string, DeviceRecord>()
+  for (const pc of pcs) map.set(pc.fingerprint, { accountId: ACCOUNT, kind: 'pc', pcs: [], blocked: false })
+  for (const [phone, pc] of phones) {
+    const known = map.get(phone.fingerprint)
+    map.set(phone.fingerprint, { accountId: ACCOUNT, kind: 'phone', pcs: [...(known?.pcs ?? []), pc.fingerprint], blocked: false })
+  }
+  return { map, find: async (fingerprint) => map.get(fingerprint) ?? null }
 }
 
 // Grampo entre o celular e o relay: guarda tudo o que passa pela rede, como veria quem estivesse no meio.
@@ -36,27 +47,33 @@ async function sniffer(target: number): Promise<{ port: number; seen: () => stri
 }
 
 // O PC: fica no controle do relay e, a cada celular que chega, abre o envelope e entrega o pedido ao servidor HTTP dele.
-function pc(relay: number, id: string, me: Identity, accepts: (fingerprint: string) => boolean, app: Server): { envelopes: Promise<unknown>[] } {
+function pc(relay: number, me: Identity, accepts: (fingerprint: string) => boolean, app: Server): { envelopes: Promise<unknown>[]; control: WebSocket } {
   const envelopes: Promise<unknown>[] = []
-  const control = new WebSocket(`ws://127.0.0.1:${relay}/s/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } })
+  const control = new WebSocket(`ws://127.0.0.1:${relay}/s/${me.fingerprint}`, { headers: relayHeaders(me, `/s/${me.fingerprint}`) })
   closers.push(() => control.terminate())
   control.on('message', (message) => {
-    const { sessao } = JSON.parse(String(message)) as { sessao: string }
-    const data = new WebSocket(`ws://127.0.0.1:${relay}/s/${id}/${sessao}`, { headers: { authorization: `Bearer ${TOKEN}` } })
+    const { sessao } = JSON.parse(String(message)) as { sessao?: string }
+    if (!sessao) return
+    const path = `/s/${me.fingerprint}/${sessao}`
+    const data = new WebSocket(`ws://127.0.0.1:${relay}${path}`, { headers: relayHeaders(me, path) })
     closers.push(() => data.terminate())
     const opened = openEnvelope(createWebSocketStream(data), me, accepts).then((socket) => { app.emit('connection', socket) })
     opened.catch(() => {})
     envelopes.push(opened)
   })
-  return { envelopes }
+  return { envelopes, control }
 }
 
 const waitControl = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 150))
 
-async function phoneRequest(relay: number, pcId: string, me: Identity, body: string): Promise<string> {
-  const ws = new WebSocket(`ws://127.0.0.1:${relay}/c/${pcId}`)
+function phoneSocket(relay: number, pcId: string, me: Identity): WebSocket {
+  const ws = new WebSocket(`ws://127.0.0.1:${relay}/c/${pcId}`, { headers: relayHeaders(me, `/c/${pcId}`) })
   closers.push(() => ws.terminate())
-  const socket = await sealEnvelope(createWebSocketStream(ws), me, pcId)
+  return ws
+}
+
+async function phoneRequest(relay: number, pcId: string, me: Identity, body: string): Promise<string> {
+  const socket = await sealEnvelope(createWebSocketStream(phoneSocket(relay, pcId, me)), me, pcId)
   return new Promise((resolve, reject) => {
     const req = request({ createConnection: () => socket, method: 'POST', path: '/eco', headers: { 'content-length': Buffer.byteLength(body) } }, (res: IncomingMessage) => {
       let text = ''
@@ -77,6 +94,13 @@ function echoApp(): { app: Server; requests: string[] } {
   })
   return { app, requests }
 }
+
+const upgrade = (port: number, path: string, headers: Record<string, string> = {}): Promise<number> => new Promise((resolve) => {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers })
+  ws.on('open', () => { ws.terminate(); resolve(101) })
+  ws.on('unexpected-response', (_req, res) => { resolve(res.statusCode!); ws.terminate() })
+  ws.on('error', () => {})
+})
 
 describe('identidade do aparelho', () => {
   it('gera um certificado que o OpenSSL lê, assinado pela própria chave, com o ID igual à impressão digital', () => {
@@ -99,11 +123,11 @@ describe('identidade do aparelho', () => {
 
 describe('envelope de dentro pelo relay', () => {
   it('o celular pareado fala com o PC pelo relay, e quem está no meio só vê bytes cifrados', async () => {
-    const [pcId, phoneId] = await Promise.all([createIdentity('PC'), createIdentity('Celular')])
-    const relay = await listen(createRelay({ token: TOKEN }))
+    const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
+    const relay = await listen(createRelay({ directory: directory([pcId], [[phoneId, pcId]]) }))
     const wire = await sniffer(relay)
     const { app, requests } = echoApp()
-    pc(relay, pcId.fingerprint, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
+    pc(relay, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
     await waitControl()
     expect(await phoneRequest(wire.port, pcId.fingerprint, phoneId, 'SEGREDO-DO-TERMINAL')).toBe('eco: SEGREDO-DO-TERMINAL')
     expect(requests).toEqual(['SEGREDO-DO-TERMINAL'])
@@ -112,26 +136,173 @@ describe('envelope de dentro pelo relay', () => {
     expect(wire.seen()).not.toContain('POST /eco')
   })
 
-  it('o PC recusa um celular que não foi pareado e não entrega nada ao servidor', async () => {
-    const [pcId, paired, stranger] = await Promise.all([createIdentity('PC'), createIdentity('Pareado'), createIdentity('Estranho')])
-    const relay = await listen(createRelay({ token: TOKEN }))
+  it('o PC recusa no envelope um celular que ele não pareou, mesmo que o relay o deixe passar', async () => {
+    const [pcId, paired, stranger] = [createIdentity('PC'), createIdentity('Pareado'), createIdentity('Estranho')]
+    // O relay acha que o estranho é deste PC (banco adulterado, por exemplo): a última palavra é do PC.
+    const relay = await listen(createRelay({ directory: directory([pcId], [[paired, pcId], [stranger, pcId]]) }))
     const { app, requests } = echoApp()
-    const side = pc(relay, pcId.fingerprint, pcId, (fingerprint) => fingerprint === paired.fingerprint, app)
+    const side = pc(relay, pcId, (fingerprint) => fingerprint === paired.fingerprint, app)
     await waitControl()
     await expect(phoneRequest(relay, pcId.fingerprint, stranger, 'entrar')).rejects.toThrow()
     await expect(side.envelopes[0]).rejects.toThrow('não é o do pareamento')
     expect(requests).toEqual([])
   })
 
-  it('o celular recusa um PC que não é o do QR, mesmo que o relay o entregue no lugar do verdadeiro', async () => {
-    const [real, impostor, phoneId] = await Promise.all([createIdentity('PC'), createIdentity('Impostor'), createIdentity('Celular')])
-    const relay = await listen(createRelay({ token: TOKEN }))
+  it('o celular recusa um PC que não é o do QR, mesmo que alguém no caminho o entregue no lugar do verdadeiro', async () => {
+    const [real, impostor, phoneId] = [createIdentity('PC'), createIdentity('Impostor'), createIdentity('Celular')]
+    const [phoneSide, impostorSide] = duplexPair()
+    void openEnvelope(impostorSide, impostor, () => true).catch(() => {})
+    await expect(sealEnvelope(phoneSide, phoneId, real.fingerprint)).rejects.toThrow('não é o do pareamento')
+  })
+})
+
+describe('relay: quem entra', () => {
+  it('só entra quem prova a chave de um aparelho registrado; assinatura boa de aparelho sem conta recebe 403', async () => {
+    const [pcId, unknown] = [createIdentity('PC'), createIdentity('Sem conta')]
+    const relay = await listen(createRelay({ directory: directory([pcId]) }))
+    const path = `/s/${pcId.fingerprint}`
+    expect(await upgrade(relay, path)).toBe(404)
+    expect(await upgrade(relay, path, { authorization: 'Bearer qualquer-coisa' })).toBe(404)
+    expect(await upgrade(relay, path, relayHeaders(pcId, path))).toBe(101)
+    expect(await upgrade(relay, `/s/${unknown.fingerprint}`, relayHeaders(unknown, `/s/${unknown.fingerprint}`))).toBe(403)
+  })
+
+  it('ninguém fala em nome de outro PC: a assinatura do impostor no caminho do verdadeiro é recusada', async () => {
+    const [real, impostor] = [createIdentity('PC'), createIdentity('Impostor')]
+    const relay = await listen(createRelay({ directory: directory([real, impostor]) }))
+    expect(await upgrade(relay, `/s/${real.fingerprint}`, relayHeaders(impostor, `/s/${real.fingerprint}`))).toBe(404)
+    // Certificado do verdadeiro (público, qualquer um pode copiar) com a assinatura do impostor também não passa.
+    const forged: Record<string, string> = { ...relayHeaders(impostor, `/s/${real.fingerprint}`), 'x-kora-certificate': relayHeaders(real, '/')['x-kora-certificate']! }
+    forged.authorization = forged.authorization!.replace(impostor.fingerprint, real.fingerprint)
+    expect(await upgrade(relay, `/s/${real.fingerprint}`, forged)).toBe(404)
+    // Nem o certificado e a assinatura do próprio impostor, declarando a impressão digital do verdadeiro.
+    const claimed = relayHeaders(impostor, `/s/${real.fingerprint}`)
+    claimed.authorization = claimed.authorization!.replace(impostor.fingerprint, real.fingerprint)
+    expect(await upgrade(relay, `/s/${real.fingerprint}`, claimed)).toBe(404)
+  })
+
+  it('a assinatura vale só para o caminho assinado e por 2 minutos', async () => {
+    const pcId = createIdentity('PC')
+    const relay = await listen(createRelay({ directory: directory([pcId]) }))
+    const path = `/s/${pcId.fingerprint}`
+    expect(await upgrade(relay, path, relayHeaders(pcId, `${path}/${'a'.repeat(32)}`))).toBe(404)
+    expect(await upgrade(relay, path, relayHeaders(pcId, path, Date.now() - 3 * 60_000))).toBe(404)
+    expect(await upgrade(relay, path, relayHeaders(pcId, path, Date.now() - 60_000))).toBe(101)
+  })
+
+  it('celular só chega ao PC que o registrou; celular de outro PC recebe 403', async () => {
+    const [pcA, pcB, phoneB] = [createIdentity('PC A'), createIdentity('PC B'), createIdentity('Celular de B')]
+    const relay = await listen(createRelay({ directory: directory([pcA, pcB], [[phoneB, pcB]]) }))
     const { app, requests } = echoApp()
-    // O impostor tem o token do relay e se registra com o ID do PC verdadeiro, aceitando qualquer celular.
-    pc(relay, real.fingerprint, impostor, () => true, app)
+    pc(relay, pcA, () => true, app)
     await waitControl()
-    await expect(phoneRequest(relay, real.fingerprint, phoneId, 'segredo')).rejects.toThrow('não é o do pareamento')
+    expect(await upgrade(relay, `/c/${pcA.fingerprint}`, relayHeaders(phoneB, `/c/${pcA.fingerprint}`))).toBe(403)
+    // Um PC também não entra como celular.
+    expect(await upgrade(relay, `/c/${pcA.fingerprint}`, relayHeaders(pcB, `/c/${pcA.fingerprint}`))).toBe(403)
     expect(requests).toEqual([])
+  })
+
+  it('o mesmo celular pareado com dois PCs chega aos dois', async () => {
+    const [home, work, phoneId] = [createIdentity('PC de casa'), createIdentity('PC do trabalho'), createIdentity('Celular')]
+    const relay = await listen(createRelay({ directory: directory([home, work], [[phoneId, home], [phoneId, work]]) }))
+    pc(relay, home, (fingerprint) => fingerprint === phoneId.fingerprint, echoApp().app)
+    pc(relay, work, (fingerprint) => fingerprint === phoneId.fingerprint, echoApp().app)
+    await waitControl()
+    expect(await phoneRequest(relay, home.fingerprint, phoneId, 'casa')).toBe('eco: casa')
+    expect(await phoneRequest(relay, work.fingerprint, phoneId, 'trabalho')).toBe('eco: trabalho')
+  })
+
+  it('celular que o PC ainda não informou só entra pela janela de pareamento (admit)', async () => {
+    const [pcId, newcomer] = [createIdentity('PC'), createIdentity('Celular novo')]
+    const dir = directory([pcId])
+    let open = false
+    const relay = await listen(createRelay({
+      directory: { find: dir.find, admit: async (phone, pc) => (open && pc === pcId.fingerprint ? { accountId: ACCOUNT, kind: 'phone', pcs: [pc], blocked: false } : null) }
+    }))
+    pc(relay, pcId, () => true, echoApp().app)
+    await waitControl()
+    expect(await upgrade(relay, `/c/${pcId.fingerprint}`, relayHeaders(newcomer, `/c/${pcId.fingerprint}`))).toBe(403)
+    open = true
+    expect(await phoneRequest(relay, pcId.fingerprint, newcomer, 'parear')).toBe('eco: parear')
+  })
+
+  it('conta bloqueada: as conexões abertas caem na hora e as novas recebem 403', async () => {
+    const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
+    const dir = directory([pcId], [[phoneId, pcId]])
+    const server = createRelay({ directory: dir })
+    const relay = await listen(server)
+    const side = pc(relay, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, echoApp().app)
+    await waitControl()
+    const closed = new Promise((resolve) => side.control.on('close', resolve))
+    for (const record of dir.map.values()) record.blocked = true
+    server.dropAccount(ACCOUNT)
+    await closed
+    expect(await upgrade(relay, `/s/${pcId.fingerprint}`, relayHeaders(pcId, `/s/${pcId.fingerprint}`))).toBe(403)
+  })
+
+  it('banco fora do ar não derruba o relay: a conexão recebe 503 e ninguém é bloqueado', async () => {
+    const pcId = createIdentity('PC')
+    const relay = await listen(createRelay({ directory: { find: async () => { throw new Error('banco fora do ar') } }, maxFailures: 2, banMs: 60_000 }))
+    for (let i = 0; i < 4; i++) expect(await upgrade(relay, `/s/${pcId.fingerprint}`, relayHeaders(pcId, `/s/${pcId.fingerprint}`))).toBe(503)
+  })
+})
+
+describe('relay: o que ele mede e responde', () => {
+  it('conta bytes e sessões por aparelho, nos dois sentidos, e anota IP e versão de quem chegou', async () => {
+    const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
+    const usage = new Map<string, Required<UsageDelta>>()
+    const seen: [string, { ip: string; client: string }][] = []
+    const add = (fingerprint: string, delta: UsageDelta): void => {
+      const total = usage.get(fingerprint) ?? { bytesIn: 0, bytesOut: 0, sessions: 0, seconds: 0 }
+      for (const key of Object.keys(total) as (keyof UsageDelta)[]) total[key] += delta[key] ?? 0
+      usage.set(fingerprint, total)
+    }
+    const relay = await listen(createRelay({ directory: directory([pcId], [[phoneId, pcId]]), usage: add, seen: (fingerprint, info) => { seen.push([fingerprint, info]) } }))
+    const app = createHttpServer((req, res) => {
+      req.resume()
+      req.on('end', () => res.end(Buffer.alloc(200_000, 1)))
+    })
+    pc(relay, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
+    await waitControl()
+    const ws = new WebSocket(`ws://127.0.0.1:${relay}/c/${pcId.fingerprint}`, { headers: { ...relayHeaders(phoneId, `/c/${pcId.fingerprint}`), 'x-kora-client': 'android/14 kora-android/0.5.0' } })
+    closers.push(() => ws.terminate())
+    const socket = await sealEnvelope(createWebSocketStream(ws), phoneId, pcId.fingerprint)
+    await new Promise<void>((resolve, reject) => {
+      request({ createConnection: () => socket, method: 'POST', path: '/', headers: { 'content-length': 50_000 } }, (res) => { res.resume(); res.on('end', resolve) }).on('error', reject).end(Buffer.alloc(50_000))
+    })
+    const phone = usage.get(phoneId.fingerprint)!
+    const computer = usage.get(pcId.fingerprint)!
+    expect(phone.sessions).toBe(1)
+    expect(computer.sessions).toBe(1)
+    expect(phone.bytesOut).toBeGreaterThan(50_000)
+    expect(phone.bytesIn).toBeGreaterThan(200_000)
+    // O que sai de um lado entra no outro: o relay não inventa nem perde bytes na conta.
+    expect(computer.bytesIn).toBe(phone.bytesOut)
+    expect(computer.bytesOut).toBe(phone.bytesIn)
+    expect(seen).toContainEqual([phoneId.fingerprint, { ip: '127.0.0.1', client: 'android/14 kora-android/0.5.0' }])
+  })
+
+  it('o PC faz pedidos pela conexão de controle e recebe a resposta com o mesmo id; o relay sabe quem pediu', async () => {
+    const pcId = createIdentity('PC')
+    const asked: [Owner, unknown][] = []
+    const relay = await listen(createRelay({
+      directory: directory([pcId]),
+      request: async (owner, body) => {
+        asked.push([owner, body])
+        if ((body as { op?: string }).op === 'falha') throw new Error('não deu')
+        return { recebido: true }
+      }
+    }))
+    const side = pc(relay, pcId, () => true, echoApp().app)
+    await new Promise((resolve) => side.control.on('open', resolve))
+    const replies: unknown[] = []
+    side.control.on('message', (message) => { replies.push(JSON.parse(String(message))) })
+    side.control.send(JSON.stringify({ id: 7, op: 'celulares', lista: [] }))
+    side.control.send(JSON.stringify({ id: 8, op: 'falha' }))
+    await expect.poll(() => replies.length).toBe(2)
+    expect(replies).toContainEqual({ id: 7, ok: true, result: { recebido: true } })
+    expect(replies).toContainEqual({ id: 8, ok: false, error: 'não deu' })
+    expect(asked[0]).toEqual([{ fingerprint: pcId.fingerprint, accountId: ACCOUNT }, { op: 'celulares', lista: [] }])
   })
 })
 
@@ -143,21 +314,12 @@ describe('relay discreto', () => {
       res.on('end', () => resolve({ code: res.statusCode!, body, headers: res.headers }))
     }).on('error', reject).end()
   })
-  const upgrade = (port: number, path: string, headers: Record<string, string> = {}): Promise<number> => new Promise((resolve) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers })
-    ws.on('open', () => { ws.terminate(); resolve(101) })
-    ws.on('unexpected-response', (_req, res) => { resolve(res.statusCode!); ws.terminate() })
-    ws.on('error', () => {})
-  })
 
-  it('responde 404 vazio a quem vasculha e só abre o caminho certo, com o token certo', async () => {
-    const pcId = await createIdentity('PC')
-    const relay = await listen(createRelay({ token: TOKEN, healthPath: '/saude-a8f3' }))
-    for (const path of ['/', '/health', '/c', '/s/123']) expect(await status(relay, path)).toMatchObject({ code: 404, body: '' })
-    expect(await upgrade(relay, `/s/${pcId.fingerprint}`)).toBe(404)
-    expect(await upgrade(relay, `/s/${pcId.fingerprint}`, { authorization: 'Bearer outro-token' })).toBe(404)
+  it('responde 404 vazio a quem vasculha, e o health só no caminho secreto', async () => {
+    const pcId = createIdentity('PC')
+    const relay = await listen(createRelay({ directory: directory([pcId]), healthPath: '/saude-a8f3' }))
+    for (const path of ['/', '/health', '/c', '/s/123', '/a/login']) expect(await status(relay, path)).toMatchObject({ code: 404, body: '' })
     expect(await upgrade(relay, `/c/${pcId.fingerprint}`)).toBe(404)
-    expect(await upgrade(relay, `/s/${pcId.fingerprint}`, { authorization: `Bearer ${TOKEN}` })).toBe(101)
     const health = await status(relay, '/saude-a8f3')
     expect(health.code).toBe(200)
     expect(health.headers['cache-control']).toBe('no-store')
@@ -167,97 +329,58 @@ describe('relay discreto', () => {
 })
 
 describe('relay contra abuso', () => {
-  const upgrade = (port: number, path: string, headers: Record<string, string> = {}): Promise<number> => new Promise((resolve) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers })
-    ws.on('open', () => { ws.terminate(); resolve(101) })
-    ws.on('unexpected-response', (_req, res) => { resolve(res.statusCode!); ws.terminate() })
-    ws.on('error', () => {})
-  })
-  const auth = { authorization: `Bearer ${TOKEN}` }
-
-  it('bloqueia por um tempo quem erra demais, inclusive com o token certo depois', async () => {
+  it('bloqueia por um tempo quem erra demais, inclusive com a assinatura certa depois', async () => {
     const pcId = createIdentity('PC')
-    const relay = await listen(createRelay({ token: TOKEN, maxFailures: 3, banMs: 400 }))
-    for (let i = 0; i < 3; i++) expect(await upgrade(relay, `/s/${pcId.fingerprint}`, { authorization: 'Bearer chute' })).toBe(404)
-    expect(await upgrade(relay, `/s/${pcId.fingerprint}`, auth)).toBe(404)
+    const relay = await listen(createRelay({ directory: directory([pcId]), maxFailures: 3, banMs: 400 }))
+    const path = `/s/${pcId.fingerprint}`
+    for (let i = 0; i < 3; i++) expect(await upgrade(relay, path, { authorization: 'Kora chute' })).toBe(404)
+    expect(await upgrade(relay, path, relayHeaders(pcId, path))).toBe(404)
     await new Promise((resolve) => setTimeout(resolve, 450))
-    expect(await upgrade(relay, `/s/${pcId.fingerprint}`, auth)).toBe(101)
+    expect(await upgrade(relay, path, relayHeaders(pcId, path))).toBe(101)
   })
 
   it('celular procurando um PC desligado não é bloqueado, e entra quando o PC volta', async () => {
     const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
-    const relay = await listen(createRelay({ token: TOKEN, maxFailures: 3, banMs: 60_000 }))
-    for (let i = 0; i < 6; i++) expect(await upgrade(relay, `/c/${pcId.fingerprint}`)).toBe(404)
+    const relay = await listen(createRelay({ directory: directory([pcId], [[phoneId, pcId]]), maxFailures: 3, banMs: 60_000 }))
+    for (let i = 0; i < 6; i++) expect(await upgrade(relay, `/c/${pcId.fingerprint}`, relayHeaders(phoneId, `/c/${pcId.fingerprint}`))).toBe(404)
     const { app } = echoApp()
-    pc(relay, pcId.fingerprint, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
+    pc(relay, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
     await waitControl()
     expect(await phoneRequest(relay, pcId.fingerprint, phoneId, 'voltei')).toBe('eco: voltei')
   })
 
+  it('aparelho sem conta insistindo não é bloqueado pelo IP: recebe 403 e quem divide a rede com ele segue entrando', async () => {
+    const [pcId, removed] = [createIdentity('PC'), createIdentity('Removido')]
+    const relay = await listen(createRelay({ directory: directory([pcId]), maxFailures: 3, banMs: 60_000 }))
+    for (let i = 0; i < 6; i++) expect(await upgrade(relay, `/s/${removed.fingerprint}`, relayHeaders(removed, `/s/${removed.fingerprint}`))).toBe(403)
+    expect(await upgrade(relay, `/s/${pcId.fingerprint}`, relayHeaders(pcId, `/s/${pcId.fingerprint}`))).toBe(101)
+  })
+
   it('atrás do proxy, bloqueia o IP de quem pediu e não o do proxy; sem proxy, ignora o cabeçalho', async () => {
     const pcId = createIdentity('PC')
-    const behind = await listen(createRelay({ token: TOKEN, trustProxy: true, maxFailures: 2, banMs: 60_000 }))
+    const path = `/s/${pcId.fingerprint}`
+    const behind = await listen(createRelay({ directory: directory([pcId]), trustProxy: true, maxFailures: 2, banMs: 60_000 }))
     const attacker = { 'x-forwarded-for': '203.0.113.9' }
     for (let i = 0; i < 2; i++) expect(await upgrade(behind, '/inventado', attacker)).toBe(404)
-    expect(await upgrade(behind, `/s/${pcId.fingerprint}`, { ...auth, ...attacker })).toBe(404)
+    expect(await upgrade(behind, path, { ...relayHeaders(pcId, path), ...attacker })).toBe(404)
     // O PC legítimo chega pelo mesmo proxy, com outro IP: segue entrando.
-    expect(await upgrade(behind, `/s/${pcId.fingerprint}`, { ...auth, 'x-forwarded-for': '198.51.100.4' })).toBe(101)
+    expect(await upgrade(behind, path, { ...relayHeaders(pcId, path), 'x-forwarded-for': '198.51.100.4' })).toBe(101)
     // Quem forja o começo da lista não escapa: vale o último IP, o que o proxy acrescentou.
-    expect(await upgrade(behind, `/s/${pcId.fingerprint}`, { ...auth, 'x-forwarded-for': '198.51.100.4, 203.0.113.9' })).toBe(404)
-    const direct = await listen(createRelay({ token: TOKEN, maxFailures: 2, banMs: 60_000 }))
+    expect(await upgrade(behind, path, { ...relayHeaders(pcId, path), 'x-forwarded-for': '198.51.100.4, 203.0.113.9' })).toBe(404)
+    const direct = await listen(createRelay({ directory: directory([pcId]), maxFailures: 2, banMs: 60_000 }))
     for (let i = 0; i < 2; i++) expect(await upgrade(direct, '/inventado', { 'x-forwarded-for': '203.0.113.50' })).toBe(404)
-    expect(await upgrade(direct, `/s/${pcId.fingerprint}`, { ...auth, 'x-forwarded-for': '198.51.100.77' })).toBe(404)
-  })
-})
-
-describe('relay como roda no contêiner', () => {
-  const run = (env: Record<string, string>): ReturnType<typeof spawn> => {
-    const child = spawn(process.execPath, ['main.ts'], { cwd: resolve('relay'), env: { ...process.env, ...env } })
-    closers.push(() => child.kill())
-    return child
-  }
-  const output = (child: ReturnType<typeof spawn>): Promise<{ code: number | null; text: string }> => new Promise((done) => {
-    let text = ''
-    child.stdout!.on('data', (chunk) => { text += chunk })
-    child.stderr!.on('data', (chunk) => { text += chunk })
-    child.on('exit', (code) => done({ code, text }))
-  })
-
-  it('recusa subir sem token forte ou com health previsível', async () => {
-    expect(await output(run({ RELAY_TOKEN: 'curto', HEALTH_PATH: '/saude-a8f3k2p9' }))).toMatchObject({ code: 1, text: expect.stringContaining('RELAY_TOKEN') })
-    expect(await output(run({ RELAY_TOKEN: 'x'.repeat(40), HEALTH_PATH: '/health' }))).toMatchObject({ code: 1, text: expect.stringContaining('HEALTH_PATH') })
-  })
-
-  it('sobe com a configuração do EasyPanel e responde o health no caminho secreto', async () => {
-    const child = run({ RELAY_TOKEN: 'x'.repeat(40), HEALTH_PATH: '/saude-a8f3k2p9', PORT: '0', TRUST_PROXY: '1' })
-    const port = await new Promise<number>((done, fail) => {
-      child.stdout!.on('data', (chunk) => { const match = /porta (\d+)/.exec(String(chunk)); if (match) done(Number(match[1])) })
-      child.on('exit', (code) => fail(new Error(`saiu com ${code}`)))
-    })
-    const health = await fetch(`http://127.0.0.1:${port}/saude-a8f3k2p9`)
-    expect(health.status).toBe(200)
-    expect((await health.json()).started_at).toEqual(expect.any(String))
-    expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(404)
+    expect(await upgrade(direct, path, { ...relayHeaders(pcId, path), 'x-forwarded-for': '198.51.100.77' })).toBe(404)
   })
 })
 
 describe('relay com tráfego pesado e conexões ruins', () => {
-  const upgrade = (port: number, path: string, headers: Record<string, string> = {}): Promise<number> => new Promise((resolve) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers })
-    ws.on('open', () => { ws.terminate(); resolve(101) })
-    ws.on('unexpected-response', (_req, res) => { resolve(res.statusCode!); ws.terminate() })
-    ws.on('error', () => {})
-  })
-
   it('uma resposta de vários MB passa inteira, como um arquivo grande da tela', async () => {
     const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
-    const relay = await listen(createRelay({ token: TOKEN }))
+    const relay = await listen(createRelay({ directory: directory([pcId], [[phoneId, pcId]]) }))
     const app = createHttpServer((_req, res) => res.end(Buffer.alloc(3 * 1024 * 1024, 7)))
-    pc(relay, pcId.fingerprint, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
+    pc(relay, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
     await waitControl()
-    const ws = new WebSocket(`ws://127.0.0.1:${relay}/c/${pcId.fingerprint}`)
-    closers.push(() => ws.terminate())
-    const socket = await sealEnvelope(createWebSocketStream(ws), phoneId, pcId.fingerprint)
+    const socket = await sealEnvelope(createWebSocketStream(phoneSocket(relay, pcId.fingerprint, phoneId)), phoneId, pcId.fingerprint)
     const size = await new Promise<number>((resolve, reject) => {
       request({ createConnection: () => socket, path: '/' }, (res) => {
         let total = 0
@@ -270,12 +393,11 @@ describe('relay com tráfego pesado e conexões ruins', () => {
 
   it('um quadro acima do limite derruba só aquela conexão, e o relay segue atendendo os outros', async () => {
     const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
-    const relay = await listen(createRelay({ token: TOKEN, maxMessageBytes: 64 * 1024 }))
+    const relay = await listen(createRelay({ directory: directory([pcId], [[phoneId, pcId]]), maxMessageBytes: 64 * 1024 }))
     const { app } = echoApp()
-    pc(relay, pcId.fingerprint, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
+    pc(relay, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
     await waitControl()
-    const abusive = new WebSocket(`ws://127.0.0.1:${relay}/c/${pcId.fingerprint}`)
-    closers.push(() => abusive.terminate())
+    const abusive = phoneSocket(relay, pcId.fingerprint, phoneId)
     abusive.on('error', () => {})
     await new Promise((resolve) => abusive.on('open', resolve))
     const closed = new Promise((resolve) => abusive.on('close', resolve))
@@ -286,17 +408,19 @@ describe('relay com tráfego pesado e conexões ruins', () => {
 
   it('o PC atrasado para uma sessão que já expirou não é bloqueado, mesmo muitas vezes', async () => {
     const pcId = createIdentity('PC')
-    const relay = await listen(createRelay({ token: TOKEN, maxFailures: 3, banMs: 60_000 }))
-    const auth = { authorization: `Bearer ${TOKEN}` }
-    for (let i = 0; i < 6; i++) expect(await upgrade(relay, `/s/${pcId.fingerprint}/${'0'.repeat(31)}${i}`, auth)).toBe(404)
-    expect(await upgrade(relay, `/s/${pcId.fingerprint}`, auth)).toBe(101)
+    const relay = await listen(createRelay({ directory: directory([pcId]), maxFailures: 3, banMs: 60_000 }))
+    for (let i = 0; i < 6; i++) {
+      const path = `/s/${pcId.fingerprint}/${'0'.repeat(31)}${i}`
+      expect(await upgrade(relay, path, relayHeaders(pcId, path))).toBe(404)
+    }
+    expect(await upgrade(relay, `/s/${pcId.fingerprint}`, relayHeaders(pcId, `/s/${pcId.fingerprint}`))).toBe(101)
   })
 })
 
 describe('relay com quem não lê', () => {
   it('o destino que para de ler derruba a sessão em vez de acumular memória na VPS', async () => {
     const [pcId, phoneId] = [createIdentity('PC'), createIdentity('Celular')]
-    const relay = await listen(createRelay({ token: TOKEN, maxBufferedBytes: 256 * 1024 }))
+    const relay = await listen(createRelay({ directory: directory([pcId], [[phoneId, pcId]]), maxBufferedBytes: 256 * 1024 }))
     // O PC manda uma resposta enorme no ritmo que o relay aceita; o celular nunca lê o que chega.
     // Os buffers do kernel no loopback engolem dezenas de MB, então o fluxo precisa ser bem maior que eles.
     const TOTAL = 256 * 1024 * 1024
@@ -314,11 +438,10 @@ describe('relay com quem não lê', () => {
         res.on('close', () => resolve(res.writableFinished ? 'completa' : 'cortada'))
         pump()
       })
-      pc(relay, pcId.fingerprint, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
+      pc(relay, pcId, (fingerprint) => fingerprint === phoneId.fingerprint, app)
     })
     await waitControl()
-    const ws = new WebSocket(`ws://127.0.0.1:${relay}/c/${pcId.fingerprint}`)
-    closers.push(() => ws.terminate())
+    const ws = phoneSocket(relay, pcId.fingerprint, phoneId)
     const socket = await sealEnvelope(createWebSocketStream(ws), phoneId, pcId.fingerprint)
     ;(ws as unknown as { _socket: { pause(): void } })._socket.pause()
     request({ createConnection: () => socket, path: '/' }, () => {}).on('error', () => {}).end()

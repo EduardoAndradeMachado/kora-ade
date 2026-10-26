@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import type { TLSSocket } from 'node:tls'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket, createWebSocketStream } from 'ws'
-import { createRelay } from '../relay/relay'
+import { relayHeaders } from '../relay/auth'
+import { createRelay, type DeviceRecord } from '../relay/relay'
 import { createIdentity, type Identity } from '../src/main/remote/identity'
 import { sealEnvelope } from '../src/main/remote/envelope'
 import { MobileServer } from '../src/main/mobile-server'
@@ -14,7 +15,7 @@ import { MobileRuntime } from '../src/main/mobile-runtime'
 import { Terminals } from '../src/main/terminals'
 import { emptyState, type KoraState } from '../src/shared/state'
 
-const TOKEN = 'convite-do-relay-de-teste-integrado'
+const CLIENT = 'windows/10.0.26100 kora/0.0.0'
 const closers: (() => unknown)[] = []
 afterEach(async () => { while (closers.length) await closers.pop()!() })
 
@@ -28,7 +29,26 @@ async function setup(): Promise<{ server: MobileServer; relay: string; lan: stri
   const server = new MobileServer({ configFile: join(dir, 'mobile.json'), rendererDir: dir, runtime, changed: () => {}, port: 0 })
   closers.push(() => server.stop())
   closers.push(() => server.stopRemote())
-  const relayServer: Server = createRelay({ token: TOKEN })
+  // Relay que guarda em memória o que o PC informa pelo pedido "sincronizar", como o serviço de verdade faz no banco:
+  // se o MobileServer deixar de informar um celular ou a janela do QR, o celular não entra.
+  const phones = new Map<string, string[]>()
+  let pairingUntil = 0
+  const pcFingerprint = (): string => server.pairing.identity().fingerprint
+  const record = (kind: 'pc' | 'phone', pcs: string[]): DeviceRecord => ({ accountId: 'conta', kind, pcs, blocked: false })
+  const relayServer: Server = createRelay({
+    directory: {
+      find: async (fingerprint) => (fingerprint === pcFingerprint() ? record('pc', []) : phones.has(fingerprint) ? record('phone', phones.get(fingerprint)!) : null),
+      admit: async (phone, pc) => (pairingUntil > Date.now() && pc === pcFingerprint() ? (phones.set(phone, [pc]), record('phone', [pc])) : null)
+    },
+    request: async (_owner, body) => {
+      const message = body as { op: string; celulares: { fingerprint: string }[]; pareamentoAte: number | null }
+      if (message.op !== 'sincronizar') throw new Error('Pedido desconhecido.')
+      phones.clear()
+      for (const phone of message.celulares) phones.set(phone.fingerprint, [pcFingerprint()])
+      pairingUntil = message.pareamentoAte ?? 0
+      return { ok: true }
+    }
+  })
   await new Promise<void>((resolve) => relayServer.listen(0, '127.0.0.1', resolve))
   closers.push(() => new Promise((resolve) => relayServer.close(resolve)))
   await server.start()
@@ -45,7 +65,7 @@ const until = async (check: () => boolean, ms = 5_000): Promise<void> => {
 }
 
 async function envelope(relay: string, pc: string, phone: Identity): Promise<TLSSocket> {
-  const ws = new WebSocket(`${relay}/c/${pc}`)
+  const ws = new WebSocket(`${relay}/c/${pc}`, { headers: relayHeaders(phone, `/c/${pc}`) })
   closers.push(() => ws.terminate())
   return sealEnvelope(createWebSocketStream(ws), phone, pc)
 }
@@ -76,7 +96,7 @@ describe('Fora de casa no servidor do celular', () => {
     const { server, relay, lan, pc } = await setup()
     const phone = createIdentity('Celular')
     const device = await pairAtHome(server, lan, phone)
-    server.startRemote(relay, TOKEN)
+    server.startRemote(relay, CLIENT)
     await until(() => server.status().remote?.state === 'conectado')
     const state = await ask(await envelope(relay, pc, phone), '/api/state')
     expect(state.status).toBe(200)
@@ -85,11 +105,13 @@ describe('Fora de casa no servidor do celular', () => {
 
   it('celular estranho não passa do aperto de mãos; com o QR valendo, pareia pelo próprio relay', async () => {
     const { server, relay, pc } = await setup()
-    server.startRemote(relay, TOKEN)
+    server.startRemote(relay, CLIENT)
     await until(() => server.status().remote?.state === 'conectado')
     const phone = createIdentity('Celular na rua')
     await expect(envelope(relay, pc, phone).then((socket) => ask(socket, '/api/state'))).rejects.toThrow()
-    const { code } = server.pairing.invite()
+    // O QR da tela, como o Kora gera: é ele que avisa o relay de que um celular novo pode chegar.
+    const code = new URL((await server.invite()).url).hash.replace('#pair=', '')
+    await new Promise((resolve) => setTimeout(resolve, 100))
     const before = await ask(await envelope(relay, pc, phone), '/api/state')
     expect(before.status).toBe(401)
     expect((await ask(await envelope(relay, pc, phone), '/api/pair', { code, name: 'Celular na rua' })).status).toBe(200)
@@ -104,7 +126,7 @@ describe('Fora de casa no servidor do celular', () => {
     const { server, relay, lan, pc } = await setup()
     const phone = createIdentity('Celular')
     const device = await pairAtHome(server, lan, phone)
-    server.startRemote(relay, TOKEN)
+    server.startRemote(relay, CLIENT)
     await until(() => server.status().remote?.state === 'conectado')
     await server.stop()
     expect(server.status().enabled).toBe(false)
@@ -123,7 +145,7 @@ describe('Fora de casa no servidor do celular', () => {
     const { server, relay, lan, pc } = await setup()
     const phone = createIdentity('Celular')
     await pairAtHome(server, lan, phone)
-    server.startRemote(relay, TOKEN)
+    server.startRemote(relay, CLIENT)
     await until(() => server.status().remote?.state === 'conectado')
     expect(server.stopRemote().remote).toBeNull()
     await expect(envelope(relay, pc, phone)).rejects.toThrow()
@@ -148,7 +170,7 @@ describe('QR do pareamento', () => {
     expect(home.searchParams.get('relay')).toBeNull()
     // O app atual só lê host, porta e #pair=: continua igual.
     expect(home.hash).toMatch(/^#pair=[\w-]+$/)
-    server.startRemote(relay, TOKEN)
+    server.startRemote(relay, CLIENT)
     const both = new URL((await server.invite()).url)
     expect(both.searchParams.get('relay')).toBe(new URL(relay).host)
     await server.stop()
@@ -164,7 +186,7 @@ describe('QR do pareamento', () => {
 describe('celular que já estava pareado', () => {
   it('registra o certificado pelo pareamento de casa e passa a entrar pelo relay, sem ler outro QR', async () => {
     const { server, relay, lan, pc } = await setup()
-    server.startRemote(relay, TOKEN)
+    server.startRemote(relay, CLIENT)
     const health = await (await fetch(`${lan}/health`)).json() as Record<string, unknown>
     expect(health['pc']).toBe(pc)
     expect(health['relay']).toBe(new URL(relay).host)
@@ -186,7 +208,7 @@ describe('celular que já estava pareado', () => {
 describe('o que só o celular dono do pareamento pode fazer', () => {
   it('pelo cookie da rede local, o certificado entra uma vez e não é trocado por outro', async () => {
     const { server, relay, lan, pc } = await setup()
-    server.startRemote(relay, TOKEN)
+    server.startRemote(relay, CLIENT)
     const { code } = server.pairing.invite()
     const paired = await fetch(`${lan}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, name: 'Celular' }) })
     const cookie = paired.headers.get('set-cookie')!.split(';')[0]!
@@ -204,7 +226,7 @@ describe('o que só o celular dono do pareamento pode fazer', () => {
     const { server, relay, lan, pc } = await setup()
     const phone = createIdentity('Celular')
     await pairAtHome(server, lan, phone)
-    server.startRemote(relay, TOKEN)
+    server.startRemote(relay, CLIENT)
     await until(() => server.status().remote?.state === 'conectado')
     const socket = await envelope(relay, pc, phone)
     const left = await new Promise<number>((resolve, reject) => {

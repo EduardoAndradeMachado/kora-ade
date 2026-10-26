@@ -35,13 +35,12 @@ const MIGRATIONS: string[] = [
     primary key (account_id, kind)
   );
 
-  -- PCs e celulares, pela impressão digital do certificado. O celular é registrado pelo PC com que foi pareado.
+  -- PCs e celulares, pela impressão digital (SHA-256) do certificado. Cada conexão traz o certificado e a assinatura,
+  -- então basta a impressão digital para saber de quem é. O celular fica na conta do PC que o registrou por último.
   create table kora_sync.devices (
     fingerprint text primary key,
     account_id uuid not null references kora_sync.accounts on delete cascade,
     kind text not null check (kind in ('pc', 'phone')),
-    certificate text not null,
-    pc_fingerprint text references kora_sync.devices on delete cascade,
     name text,
     platform text,
     os_version text,
@@ -55,6 +54,14 @@ const MIGRATIONS: string[] = [
     connected_seconds bigint not null default 0
   );
   create index devices_account on kora_sync.devices (account_id);
+
+  -- Quais PCs cada celular pode procurar: o mesmo celular pareado com o PC de casa e o do trabalho fica nos dois.
+  create table kora_sync.phone_pcs (
+    phone text not null references kora_sync.devices on delete cascade,
+    pc text not null references kora_sync.devices on delete cascade,
+    primary key (phone, pc)
+  );
+  create index phone_pcs_pc on kora_sync.phone_pcs (pc);
 
   -- Consumo por dia e aparelho; depois de 90 dias some, e fica só o total acumulado em devices.
   create table kora_sync.usage_daily (

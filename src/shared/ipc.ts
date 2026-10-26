@@ -5,7 +5,7 @@ import type { AgentUsage } from './usage-types'
 import type { ClaudeAccountsView } from './claude-accounts'
 import type { DayPoint, SessionMetrics } from './metrics'
 import type { UpdateStatus } from './update'
-import type { DesktopSessionState, MobilePairing, MobileStatus, TerminalSizeEvent, TerminalSnapshot } from './mobile'
+import type { AccountAction, AdminRequest, DesktopSessionState, MobilePairing, MobileStatus, TerminalSizeEvent, TerminalSnapshot } from './mobile'
 
 export interface FileEntry {
   name: string
@@ -222,8 +222,13 @@ export interface KoraApi {
   onMobileState(listener: (snapshot: DesktopSessionState) => void): () => void
   mobileStatus(): Promise<MobileStatus>
   setMobileEnabled(enabled: boolean): Promise<MobileStatus>
-  // Fora de casa; o convite só precisa vir na primeira vez (fica guardado no PC).
-  setMobileRemote(enabled: boolean, invite?: string): Promise<MobileStatus>
+  // Fora de casa: liga e desliga depois de entrar na conta.
+  setMobileRemote(enabled: boolean): Promise<MobileStatus>
+  // Conta do Fora de casa. Verificar o código e redefinir a senha já entram na conta e ligam o Fora de casa.
+  mobileAccount(action: AccountAction): Promise<MobileStatus>
+  signOutMobile(): Promise<MobileStatus>
+  // Painel do dono do servidor; o relay confere a conta a cada pedido.
+  mobileAdmin(request: AdminRequest): Promise<unknown>
   onMobileStatus(listener: (status: MobileStatus) => void): () => void
   pairMobile(): Promise<MobilePairing>
   revokeMobile(id: string): Promise<MobileStatus>

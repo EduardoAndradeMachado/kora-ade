@@ -10,13 +10,14 @@ const DeviceSchema = z.object({ id: z.string(), name: z.string(), pairedAt: z.st
 // serverId: identidade desta instalação do Kora (o instalado e o Dev têm pastas de dados diferentes). O celular
 // guarda um pareamento por id, e os dois Kora do mesmo PC convivem pareados no mesmo celular.
 // identity: a chave e o certificado deste Kora no envelope do relay; criados uma vez e guardados, para o ID não mudar.
-// remote: "Fora de casa" ligado e o código de convite do relay (o token que o relay pede ao PC).
+// remote: "Fora de casa" ligado e o e-mail da conta em que este PC entrou (o que prova o PC ao relay é a chave dele;
+// o e-mail é só para a tela). Configuração antiga, do código de convite, volta desligada e sem conta.
 const ConfigSchema = z.object({
   enabled: z.boolean(),
   devices: z.array(DeviceSchema).max(20),
   serverId: z.string().regex(/^[\w-]{8,32}$/).optional(),
   identity: z.object({ key: z.string(), cert: z.string() }).optional(),
-  remote: z.object({ enabled: z.boolean(), invite: z.string() }).optional()
+  remote: z.object({ enabled: z.boolean(), email: z.string().optional() }).optional()
 })
 const digest = (value: string): string => createHash('sha256').update(value).digest('hex')
 const equal = (a: string, b: string): boolean => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b))
@@ -45,15 +46,25 @@ export class MobilePairingStore {
     return { ...this.config.identity, fingerprint: fingerprintOf(this.config.identity.cert) }
   }
 
-  get remote(): { enabled: boolean; invite: string } { return this.config.remote ?? { enabled: false, invite: '' } }
+  get remote(): { enabled: boolean; email: string | null } {
+    const email = this.config.remote?.email ?? null
+    return { enabled: email !== null && (this.config.remote?.enabled ?? false), email }
+  }
 
-  setRemote(enabled: boolean, invite = this.remote.invite): void {
-    this.config.remote = { enabled, invite }
+  setRemote(enabled: boolean, email = this.remote.email): void {
+    this.config.remote = { enabled: enabled && email !== null, ...(email ? { email } : {}) }
     this.save()
   }
 
   // Enquanto o QR está valendo, o PC aceita o aperto de mãos de um certificado novo: é o celular que vai parear.
   get pairingOpen(): boolean { return this.invitation !== null && Date.now() <= this.invitation.until }
+  // Até quando o QR aceita um celular novo (null: fechado). O relay deixa entrar celular sem registro só nessa janela.
+  get pairingUntil(): number | null { return this.pairingOpen ? this.invitation!.until : null }
+
+  // Os celulares que podem entrar pelo relay: os que já registraram o certificado.
+  get relayDevices(): { fingerprint: string; name: string }[] {
+    return this.config.devices.flatMap((device) => (device.certificate ? [{ fingerprint: device.certificate, name: device.name }] : []))
+  }
 
   // Pelo pareamento antigo (cookie da rede local) o certificado entra uma vez só: quem pegasse o cookie na rede de casa
   // não consegue trocar o do celular pelo dele e ganhar acesso de fora. Trocar de aparelho é parear de novo pelo QR.

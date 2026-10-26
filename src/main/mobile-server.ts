@@ -137,7 +137,7 @@ export class MobileServer {
       remote: this.link ? this.link.status : null,
       address: this.server ? this.lanAddress : null,
       tailscale: this.server ? tailscaleAddresses()[0] ?? null : null,
-      invite: this.pairing.remote.invite !== '',
+      account: this.pairing.remote.email ? { email: this.pairing.remote.email, admin: this.admin } : null,
       devices: this.pairing.devices.map((device) => {
         const online = this.online(device.id)
         const relay = [...this.clients].some((client) => client.device === device.id && client.tunnel)
@@ -208,13 +208,17 @@ export class MobileServer {
   }
 
   // Fora de casa: o PC fica ligado ao relay e cada celular que chega por ele cai no mesmo atendimento da rede local.
-  startRemote(url: string, invite: string): MobileStatus {
+  startRemote(url: string, client: string): MobileStatus {
     this.link?.stop()
     this.relayHost = new URL(url).host
     this.link = new RelayLink({
       url,
-      token: invite,
+      client,
       identity: this.pairing.identity(),
+      onConnected: () => {
+        this.syncRelay()
+        this.refreshAccount()
+      },
       accepts: (fingerprint) => this.pairing.deviceByCertificate(fingerprint) !== null || this.pairing.pairingOpen,
       deliver: (socket, fingerprint) => this.acceptTunnel(socket, fingerprint),
       onStatus: () => this.notify()
@@ -240,6 +244,39 @@ export class MobileServer {
 
   // O PC voltou da suspensão ou trocou de rede: a conexão com o relay é refeita na hora.
   reconnectRemote(): void { this.link?.reconnectNow() }
+
+  // Se a conta deste PC é a do dono do servidor: vem do relay a cada conexão, e só serve para a tela mostrar o painel
+  // (cada pedido de admin é conferido no relay de novo).
+  private admin = false
+
+  // Pedido de admin ao relay (visão geral, bloquear, desbloquear).
+  adminRequest(body: Record<string, unknown>): Promise<unknown> {
+    if (!this.link) return Promise.reject(new Error('Ligue o Fora de casa antes.'))
+    return this.link.request(body)
+  }
+
+  // Sair da conta: o relay esquece este PC (e os celulares que só ele tinha), e o Fora de casa desliga.
+  async signOut(): Promise<MobileStatus> {
+    await this.link?.request({ op: 'sair' }).catch(() => {})
+    this.pairing.setRemote(false, null)
+    this.admin = false
+    return this.stopRemote()
+  }
+
+  private refreshAccount(): void {
+    void this.link?.request<{ admin: boolean }>({ op: 'conta' }).then((account) => {
+      if (this.admin === account.admin) return
+      this.admin = account.admin
+      this.notify()
+    }, () => {})
+  }
+
+  // O relay só deixa passar os celulares que este PC informa, e um celular novo só durante o QR aberto. Vai a lista
+  // inteira a cada vez: o relay troca a dele por esta, então pareamento desfeito some de lá também.
+  private syncRelay(): void {
+    if (this.link?.status.state !== 'conectado') return
+    void this.link.request({ op: 'sincronizar', celulares: this.pairing.relayDevices, pareamentoAte: this.pairing.pairingUntil }).catch(() => {})
+  }
 
   acceptTunnel(socket: TLSSocket, certificate: string): void {
     const tunnel = socket as TunnelSocket
@@ -291,6 +328,7 @@ export class MobileServer {
     const address = this.server ? await preferredAddress() : null
     if (!address && !this.relayHost) throw new Error(this.server ? 'Conecte o PC ao Wi-Fi ou ao cabo de rede para conectar o celular.' : 'Ative a conexão antes.')
     const invitation = this.pairing.invite()
+    this.syncRelay()
     const pc = this.pairing.identity().fingerprint
     const link = address
       ? `http://${address}:${this.port}/?pc=${pc}${this.relayHost ? `&relay=${this.relayHost}` : ''}#pair=${invitation.code}`
@@ -302,6 +340,7 @@ export class MobileServer {
 
   revoke(id: string): MobileStatus {
     this.pairing.revoke(id)
+    this.syncRelay()
     this.options.runtime.leave(id)
     for (const [token, link] of this.rawLinks) if (link.device === id) this.rawLinks.delete(token)
     clearTimeout(this.disconnectTimers.get(id))
@@ -318,6 +357,7 @@ export class MobileServer {
 
   rename(id: string, name: string): MobileStatus {
     this.pairing.rename(id, DeviceNameSchema.parse(name))
+    this.syncRelay()
     this.notify()
     return this.status()
   }
@@ -501,6 +541,7 @@ export class MobileServer {
       if (url.pathname === '/api/pair' && request.method === 'POST') {
         const { code, name, certificado } = PairSchema.parse(await this.body(request))
         const token = this.pairing.pair(code, name, certificate ?? certificado)
+        this.syncRelay()
         response.setHeader('set-cookie', `${this.cookieName()}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`)
         this.options.changed()
         this.notify()
@@ -552,6 +593,7 @@ export class MobileServer {
         if (url.pathname === '/api/device/certificate' && request.method === 'POST') {
           const { certificado } = z.object({ certificado: z.string().regex(/^[0-9a-f]{64}$/) }).parse(await this.body(request))
           this.pairing.setCertificate(device, certificado)
+          this.syncRelay()
           return json(response, 200, {})
         }
         if (url.pathname === '/api/device') {

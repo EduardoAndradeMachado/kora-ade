@@ -30,6 +30,8 @@ export interface KoraEnv {
   log: string
   pids: string
   stateFile: string
+  // Relay do Fora de casa; sem ele, uma porta local fechada (nenhum teste fala com o relay publicado).
+  relayUrl?: string
 }
 
 export interface FakeEvent {
@@ -99,6 +101,7 @@ export function appEnv(env: KoraEnv): Record<string, string> {
   out['KORA_MOBILE_PORT'] = String(MOBILE_PORT)
   // No app empacotado o atualizador consultaria o GitHub; nos testes ele fala com uma porta local fechada.
   out['KORA_UPDATE_FEED'] = 'http://127.0.0.1:9/'
+  out['KORA_RELAY_URL'] = env.relayUrl ?? 'ws://127.0.0.1:9'
   out['KORA_FAKE_LOG'] = env.log
   out['KORA_FAKE_PIDS'] = env.pids
   return out

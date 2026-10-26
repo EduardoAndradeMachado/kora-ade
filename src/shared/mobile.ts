@@ -67,13 +67,68 @@ export interface MobileStatus {
   network: boolean
   // Fora de casa: como está a conexão do PC com o relay; null com ele desligado.
   remote?: { state: 'conectando' | 'conectado' | 'reconectando' | 'parado'; since: number; error: string | null } | null
-  // Onde o celular acha o PC: endereço na rede de casa e no Tailscale (null fora do ar), e se o convite do relay já foi
-  // informado (o código em si nunca sai do main).
+  // Onde o celular acha o PC: endereço na rede de casa e no Tailscale (null fora do ar), e a conta do Fora de casa em que
+  // este PC entrou (admin: a conta do dono do servidor, que vê o painel).
   address?: string | null
   tailscale?: string | null
-  invite?: boolean
+  account?: { email: string; admin: boolean } | null
   devices: MobileDevice[]
 }
 // app: link e QR para baixar o app Android direto deste PC, para quem ainda não o tem (só pela rede de casa).
 export interface MobilePairing { url: string; qr: string; expiresAt: string; app?: { url: string; qr: string } }
 export const DeviceNameSchema = z.string().trim().min(1).max(60)
+
+// Conta do Fora de casa (cadastro, código por e-mail, login, troca de senha). A senha passa pelo main só até o relay.
+const accountEmail = z.string().trim().min(3).max(254)
+const accountCode = z.string().trim().regex(/^\d{6}$/, 'O código tem 6 números.')
+const accountPassword = z.string().min(1).max(128)
+export const AccountActionSchema = z.discriminatedUnion('acao', [
+  z.object({ acao: z.literal('cadastro'), email: accountEmail }),
+  z.object({ acao: z.literal('verificar'), email: accountEmail, codigo: accountCode, senha: accountPassword }),
+  z.object({ acao: z.literal('entrar'), email: accountEmail, senha: accountPassword }),
+  z.object({ acao: z.literal('esqueci'), email: accountEmail }),
+  z.object({ acao: z.literal('redefinir'), email: accountEmail, codigo: accountCode, senha: accountPassword })
+])
+export type AccountAction = z.infer<typeof AccountActionSchema>
+
+export const AdminRequestSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('admin:visao') }),
+  z.object({ op: z.literal('admin:bloquear'), conta: z.string().uuid(), motivo: z.string().max(200).optional() }),
+  z.object({ op: z.literal('admin:desbloquear'), conta: z.string().uuid() })
+])
+export type AdminRequest = z.infer<typeof AdminRequestSchema>
+
+// O que o relay devolve ao admin: contas, aparelhos com consumo (total e dos últimos 30 dias) e quem está online.
+export interface AdminAccount {
+  id: string
+  email: string
+  admin: boolean
+  created_at: string
+  verified_at: string | null
+  blocked_at: string | null
+  blocked_reason: string | null
+  last_login_at: string | null
+}
+export interface AdminDevice {
+  fingerprint: string
+  account_id: string
+  kind: 'pc' | 'phone'
+  name: string | null
+  platform: string | null
+  os_version: string | null
+  app_version: string | null
+  created_at: string
+  last_seen_at: string | null
+  last_ip: string | null
+  bytes_in: string
+  bytes_out: string
+  sessions: string
+  connected_seconds: string
+  bytes_in_30d: string
+  bytes_out_30d: string
+  sessions_30d: string
+  pcs: string[]
+  online: boolean
+}
+// you: a conta de quem está olhando, que o painel mostra à parte.
+export interface AdminOverview { you: string; accounts: AdminAccount[]; devices: AdminDevice[] }

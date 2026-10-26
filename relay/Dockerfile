@@ -4,7 +4,7 @@ WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --prod --frozen-lockfile
-COPY relay.ts main.ts ./
+COPY *.ts ./
 ENV NODE_ENV=production PORT=8080
 USER node
 EXPOSE 8080
