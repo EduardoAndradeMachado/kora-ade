@@ -228,7 +228,9 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.getByRole('button', { name: 'Gravar áudio' }).click()
     await page.getByRole('button', { name: 'Parar e transcrever' }).click()
     await browserExpect(page.getByRole('status').filter({ hasText: 'Transcrevendo no PC' })).toBeVisible()
-    await page.waitForTimeout(300)
+    // A mensagem aparece assim que o áudio começa a subir; o cancelamento só chega ao Transcritor se o PC já tiver
+    // começado a transcrever (numa máquina lenta, 300 ms fixos não bastavam).
+    await expect.poll(() => heard.length).toBe(3)
     await page.screenshot({ path: join(artifacts, 'transcrevendo-350.png') })
     await page.getByRole('button', { name: 'Cancelar transcrição' }).click()
     await expect.poll(() => gaveUp).toBe(true)
