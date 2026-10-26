@@ -31,6 +31,9 @@ const LOCK_MS = 15 * 60_000
 // Teto por conta, somando todos os códigos: pedir código novo zera as 5 tentativas daquele código, e sem este teto
 // dava para ir adivinhando aos poucos (5 palpites por minuto). 10 erros por dia deixam a chance em 1 em 100 mil.
 const CODE_MISSES_PER_DAY = 10
+// Senha errada de qualquer IP, somada por e-mail: 5 por IP não seguram quem tem centenas de IPs. Passou disso, só entra
+// quem vem de um IP que a conta já usou (o de algum aparelho dela); vale igual para e-mail sem conta.
+const LOGIN_MISSES_PER_HOUR = 30
 const CODES_PER_HOUR = 5
 
 export const normalizeEmail = (email: string): string | null => {
@@ -46,6 +49,7 @@ export const passwordProblem = (password: string): string | null =>
 export class Accounts {
   private readonly failures = new Map<string, { count: number; rounds: number; lockedUntil: number }>()
   private readonly codeMisses = new Map<string, { count: number; since: number }>()
+  private readonly loginMisses = new Map<string, { count: number; since: number }>()
   private readonly codesSent = new Map<string, { count: number; since: number }>()
   private readonly now: () => number
   private readonly sql: Sql
@@ -101,18 +105,25 @@ export class Accounts {
     const lock = this.failures.get(key)
     if (lock && lock.lockedUntil > this.now()) return { ok: false, reason: 'locked' }
     const [account] = email
-      ? await this.sql<{ id: string; password_hash: string | null; blocked: boolean; admin: boolean }[]>`
-          select id, password_hash, blocked_at is not null as blocked, admin
-          from kora_sync.accounts where email = ${email}`
+      ? await this.sql<{ id: string; password_hash: string | null; blocked: boolean; admin: boolean; ips: string[] }[]>`
+          select a.id, a.password_hash, a.blocked_at is not null as blocked, a.admin,
+                 coalesce(array_agg(d.last_ip) filter (where d.last_ip is not null), '{}') as ips
+          from kora_sync.accounts a left join kora_sync.devices d on d.account_id = a.id
+          where a.email = ${email}
+          group by a.id`
       : []
+    const target = email ?? rawEmail
+    if (this.exhausted(this.loginMisses, target, LOGIN_MISSES_PER_HOUR, 60 * 60_000) && !account?.ips.includes(ip)) return { ok: false, reason: 'locked' }
     // Conta inexistente ou ainda sem verificação (sem senha): confere contra um hash falso, para o tempo de resposta
     // não denunciar quais e-mails têm conta.
     const valid = await verifyPassword(password, account?.password_hash ?? (await decoyHash())) && Boolean(account?.password_hash)
     if (!account || !valid) {
       this.fail(key)
+      this.count(this.loginMisses, target, 60 * 60_000)
       return { ok: false, reason: 'invalid' }
     }
     this.failures.delete(key)
+    this.loginMisses.delete(target)
     if (account.blocked) return { ok: false, reason: 'blocked' }
     await this.sql`update kora_sync.accounts set last_login_at = now() where id = ${account.id}`
     return { ok: true, accountId: account.id, admin: account.admin }
@@ -147,7 +158,7 @@ export class Accounts {
   sweep(): void {
     const now = this.now()
     for (const [key, entry] of this.failures) if (entry.lockedUntil <= now && entry.count === 0) this.failures.delete(key)
-    for (const map of [this.codeMisses, this.codesSent]) for (const [key, entry] of map) if (now - entry.since > 24 * 60 * 60_000) map.delete(key)
+    for (const map of [this.codeMisses, this.codesSent, this.loginMisses]) for (const [key, entry] of map) if (now - entry.since > 24 * 60 * 60_000) map.delete(key)
   }
 
   private codeHash(accountId: string, kind: EmailKind, code: string): string {

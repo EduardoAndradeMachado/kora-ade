@@ -183,6 +183,19 @@ describe('relay com contas de verdade (Postgres)', () => {
     expect(await timed.directory.admit(phone.fingerprint, pc.fingerprint)).toBeNull()
   })
 
+  it('o PC de outra conta não leva para a conta dele um celular que já é de alguém', async () => {
+    const [mine, other, phone] = [createIdentity('Meu PC'), createIdentity('PC de outra conta'), createIdentity('Meu celular')]
+    await accountWithPc('meu@exemplo.com', mine)
+    await accountWithPc('outro@exemplo.com', other)
+    const myLink = pcLink(mine)
+    const otherLink = pcLink(other)
+    await until(() => myLink.status.state === 'conectado' && otherLink.status.state === 'conectado')
+    await myLink.request({ op: 'sincronizar', celulares: [{ fingerprint: phone.fingerprint, name: 'Meu celular' }], pareamentoAte: null })
+    await otherLink.request({ op: 'sincronizar', celulares: [{ fingerprint: phone.fingerprint, name: 'Roubado' }], pareamentoAte: null })
+    const [row] = await sql<{ email: string }[]>`select a.email from kora_sync.devices d join kora_sync.accounts a on a.id = d.account_id where d.fingerprint = ${phone.fingerprint}`
+    expect(row!.email).toBe('meu@exemplo.com')
+  })
+
   it('PC não registra outro PC como celular dele, e celular de um PC não chega a outro', async () => {
     const [pcA, pcB, phoneB] = [createIdentity('PC A'), createIdentity('PC B'), createIdentity('Celular de B')]
     await accountWithPc('donoa@exemplo.com', pcA)

@@ -120,6 +120,18 @@ describe('contas do relay', () => {
     expect(await accounts.login('d@exemplo.com', PASSWORD, '203.0.113.9')).toMatchObject({ ok: true })
   })
 
+  it('30 senhas erradas por hora, somando todos os IPs, travam o e-mail para IPs novos, não para os da conta', async () => {
+    const id = await createVerified('alvo2@exemplo.com')
+    await sql`insert into kora_sync.devices (fingerprint, account_id, kind, last_ip) values (${'a'.repeat(64)}, ${id}, 'pc', '198.51.100.7')`
+    for (let i = 0; i < 30; i++) expect(await accounts.login('alvo2@exemplo.com', 'errada-errada', `203.0.113.${i}`)).toEqual({ ok: false, reason: 'invalid' })
+    expect(await accounts.login('alvo2@exemplo.com', PASSWORD, '203.0.113.200')).toEqual({ ok: false, reason: 'locked' })
+    // A dona da conta, do IP em que o PC dela já esteve, entra.
+    expect(await accounts.login('alvo2@exemplo.com', PASSWORD, '198.51.100.7')).toMatchObject({ ok: true })
+    // E-mail sem conta responde igual: o teto não revela quem tem conta.
+    for (let i = 0; i < 30; i++) await accounts.login('ninguem2@exemplo.com', 'errada-errada', `203.0.113.${i}`)
+    expect(await accounts.login('ninguem2@exemplo.com', 'errada-errada', '203.0.113.201')).toEqual({ ok: false, reason: 'locked' })
+  }, 60_000)
+
   it('a trava responde igual para e-mail com e sem conta: errar não revela quem tem conta', async () => {
     await createVerified('existe@exemplo.com')
     for (const email of ['existe@exemplo.com', 'nao-existe@exemplo.com']) {

@@ -209,10 +209,11 @@ export class RelayService {
     const keep = phones.map((phone) => phone.fingerprint)
     const touched = await this.sql.begin(async (tx) => {
       for (const phone of phones) {
-        // Uma impressão digital de PC nunca vira celular: um PC não registra outro PC como celular dele.
+        // Uma impressão digital de PC nunca vira celular, e o celular fica na conta de quem o registrou primeiro: outro
+        // PC que conheça a impressão digital dele não o leva para a própria conta (consumo, painel).
         const [row] = await tx<{ kind: string }[]>`
           insert into kora_sync.devices (fingerprint, account_id, kind, name) values (${phone.fingerprint}, ${owner.accountId}, 'phone', ${phone.name})
-          on conflict (fingerprint) do update set account_id = excluded.account_id, name = coalesce(excluded.name, kora_sync.devices.name)
+          on conflict (fingerprint) do update set name = coalesce(excluded.name, kora_sync.devices.name)
           where kora_sync.devices.kind = 'phone'
           returning kind`
         if (row) await tx`insert into kora_sync.phone_pcs (phone, pc) values (${phone.fingerprint}, ${owner.fingerprint}) on conflict do nothing`
