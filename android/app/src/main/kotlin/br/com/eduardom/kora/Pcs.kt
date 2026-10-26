@@ -7,7 +7,7 @@ import org.json.JSONObject
  * Um Kora em que o celular já entrou. O id vem do próprio Kora (o instalado e o Dev do mesmo PC têm ids diferentes),
  * e o endereço pode mudar quando o roteador troca o IP do PC. apelido é o nome que a pessoa deu no celular.
  */
-data class PcSalvo(val id: String, val host: String, val porta: Int, val nome: String, val apelido: String? = null, val edicao: String = "") {
+data class PcSalvo(val id: String, val host: String, val porta: Int, val nome: String, val apelido: String? = null, val edicao: String = "", val tailscale: String? = null) {
     val exibido: String get() = apelido ?: nome
     val tipo: String get() = if (edicao == "dev") "Kora Dev" else "Kora"
 }
@@ -18,13 +18,14 @@ fun lerPcs(json: String?): List<PcSalvo> {
         val pc = lista.optJSONObject(indice) ?: return@mapNotNull null
         val id = pc.optString("id").ifEmpty { return@mapNotNull null }
         val host = pc.optString("host").ifEmpty { return@mapNotNull null }
-        PcSalvo(id, host, pc.optInt("porta", PORTAS.first()), pc.optString("nome").ifEmpty { host }, pc.optString("apelido").ifEmpty { null }, pc.optString("edicao"))
+        PcSalvo(id, host, pc.optInt("porta", PORTAS.first()), pc.optString("nome").ifEmpty { host }, pc.optString("apelido").ifEmpty { null }, pc.optString("edicao"), pc.optString("tailscale").ifEmpty { null })
     }
 }
 
 fun escreverPcs(pcs: List<PcSalvo>): String = JSONArray(pcs.map { pc ->
     JSONObject().put("id", pc.id).put("host", pc.host).put("porta", pc.porta).put("nome", pc.nome).put("edicao", pc.edicao)
         .apply { pc.apelido?.let { put("apelido", it) } }
+        .apply { pc.tailscale?.let { put("tailscale", it) } }
 }).toString()
 
 // Um Kora de antes do id ficou salvo como "host:porta"; quando ele se atualiza e passa a ter id, é o mesmo PC.
@@ -37,9 +38,18 @@ fun lembrar(pcs: List<PcSalvo>, kora: Kora): List<PcSalvo> {
     val anterior = pcs.find { it.id == semId(kora) }?.takeIf { kora.id != semId(kora) }
     val restantes = if (anterior == null) pcs else pcs.filter { it.id != semId(kora) }
     val conhecido = restantes.find { it.id == kora.id }
-    val atualizado = PcSalvo(kora.id, kora.host, kora.porta, kora.nome, conhecido?.apelido ?: anterior?.apelido, kora.edicao)
+    // Entrar pelo Tailscale não troca o endereço de casa: em casa o app continua indo direto pela rede local.
+    val host = if (conhecido != null && kora.host == kora.tailscale) conhecido.host else kora.host
+    val atualizado = PcSalvo(kora.id, host, kora.porta, kora.nome, conhecido?.apelido ?: anterior?.apelido, kora.edicao, kora.tailscale ?: conhecido?.tailscale)
     return if (conhecido == null) restantes + atualizado else restantes.map { if (it.id == kora.id) atualizado else it }
 }
+
+/** Onde procurar o PC: primeiro o endereço de casa, depois o do Tailscale. */
+fun enderecos(pc: PcSalvo): List<String> = listOfNotNull(pc.host, pc.tailscale?.takeIf { it != pc.host })
+
+/** Os cookies de pareamento do Kora (src/main/mobile-server.ts, cookieName) no cabeçalho que o CookieManager devolve. */
+fun cookiesDePareamento(cabecalho: String?): List<String> =
+    cabecalho.orEmpty().split(';').map { it.trim() }.filter { it.startsWith("kora-device") && '=' in it }
 
 /** Nome vazio volta ao nome que o próprio Kora informa. */
 fun renomear(pcs: List<PcSalvo>, id: String, apelido: String): List<PcSalvo> =

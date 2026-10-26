@@ -229,7 +229,7 @@ class MainActivity : ComponentActivity() {
         if (ultimo == null && antigo == null) procurar(automatico = true) else {
             mostrarAbertura()
             Thread {
-                val kora = if (ultimo != null) sondar(ultimo.host, ultimo.porta)?.takeIf { conhecido(listOf(ultimo), it) }
+                val kora = if (ultimo != null) sondarSalvo(ultimo)
                 else PORTAS.firstNotNullOfOrNull { sondar(antigo!!, it) }
                 val pareado = kora?.let(::pareado)
                 principal.post { if (kora != null && pareado != false) abrir(kora) else procurar() }
@@ -452,7 +452,7 @@ class MainActivity : ComponentActivity() {
         if (salvo.id == atual?.id) return voltarParaPagina()
         mostrarAbertura()
         Thread {
-            val kora = sondar(salvo.host, salvo.porta)?.takeIf { conhecido(listOf(salvo), it) }
+            val kora = sondarSalvo(salvo)
             val pareado = kora?.let(::pareado)
             principal.post {
                 when {
@@ -555,19 +555,23 @@ class MainActivity : ComponentActivity() {
         pareados.clear()
         naRede.clear()
         val ip = ipDoCelular()
-        buscando = ip != null
-        this.aviso = aviso ?: if (ip == null) "Conecte o celular ao Wi-Fi de casa para achar o Kora do PC." else null
+        // Fora de casa não há rede local para varrer, mas os salvos com Tailscale ainda respondem.
+        val salvos = pcs.flatMap { pc -> enderecos(pc).map { it to pc.porta } }
+        buscando = ip != null || salvos.isNotEmpty()
+        this.aviso = aviso ?: if (!buscando) "Conecte o celular ao Wi-Fi de casa para achar o Kora do PC." else null
         mostrarInicio()
-        if (ip == null) return
+        if (!buscando) return
         val minha = ++geracao
         busca?.shutdownNow()
         // Os salvos primeiro, para o estado deles aparecer logo; depois as duas portas de cada vizinho (o Kora
         // instalado e o Kora Dev podem estar ligados no mesmo PC).
-        val enderecos = (pcs.map { it.host to it.porta } + vizinhos(ip).flatMap { host -> PORTAS.map { host to it } }).distinct()
+        val enderecos = (salvos + (ip?.let { vizinhos(it) } ?: emptyList()).flatMap { host -> PORTAS.map { host to it } }).distinct()
+        val casaPeloTailscale = pcs.filter { it.tailscale != null && it.tailscale != it.host }.associate { (it.tailscale!! to it.porta) to it.host }
         val pool = Executors.newFixedThreadPool(SONDAS_EM_PARALELO).also { busca = it }
         var pendentes = enderecos.size
         for ((host, porta) in enderecos) pool.execute {
             val kora = sondar(host, porta)
+            casaPeloTailscale[host to porta]?.let { casa -> if (kora != null) levarPareamento(casa, host, porta) }
             val pareado = kora?.let(::pareado)
             principal.post {
                 if (minha != geracao) return@post
@@ -833,7 +837,9 @@ class MainActivity : ComponentActivity() {
                 try { conexao.responseCode } finally { conexao.disconnect() }
             }.onFailure { Log.w(TAG, "o PC não recebeu a saída do celular", it) }
         }.start()
-        for (nome in cookiesParaApagar(pcs, pc)) cookies.setCookie(endereco, "$nome=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT")
+        for (nome in cookiesParaApagar(pcs, pc)) for (host in enderecos(pc)) {
+            cookies.setCookie("http://$host:${pc.porta}", "$nome=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT")
+        }
         cookies.flush()
         pcs = esquecer(pcs, pc.id)
         respostas.remove(pc.id)
@@ -844,6 +850,20 @@ class MainActivity : ComponentActivity() {
             web.loadUrl("about:blank")
         }
         renderizar()
+    }
+
+    // Tenta o endereço de casa e depois o do Tailscale; entrando pelo Tailscale, leva o pareamento de casa junto.
+    private fun sondarSalvo(salvo: PcSalvo): Kora? = enderecos(salvo).firstNotNullOfOrNull { host ->
+        sondar(host, salvo.porta)?.takeIf { conhecido(listOf(salvo), it) }?.also { if (host != salvo.host) levarPareamento(salvo.host, host, salvo.porta) }
+    }
+
+    // O cookie vale por endereço: o mesmo pareamento passa a valer no endereço do Tailscale, sem parear de novo.
+    private fun levarPareamento(casa: String, tailscale: String, porta: Int) {
+        val cookies = CookieManager.getInstance()
+        for (cookie in cookiesDePareamento(cookies.getCookie("http://$casa:$porta"))) {
+            cookies.setCookie("http://$tailscale:$porta", "$cookie; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict")
+        }
+        cookies.flush()
     }
 
     private fun sondar(host: String, porta: Int): Kora? = runCatching {
@@ -857,7 +877,8 @@ class MainActivity : ComponentActivity() {
             // Kora de antes do id: o endereço vira o id, como era o único PC que o app guardava.
             val id = saude.optString("id").ifEmpty { "$host:$porta" }
             val edicao = saude.optString("edition")
-            Kora(id, host, porta, nomeDoPc(saude.optString("name").ifEmpty { host }, edicao), edicao)
+            val tailscale = if (saude.isNull("tailscale")) null else saude.optString("tailscale").ifEmpty { null }
+            Kora(id, host, porta, nomeDoPc(saude.optString("name").ifEmpty { host }, edicao), edicao, tailscale)
         } finally {
             conexao.disconnect()
         }

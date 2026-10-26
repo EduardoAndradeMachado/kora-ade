@@ -6,7 +6,8 @@ import java.net.URI
 // fica noutra para os dois poderem estar ligados ao mesmo tempo.
 val PORTAS = listOf(43127, 43128)
 
-data class Kora(val id: String, val host: String, val porta: Int, val nome: String, val edicao: String = "")
+// tailscale: o endereço do PC no Tailscale, que o /health informa; com ele o celular chega ao PC fora de casa.
+data class Kora(val id: String, val host: String, val porta: Int, val nome: String, val edicao: String = "", val tailscale: String? = null)
 
 data class Convite(val host: String, val porta: Int, val codigo: String)
 
