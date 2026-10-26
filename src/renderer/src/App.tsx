@@ -210,8 +210,18 @@ export function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    void window.kora.getState().then((s) => {
+    void Promise.all([window.kora.getState(), window.kora.takeResumeAfterUpdate()]).then(([s, resume]) => {
       const restored = restoreTabs(s)
+      // Quem rodava antes da atualização volta a rodar, como no "Continuar chat", sem trocar a aba aberta.
+      for (const [projectId, list] of Object.entries(restored)) {
+        restored[projectId] = list.map((tab) => {
+          if (tab.kind !== 'terminal' || !resume.includes(tab.id)) return tab
+          const how: Launch = tab.agent ? { type: 'resume', agent: tab.agent } : { type: 'shell' }
+          pendingLaunch.current.set(tab.id, { tab: { id: tab.id, projectId, title: tab.title }, how })
+          terminalBus.expect(tab.id)
+          return { ...tab, live: true }
+        })
+      }
       lastSavedTabs.current = JSON.stringify(tabRefs(restored))
       setState(s)
       setTabs(restored)

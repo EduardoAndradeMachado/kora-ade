@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect } from './harness'
 import {
@@ -71,6 +71,32 @@ test('R5 fechar normalmente e reabrir: aba adormecida com Continuar chat roda cl
   await resume.click()
   const again = await waitFor(() => starts(env, 'claude')[1], 'claude falso retomado')
   expect(again.args).toEqual(['--resume', sessionId])
+})
+
+test('R5b reabrir logo depois de instalar atualização: só as abas que rodavam voltam sozinhas, uma vez', async ({ kora }) => {
+  const env = kora.env()
+  const first = await kora.launch(env)
+  const a = await openClaude(first, env, 0)
+  const b = await openClaude(first, env, 1)
+  await first.closeWindow()
+  // A lista que o instalador grava antes de fechar: só a aba A rodava.
+  const tabA = readState(env).tabs.find((t) => t.agent?.sessionId === a.sessionId)!
+  const list = join(env.userData, 'resume-after-update.json')
+  writeFileSync(list, JSON.stringify({ tabIds: [tabA.id], at: Date.now() }))
+
+  const second = await kora.launch(env)
+  const resumed = await waitFor(() => starts(env, 'claude')[2], 'claude falso retomado sem clique')
+  expect(resumed.args).toEqual(['--resume', a.sessionId])
+  expect(existsSync(list)).toBe(false)
+  await second.page.waitForTimeout(3000)
+  expect(starts(env, 'claude').filter((s) => s.args?.includes(b.sessionId))).toHaveLength(1)
+  await second.closeWindow()
+
+  // Fechar e abrir de novo depois é como sempre: nada volta sozinho.
+  const third = await kora.launch(env)
+  await expect(ui.visibleButton(third.page, 'Continuar chat')).toBeVisible()
+  await third.page.waitForTimeout(3000)
+  expect(starts(env, 'claude')).toHaveLength(3)
 })
 
 test('R6 matar o app à força e reabrir: as mesmas abas voltam e retomam a sessão', async ({ kora }) => {

@@ -30,6 +30,7 @@ import { createLagMonitor } from './lag-monitor'
 import { autoUpdater } from 'electron-updater'
 import { createErrorLog, errorText } from './error-log'
 import { startUpdates, type Updates } from './updater'
+import { rememberLiveTabs, takeLiveTabs } from './resume-after-update'
 import type { UpdateStatus } from '../shared/update'
 import type { MobileStatus } from '../shared/mobile'
 import { resolveTerminalLink } from './terminal-links'
@@ -66,6 +67,7 @@ const DETECT_FALLBACK_MS = 30_000
 const DETECT_MIN_GAP_MS = 400
 // O token OAuth do Claude é lido aqui dentro e nunca vai para o renderer; só os percentuais saem.
 const usageCacheFile = (): string => join(app.getPath('userData'), 'usage-cache.json')
+const resumeFile = (): string => join(app.getPath('userData'), 'resume-after-update.json')
 const usage = createUsageReader({
   claudeRoot: join(homedir(), '.claude'),
   codexRoot: join(homedir(), '.codex'),
@@ -222,6 +224,8 @@ function lagLog(line: string): void {
 }
 let lag: ReturnType<typeof createLagMonitor> | null = null
 let updates: Updates | null = null
+// Abas que rodavam quando a atualização fechou o app; o renderer pede uma vez e reabre.
+let resumeAfterUpdate: string[] = []
 
 function updaterLog(line: string): void {
   try {
@@ -515,6 +519,11 @@ function registerIpc(): void {
     event.returnValue = Number(release().split('.')[2]) || 0
   })
   ipcMain.handle('state:get', () => state)
+  ipcMain.handle('tabs:resume-after-update', () => {
+    const ids = resumeAfterUpdate
+    resumeAfterUpdate = []
+    return ids
+  })
   // O renderer segue o prefers-color-scheme, que o Chromium deriva do nativeTheme.themeSource.
   const SizesSchema = z.object({
     zoom: z.number().min(ZOOM.min).max(ZOOM.max).optional(),
@@ -974,6 +983,13 @@ nativeTheme.on('updated', () => mainWindow?.setTitleBarOverlay(titleBarOverlay()
 void app.whenReady().then(() => {
   stateFile = join(app.getPath('userData'), 'kora-state.json')
   state = loadState(stateFile)
+  // Aba de projeto cuja pasta sumiu fica suspensa, para a tela de localizar a pasta aparecer em vez de um erro.
+  resumeAfterUpdate = takeLiveTabs(resumeFile()).filter((id) => {
+    const tab = state.tabs.find((t) => t.id === id)
+    const project = tab && state.projects.find((p) => p.id === tab.projectId)
+    return project !== undefined && existsSync(project.path)
+  })
+  if (resumeAfterUpdate.length) updaterLog(`reabrindo ${resumeAfterUpdate.length} aba(s) que rodavam antes da atualização`)
   scrollbacks = new Scrollbacks(join(app.getPath('userData'), 'scrollback'))
   pruneScrollbacks()
   job = new KillOnCloseJob()
@@ -1067,6 +1083,13 @@ void app.whenReady().then(() => {
       beforeInstall: () => {
         quitting = true
         detectAgents()
+        const live = [...terminals.pids().keys()]
+        try {
+          rememberLiveTabs(resumeFile(), live)
+          updaterLog(`${live.length} aba(s) rodando, para reabrir depois de instalar`)
+        } catch (err) {
+          updaterLog(`não deu para guardar as abas rodando: ${errorText(err)}`)
+        }
         terminals.killAll()
       },
       log: updaterLog
