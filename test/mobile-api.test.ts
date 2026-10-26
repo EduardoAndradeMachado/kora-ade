@@ -19,6 +19,11 @@ it('502 sem corpo da passagem do app vira aviso com o motivo, venha ele codifica
   await expect(api('file?x')).rejects.toThrow(/^Sem conexão com o PC agora\. Confira/)
 })
 
+it('rede que cai antes de qualquer resposta vira aviso em português, e não o "Failed to fetch" do navegador', async () => {
+  vi.stubGlobal('fetch', async () => { throw new TypeError('Failed to fetch') })
+  await expect(api('file?x')).rejects.toThrow(/^Sem conexão com o PC agora\. Confira a internet do celular/)
+})
+
 it('403 sem corpo é a tela que perdeu o cookie da passagem; erro com JSON mostra a mensagem do PC', async () => {
   answer(new Response('', { status: 403 }))
   await expect(api('file?x')).rejects.toThrow('O app perdeu a ligação com esta tela.')

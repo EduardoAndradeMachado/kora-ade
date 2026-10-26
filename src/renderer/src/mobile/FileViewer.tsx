@@ -3,7 +3,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { viewerFor } from '@shared/file-kind'
 import { Icon } from '@/brand/icons'
-import { api } from './api'
+import { api, offline } from './api'
 import { CodeEditor } from './CodeEditor'
 import { PdfPages } from './PdfPages'
 import { SkeletonCode } from './Skeleton'
@@ -46,8 +46,8 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
   const query = `project=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`
   const name = path.split(/[\\/]/).pop() ?? path
   const folder = path.slice(0, path.length - name.length).replace(/[\\/]$/, '')
-  // O link de leitura do PC não entrega arquivo oculto (.env, .git/...), nem para baixar.
-  const hidden = path.split(/[\\/]/).some((part) => part.startsWith('.'))
+  // O link de leitura do PC não entrega arquivo oculto (.env), nem para baixar; numa pasta oculta (.kora/temp), entrega.
+  const hidden = name.startsWith('.')
   const [file, setFile] = useState<TextFile | null>(null)
   const [raw, setRaw] = useState<string | null>(null)
   // Muda a cada leitura do PC: o editor remonta com o texto novo. Entre Ver e Editar ele remonta com o texto atual.
@@ -59,7 +59,7 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
   const [loading, setLoading] = useState(true)
   // Versão do arquivo sobre a qual o texto está sendo editado: é ela que o salvar manda para o PC conferir.
   const [base, setBase] = useState(0)
-  // Toque no PDF esconde a barra de página e zoom; com o celular deitado, também a faixa do arquivo (só no CSS).
+  // Toque no PDF esconde a barra de página e zoom, a faixa do arquivo e o cabeçalho do Kora (os dois pelo CSS).
   const [immersive, setImmersive] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const draftRef = useRef(draft)
@@ -133,7 +133,7 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
     setSaving(true)
     setNotice(null)
     try {
-      const response = await fetch('/api/file', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId, path, content: sent, mtimeMs }) })
+      const response = await fetch('/api/file', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId, path, content: sent, mtimeMs }) }).catch(offline)
       const result = await response.json().catch(() => ({}))
       if (response.status === 409) return setNotice({ tone: 'conflict', text: 'O arquivo mudou no PC depois que você abriu, talvez pelo agente.' })
       if (!response.ok) throw new Error(result.error ?? 'Não deu para salvar no PC.')

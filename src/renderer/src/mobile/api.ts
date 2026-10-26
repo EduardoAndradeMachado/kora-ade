@@ -2,7 +2,7 @@
 const NOT_JSON = Symbol('sem JSON')
 
 export async function api<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`/api/${path}`, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const response = await fetch(`/api/${path}`, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(offline)
   const result = await response.json().catch(() => NOT_JSON)
   if (result === NOT_JSON) throw new Error(unreachable(response))
   if (!response.ok) throw new Error(result?.error ?? 'Não foi possível conectar ao PC.')
@@ -16,6 +16,13 @@ function unreachable(response: Response): string {
   if (response.status === 502) return `Sem conexão com o PC agora${reason ? ` (${reason.replace(/\.$/, '')})` : ''}. Confira a internet do celular; quando a conexão voltar, é só tentar de novo.`
   if (response.status === 403) return 'O app perdeu a ligação com esta tela. Feche e abra o Kora de novo.'
   return 'Não foi possível conectar ao PC.'
+}
+
+// O fetch que nem chega a uma resposta (rede caiu, PC fora do ar) só diz "Failed to fetch", em inglês.
+export const NO_CONNECTION = 'Sem conexão com o PC agora. Confira a internet do celular; quando a conexão voltar, é só tentar de novo.'
+export function offline(error: unknown): never {
+  if (error instanceof TypeError) throw new Error(NO_CONNECTION)
+  throw error
 }
 
 // O app 0.5.2 manda o motivo em percent-encoding; o 0.5.1 mandava o texto cru, que segue como veio.

@@ -288,6 +288,10 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .file-row small { font-family: var(--terminal-font-family, monospace); font-size: 11px; font-weight: 600; }
 .file-row > svg:last-child { width: 14px; height: 14px; color: var(--muted-foreground); }
 .file-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Leitura do PDF: um toque esconde o cabeçalho do Kora e a faixa do arquivo, em pé ou deitado, e o PDF fica com a tela
+   quase toda (a barra de status do Android fica); a barra de página e zoom some pelo PdfPages. */
+.mobile-app > .mobile-header, .file-header { max-height: 160px; transition: max-height .2s, min-height .2s, opacity .2s, padding .2s, visibility .2s; }
+.file-page.immersive .file-header, .mobile-app:has(.file-page.immersive) > .mobile-header { min-height: 0; max-height: 0; padding-block: 0; border-bottom-width: 0; opacity: 0; visibility: hidden; overflow: hidden; }
 .file-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; min-height: 52px; }
 .file-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .file-title strong, .file-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -376,8 +380,7 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
   .chat-return { width: 36px; height: 30px; min-height: 30px; }
   .terminal-keys { padding: 3px 10px; }
   .terminal-keys button { min-height: 30px; padding: 4px 10px; }
-  .file-header { min-height: 0; max-height: 60px; gap: 6px; padding: 2px 8px 2px 12px; transition: max-height .2s, opacity .2s, padding .2s, visibility .2s; }
-  .file-page.immersive .file-header { max-height: 0; padding-block: 0; border-bottom-width: 0; opacity: 0; visibility: hidden; overflow: hidden; }
+  .file-header { min-height: 0; max-height: 60px; gap: 6px; padding: 2px 8px 2px 12px; }
   .file-title { flex-direction: row; align-items: baseline; gap: 8px; }
   .file-title strong { flex-shrink: 0; max-width: 70%; font-size: 13px; }
   .file-title small { flex: 1; min-width: 0; }
@@ -417,3 +420,6 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .skeleton-terminal-line { display: flex; align-items: center; height: 15px; }
 .skeleton-pages { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 16px; }
 .skeleton-pages .skeleton-page { width: min(100%, 420px); height: auto; aspect-ratio: 1 / 1.414; border-radius: 4px; }
+/* Teclado aberto encolhe a área: como na tela de verdade, as linhas que não cabem saem, sem espremer as que ficam. */
+.skeleton-list, .skeleton-code, .skeleton-terminal, .skeleton-pages { overflow: hidden; }
+.skeleton-list > *, .skeleton-code > *, .skeleton-terminal > *, .skeleton-pages > * { flex-shrink: 0; }

@@ -1,7 +1,5 @@
 import { useEffect, useRef } from 'react'
 
-// Faixa das bordas em que o Android com navegação por gestos toma o arrastar como "voltar" do sistema.
-const EDGE = 24
 // Até aqui o dedo ainda pode estar só tocando; passou disso, o primeiro rumo decide se é rolagem vertical.
 const SLOP = 10
 const MIN_DISTANCE = 72
@@ -40,7 +38,6 @@ export function useSwipe(element: HTMLElement | null, actions: SwipeActions): vo
       const touch = event.touches[0]
       const target = event.target
       if (event.touches.length !== 1 || !touch || !(target instanceof Element)) return
-      if (touch.clientX < EDGE || touch.clientX > window.innerWidth - EDGE) return
       if ((window.visualViewport?.scale ?? 1) > 1.01) return
       if (target.closest('textarea, input, select, [data-no-swipe]') || element.querySelector('[data-swipe-lock]')) return
       gesture = {

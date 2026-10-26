@@ -51,7 +51,8 @@ export async function uploadImage(file: File): Promise<{ path: string; preview: 
   // Depois da tela apagada, o navegador ainda tenta a conexão antiga, que o Wi-Fi já derrubou: o envio falha na
   // rede e a segunda tentativa abre uma conexão nova. Repetir no máximo salva o print duas vezes.
   const response = await post().catch(post).catch((error: unknown) => {
-    throw new Error(`Não deu para enviar a imagem ao PC (${detail(error)}).`)
+    // O fetch sem resposta nenhuma só diz "Failed to fetch".
+    throw new Error(`Não deu para enviar a imagem ao PC (${error instanceof TypeError ? 'sem conexão com o PC' : detail(error)}).`)
   })
   const result = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(result.error ?? 'Não deu para enviar a imagem ao PC.')

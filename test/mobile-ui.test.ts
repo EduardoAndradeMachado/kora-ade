@@ -125,7 +125,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     // Sem rede nenhuma, o aviso aparece no campo de mensagem, onde a pessoa agiu, e não no topo do app.
     await page.route('**/api/image', (route) => route.abort('connectionreset'))
     await page.getByLabel('Escolher imagem').setInputFiles({ name: 'print.png', mimeType: 'image/png', buffer: png })
-    await browserExpect(page.locator('.composer').getByRole('alert')).toContainText('Não deu para enviar a imagem ao PC')
+    await browserExpect(page.locator('.composer').getByRole('alert')).toContainText('Não deu para enviar a imagem ao PC (sem conexão com o PC).')
     await browserExpect(page.locator('.error-banner')).toHaveCount(0)
     await page.unroute('**/api/image')
     // A primeira tentativa cai na rede, como a conexão velha depois da tela apagada: o envio tenta de novo sozinho.
@@ -140,7 +140,8 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     // O campo esvazia no toque; se o PC não recebe, texto e imagem voltam para mandar de novo.
     await page.route('**/api/action', (route) => (route.request().postData()?.includes('"type":"send"') ? route.abort('connectionreset') : route.continue()))
     await page.getByRole('button', { name: 'Enviar', exact: true }).click()
-    await browserExpect(page.locator('.composer').getByRole('alert')).toBeVisible()
+    // Sem resposta nenhuma do PC, o aviso é em português, e não o "Failed to fetch" do navegador.
+    await browserExpect(page.locator('.composer').getByRole('alert')).toContainText('Sem conexão com o PC agora.')
     await browserExpect(page.getByRole('textbox', { name: 'Mensagem para a sessão' })).toHaveValue("Write-Output 'OLHA_O_PRINT'")
     await browserExpect(page.getByRole('img', { name: 'Imagem anexada' })).toBeVisible()
     await page.unroute('**/api/action')

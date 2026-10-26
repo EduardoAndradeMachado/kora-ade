@@ -219,7 +219,7 @@ async function tapAt(cdp: CDPSession, x: number, y: number): Promise<void> {
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
 }
 
-test('R-celular-gestos arrastar de lado: conversa → arquivos e de volta, conversa → lista; vertical, diagonal, borda e área que rola de lado não navegam', async ({ kora }) => {
+test('R-celular-gestos arrastar de lado: conversa → arquivos e de volta, conversa → lista, também a partir da borda; vertical, diagonal e área que rola de lado não navegam', async ({ kora }) => {
   const env = kora.env()
   writeFileSync(join(env.project, 'largo.md'), ['# Largo', '', '```', 'codigo_largo '.repeat(60), '```', ''].join('\n'))
   writeFileSync(join(env.project, 'doc.pdf'), pdfBytes())
@@ -252,7 +252,6 @@ test('R-celular-gestos arrastar de lado: conversa → arquivos e de volta, conve
   await stays([[width / 2, middle - 150], [width / 2, middle + 150]], 'rolar o terminal na vertical não navega')
   await stays([[width - 60, middle - 60], [width - 200, middle + 60]], 'diagonal (140 de lado, 120 para baixo) não navega')
   await stays([[width - 60, middle], [width - 60, middle + 40], [60, middle + 40]], 'começou rolando na vertical: virar de lado depois não navega')
-  await stays([[8, middle], [width - 50, middle]], 'arrastar a partir da borda é o voltar do Android, não o do Kora')
   // Pinça: o segundo dedo chega depois do primeiro, e os dois andam para a esquerda.
   const pinch = async (): Promise<void> => {
     const fingers = (x: number): { x: number; y: number; id: number }[] => [{ x, y: middle - 60, id: 0 }, { x: x - 20, y: middle + 60, id: 1 }]
@@ -265,6 +264,15 @@ test('R-celular-gestos arrastar de lado: conversa → arquivos e de volta, conve
     await expect(files).toHaveCount(0)
   }
   await pinch()
+
+  // A partir da borda, onde o dedo costuma começar: com os botões de navegação do Android a borda é da página, e com a
+  // navegação por gestos o sistema cancela o toque quando assume o voltar.
+  await drag(cdp, [[width - 3, middle], [50, middle]])
+  await expect(files, 'conversa: dedo para a esquerda, a partir da borda, abre os arquivos').toBeVisible()
+  await expect(toChat).toBeVisible()
+  await drag(cdp, [[3, middle], [width - 50, middle]])
+  await expect(strip, 'arquivos: dedo para a direita, a partir da borda, volta à conversa').toBeVisible()
+  await expect(files).toHaveCount(0)
 
   await drag(cdp, left)
   await expect(files, 'conversa: dedo para a esquerda abre os arquivos').toBeVisible()
@@ -288,7 +296,8 @@ test('R-celular-gestos arrastar de lado: conversa → arquivos e de volta, conve
   await expect(strip, 'arquivo aberto vindo da conversa: dedo para a direita volta direto à conversa').toBeVisible()
   await expect(code).toHaveCount(0)
 
-  // PDF: toque simples alterna a barra de página e zoom; duplo toque é zoom e não esconde nada.
+  // PDF: toque simples esconde a barra de página e zoom, a faixa do arquivo e o cabeçalho do Kora, e o PDF fica com a
+  // tela quase toda; duplo toque é zoom e não esconde nada.
   await drag(cdp, left)
   await files.locator('.file-row').filter({ hasText: 'doc.pdf' }).click()
   const bar = phone.locator('.pdf-zoom')
@@ -300,11 +309,19 @@ test('R-celular-gestos arrastar de lado: conversa → arquivos e de volta, conve
     const page = (await phone.locator('.pdf-scroller').boundingBox())!
     for (let i = 0; i < times; i++) await tapAt(cdp, page.x + page.width / 2, page.y + page.height / 2)
   }
+  const koraHeader = phone.locator('.mobile-header')
+  const reading = async (): Promise<number> => (await phone.locator('.pdf-scroller').boundingBox())!.height
+  const before = await reading()
   await tap()
   await expect(bar, 'um toque esconde a barra').toBeHidden()
-  await expect(header, 'em pé a faixa do arquivo fica').toBeVisible()
+  await expect(header, 'em pé, o toque esconde também a faixa do arquivo').toBeHidden()
+  await expect(koraHeader, 'e o cabeçalho do Kora').toBeHidden()
+  await expect.poll(async () => (await reading()) / await phone.evaluate(() => innerHeight), { message: 'o PDF fica com a tela quase toda' }).toBeGreaterThan(0.97)
+  expect(await reading()).toBeGreaterThan(before)
   await tap()
   await expect(bar, 'outro toque mostra a barra').toBeVisible()
+  await expect(header).toBeVisible()
+  await expect(koraHeader).toBeVisible()
   const fitted = await zoom.textContent()
   await tap(2)
   await expect(zoom, 'duplo toque amplia').not.toHaveText(fitted!)

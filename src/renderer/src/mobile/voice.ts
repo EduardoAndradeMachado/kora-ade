@@ -37,7 +37,8 @@ export async function transcribeAudio(base64: string, mime: string, signal: Abor
     if (signal.aborted) throw error
     return post()
   }).catch((error: unknown) => {
-    throw new Error(`Não deu para enviar o áudio ao PC (${error instanceof Error ? error.message : String(error)}).`)
+    // O fetch sem resposta nenhuma só diz "Failed to fetch".
+    throw new Error(`Não deu para enviar o áudio ao PC (${error instanceof TypeError ? 'sem conexão com o PC' : error instanceof Error ? error.message : String(error)}).`)
   })
   const result = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(result.error ?? 'Não deu para transcrever o áudio.')
