@@ -36,7 +36,7 @@ function markdownHtml(source: string, raw: string): string {
   return doc.body.innerHTML
 }
 
-export function FileViewer({ projectId, path, dark, onBack, onOpenFile }: { projectId: string; path: string; dark: boolean; onBack(): void; onOpenFile(path: string): void }): React.JSX.Element {
+export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }: { projectId: string; path: string; dark: boolean; onBack(): void; onChat?(): void; onOpenFile(path: string): void }): React.JSX.Element {
   const kind = kindOf(path)
   const textual = kind === 'markdown' || kind === 'html' || kind === 'code'
   const key = `${projectId}:${path}`
@@ -138,6 +138,7 @@ export function FileViewer({ projectId, path, dark, onBack, onOpenFile }: { proj
       </div>}
       {!textual && raw && <button className="icon-button" aria-label="Recarregar do PC" onClick={() => void load(false)}><Icon name="atualizar" /></button>}
       {textual && draft !== null && <button className="primary save-button" disabled={saving} onClick={() => void save(base)}>{saving ? 'Salvando…' : 'Salvar'}</button>}
+      {onChat && <button className="icon-button chat-return" aria-label="Voltar à conversa" onClick={onChat}><Icon name="sessoes" /></button>}
     </div>
     {notice && <div role={notice.tone === 'info' ? 'status' : 'alert'} className={`file-notice ${notice.tone}`}>
       <span>{notice.text}</span>

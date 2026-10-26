@@ -466,7 +466,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     mkdirSync(join(dir, 'docs'))
     const note = join(dir, 'docs', 'nota.md')
     writeFileSync(note, '# Título da nota\r\nlinha do PC\r\n')
-    writeFileSync(join(dir, 'docs', 'pagina.html'), '<link rel="stylesheet" href="estilo.css"><h1>Página de teste</h1>')
+    writeFileSync(join(dir, 'docs', 'pagina.html'), '<link rel="stylesheet" href="estilo.css"><h1>Página de teste</h1><a href="#fim">Ir ao fim</a> <a href="#topo">Ir ao topo</a><p id="fim">fim</p>')
     writeFileSync(join(dir, 'docs', 'estilo.css'), 'h1 { color: rgb(255, 0, 0) }')
     writeFileSync(join(dir, 'docs', 'foto.png'), png)
     writeFileSync(join(dir, 'docs', 'doc.pdf'), [
@@ -567,10 +567,25 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await expect.poll(() => page.locator('.image-view img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1)
     const fileSize = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }))
     expect(fileSize.scroll).toBeLessThanOrEqual(fileSize.width)
-    // Da lista inicial, os arquivos do projeto estão a um toque, sem passar pela página de conversas.
+    await page.screenshot({ path: join(artifacts, 'arquivo-voltar-conversa-350.png') })
+    // Do arquivo à conversa num toque, pulando as pastas abertas; os arquivos reabrem na pasta em que estavam.
+    await page.getByRole('button', { name: 'Voltar à conversa', exact: true }).click()
+    await browserExpect(page.locator('.session-strip')).toBeVisible()
+    await page.locator('.session-strip').getByRole('button', { name: 'Arquivos do projeto', exact: true }).click()
+    await browserExpect(page.locator('.file-row').filter({ hasText: 'nota.md' })).toBeVisible()
+    await page.screenshot({ path: join(artifacts, 'arquivos-da-conversa-350.png') })
+    // Links dentro da prévia HTML põem entradas no histórico do navegador que não são do Kora: a volta não conta com elas.
+    await page.locator('.file-row').filter({ hasText: 'pagina.html' }).click()
+    const preview = page.frameLocator('iframe.html-view')
+    await preview.getByRole('link', { name: 'Ir ao fim', exact: true }).click()
+    await preview.getByRole('link', { name: 'Ir ao topo', exact: true }).click()
+    await page.getByRole('button', { name: 'Voltar à conversa', exact: true }).click()
+    await browserExpect(page.locator('.session-strip')).toBeVisible()
+    // Da lista inicial, os arquivos do projeto estão a um toque, sem passar pela página de conversas, na mesma pasta.
     await page.getByRole('button', { name: 'Início', exact: true }).click()
     await page.getByRole('button', { name: 'Arquivos de Projeto de validação', exact: true }).click()
-    await browserExpect(page.locator('.file-row').filter({ hasText: /^docs$/ })).toBeVisible()
+    await browserExpect(page.locator('.file-row').filter({ hasText: 'nota.md' })).toBeVisible()
+    await browserExpect(page.getByRole('button', { name: 'Voltar à conversa', exact: true })).toHaveCount(0)
     expect(errors).toEqual([])
   } finally {
     process.env['PATH'] = originalPath

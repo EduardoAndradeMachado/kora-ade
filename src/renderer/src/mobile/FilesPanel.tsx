@@ -9,9 +9,10 @@ import { Loading } from './Loading'
 const FILE_ICON: Record<ReturnType<typeof viewerFor>, IconName> = { markdown: 'arquivo', code: 'codigo', pdf: 'pdf', image: 'imagem', external: 'arquivo' }
 
 // Uma pasta por vez, com as cores do git do explorador do PC; tocar na pasta entra nela, no arquivo abre.
-export function FilesPanel({ projectId, dir, onDir, onFile }: {
+export function FilesPanel({ projectId, dir, onFailed, onDir, onFile }: {
   projectId: string
   dir: string
+  onFailed(): void
   onDir(dir: string): void
   onFile(path: string): void
 }): React.JSX.Element {
@@ -32,6 +33,7 @@ export function FilesPanel({ projectId, dir, onDir, onFile }: {
         if (mine !== request.current) return
         setListing(null)
         setError(failure.message)
+        onFailed()
       })
       .finally(() => { if (mine === request.current) setLoading(false) })
   }, [projectId, dir])
