@@ -101,8 +101,16 @@ test('R-conta Fora de casa: cria a conta pelo painel do celular, liga, e o dono 
     const [blocked] = await relay.sql<{ blocked_reason: string }[]>`select blocked_reason from kora_sync.accounts where id = ${other[0]!.id}`
     expect(blocked!.blocked_reason).toBe('teste de bloqueio')
 
+    // Na bandeja o Kora continua aberto, e o PC continua no ar pelo servidor do Kora.
+    await admin.getByRole('button', { name: 'Fechar' }).click()
+    await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
+    await expect.poll(() => run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false)
+    await page.waitForTimeout(1500)
+    expect((await page.evaluate(() => window.kora.mobileStatus())).remote?.state).toBe('conectado')
+    await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.show())
+    await page.getByRole('button', { name: 'Celular', exact: true }).click()
+
     // Sair: o relay esquece este PC e o Fora de casa desliga.
-    await admin.getByRole('button', { name: 'Voltar' }).click()
     await panel.getByRole('button', { name: 'Sair' }).click()
     await expect(away).toHaveAttribute('aria-checked', 'false')
     await expect(panel.getByRole('form', { name: 'Entrar na conta do Kora' })).toBeVisible()

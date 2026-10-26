@@ -377,3 +377,24 @@ test('R-celular-rolagem campo da mensagem focado: arrastar no terminal larga o c
   await phone.keyboard.type(' mais')
   await expect(field).toHaveValue('rascunho mais')
 })
+
+test('R-celular-bandeja Kora na bandeja segue no ar: o celular vê a aba suspensa, retoma e usa o shell com a janela escondida', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  await newTab(run.page, 'Terminal')
+  await expect(ui.terminal(run.page)).toBeVisible()
+  const { cookie } = await pairPhone(run)
+  const tab = await until(async () => (await phoneTabs(cookie)).find((t) => t.live), 'aba viva para o celular')
+
+  // O X da janela vai para a bandeja: os processos das abas acabam, mas o Kora (e o servidor do celular) continua.
+  await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
+  await until(async () => (await phoneTabs(cookie)).find((t) => t.id === tab.id && !t.live), 'aba suspensa vista pelo celular')
+  expect(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false)
+  expect((await fetch(`${BASE}/health`)).status).toBe(200)
+
+  await phone(cookie, { type: 'resume', tabId: tab.id, cols: 60, rows: 24 })
+  await until(async () => (await phoneTabs(cookie)).find((t) => t.id === tab.id && t.live), 'aba retomada pelo celular')
+  await phone(cookie, { type: 'send', tabId: tab.id, text: "Write-Output ('NA_' + 'BANDEJA')" })
+  await until(async () => (await screen(cookie, tab.id)).includes('NA_BANDEJA'), 'saída do shell retomado com a janela escondida')
+  expect(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false)
+})
