@@ -9,7 +9,8 @@
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "isolatedModules": true,
+    "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["electron.vite.config.ts", "vitest.config.ts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*", "scripts/**/*", "test/**/*"]
+  "include": ["electron.vite.config.ts", "vitest.config.ts", "relay/**/*", "src/main/**/*", "src/preload/**/*", "src/shared/**/*", "scripts/**/*", "test/**/*"]
 }
