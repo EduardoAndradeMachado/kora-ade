@@ -6,6 +6,7 @@ import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.ClipboardManager
+import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -17,6 +18,8 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -32,6 +35,7 @@ import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowInsets
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.MimeTypeMap
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -62,6 +66,7 @@ import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.io.File
 import java.net.URL
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.UUID
 import java.util.concurrent.ExecutorService
@@ -166,9 +171,11 @@ class MainActivity : ComponentActivity() {
     private var numeroDaGravacao = 0
     // Esquecida ligada, a gravação para sozinha e vai para a transcrição, dentro do limite de envio do PC.
     private val pararPorTempo = Runnable { pararGravacao(enviar = true) }
-    // A ponte KoraApp chega também aos iframes, como o HTML de projeto aberto no visualizador: o microfone só obedece
-    // a quem tem esta chave, que o app põe no documento principal a cada página carregada.
+    // A ponte KoraApp chega também aos iframes, como o HTML de projeto aberto no visualizador: o microfone e o Baixar só
+    // obedecem a quem tem esta chave, que o app põe no documento principal a cada página carregada.
     private var chaveDoAudio = UUID.randomUUID().toString()
+    // O último arquivo salvo em Downloads, para o Abrir do aviso na tela.
+    private var ultimoBaixado: Pair<Uri, String>? = null
     // Nível do microfone para as barras do campo: quem fala vê que o áudio está chegando.
     private val medirNivel = object : Runnable {
         override fun run() {
@@ -347,9 +354,81 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun pararAudio(enviar: Boolean, chave: String) = runOnUiThread { if (chave == chaveDoAudio) pararGravacao(enviar) }
+
+        @JavascriptInterface
+        fun baixar(endereco: String, nome: String, chave: String) = runOnUiThread { if (chave == chaveDoAudio) baixarArquivo(endereco, nome) }
+
+        @JavascriptInterface
+        fun abrirBaixado(chave: String) = runOnUiThread { if (chave == chaveDoAudio) abrirBaixado() }
     }
 
     private fun avisarAudio(evento: JSONObject) = web.evaluateJavascript("window.koraAudio && window.koraAudio($evento)", null)
+
+    private fun avisarBaixado(evento: JSONObject) = web.evaluateJavascript("window.koraBaixado && window.koraBaixado($evento)", null)
+
+    // Baixa pelo mesmo caminho da tela (rede de casa, ou a passagem pelo relay com o cookie dela) direto para
+    // Downloads/Kora: o arquivo fica no celular e abre sem o PC.
+    private fun baixarArquivo(endereco: String, nome: String) {
+        val kora = atual
+        val origem = kora?.let { enderecoParaBaixar(endereco, it.host, it.porta) }
+        if (origem == null) return avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Esse arquivo não é do Kora aberto."))
+        val cookie = passagem?.takeIf { kora.host == "127.0.0.1" }?.cookie
+        Thread {
+            var salvo: Uri? = null
+            val resultado = runCatching {
+                val conexao = origem.toURL().openConnection() as HttpURLConnection
+                cookie?.let { conexao.setRequestProperty("Cookie", it) }
+                conexao.connectTimeout = 5000
+                conexao.readTimeout = 30_000
+                try {
+                    check(conexao.responseCode == 200) {
+                        conexao.getHeaderField("X-Kora-Erro")?.let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrNull() }?.trimEnd('.')
+                            ?: "o PC respondeu ${conexao.responseCode}"
+                    }
+                    // O tipo segue a extensão quando o Android a conhece: com outro tipo, o MediaStore acrescentaria a
+                    // extensão dele ao nome (README.md viraria README.md.txt).
+                    val extensao = nomeParaSalvar(nome).substringAfterLast('.', "").lowercase()
+                    val tipo = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extensao) ?: tipoDoArquivo(conexao.contentType)
+                    val dados = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, nomeParaSalvar(nome))
+                        put(MediaStore.Downloads.MIME_TYPE, tipo)
+                        put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Kora")
+                        put(MediaStore.Downloads.IS_PENDING, 1)
+                    }
+                    val uri = checkNotNull(contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, dados)) { "o Android não criou o arquivo" }
+                    salvo = uri
+                    conexao.inputStream.use { entrada -> checkNotNull(contentResolver.openOutputStream(uri)).use { entrada.copyTo(it) } }
+                    check(contentResolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null) == 1) { "o Android não liberou o arquivo" }
+                    // O Android acrescenta " (1)" quando o nome já existe: o aviso mostra o nome de verdade.
+                    val final = contentResolver.query(uri, arrayOf(MediaStore.Downloads.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+                    Triple(uri, tipo, final ?: nomeParaSalvar(nome))
+                } finally {
+                    conexao.disconnect()
+                }
+            }
+            resultado.onFailure { erro ->
+                Log.w(TAG, "falha ao baixar arquivo do PC", erro)
+                salvo?.let { runCatching { contentResolver.delete(it, null, null) } }
+            }
+            principal.post {
+                if (isFinishing) return@post
+                resultado.onSuccess { (uri, tipo, final) ->
+                    ultimoBaixado = uri to tipo
+                    avisarBaixado(JSONObject().put("tipo", "salvo").put("nome", final))
+                }.onFailure { erro ->
+                    avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Não deu para baixar o arquivo: ${erro.message.orEmpty().trimEnd('.')}."))
+                }
+            }
+        }.start()
+    }
+
+    private fun abrirBaixado() {
+        val (uri, tipo) = ultimoBaixado ?: return
+        val pedido = Intent(Intent.ACTION_VIEW).setDataAndType(uri, tipo).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        runCatching { startActivity(pedido) }.onFailure {
+            Toast.makeText(this, "Nenhum app do celular abre este tipo de arquivo.", Toast.LENGTH_LONG).show()
+        }
+    }
 
     private fun comecarGravacao() {
         // Gravação que a página perdeu de vista (recarregou no meio) não trava o microfone: é descartada.
@@ -434,7 +513,7 @@ class MainActivity : ComponentActivity() {
 
         // evaluateJavascript roda só no documento principal: o iframe do visualizador não recebe a chave.
         override fun onPageFinished(view: WebView, url: String?) {
-            view.evaluateJavascript("window.koraChaveAudio = '$chaveDoAudio'", null)
+            if (recebeAChave(url)) view.evaluateJavascript("window.koraChaveAudio = '$chaveDoAudio'", null)
             if (passagem == null) atual?.let(::registrarCertificado)
             super.onPageFinished(view, url)
         }

@@ -297,6 +297,12 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .file-mode button { min-height: 32px; padding: 0 8px; gap: 4px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font-size: 12px; }
 .file-mode button svg { width: 14px; height: 14px; }
 .file-mode button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); }
+/* Celular estreito: Ver e Editar só com o ícone, para o nome do arquivo caber ao lado do Baixar e da conversa. O texto
+   continua sendo o nome do botão para o leitor de tela. */
+@media (max-width: 379px) {
+  .file-mode button { font-size: 0; gap: 0; padding: 0 9px; }
+  .file-mode button svg { width: 16px; height: 16px; }
+}
 .save-button { min-height: 36px; padding: 0 12px; font-size: 13px; flex-shrink: 0; }
 .file-notice { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; line-height: 1.4; flex-shrink: 0; flex-wrap: wrap; }
 .file-notice > span:first-child { flex: 1; min-width: 160px; }

@@ -29,8 +29,12 @@ interface Anchor { fx: number; fy: number; px: number; py: number }
 const failure = (error: unknown): string =>
   error instanceof Error && error.name === 'PasswordException' ? 'o PDF é protegido por senha.' : error instanceof Error ? error.message : String(error)
 
-export function PdfPages({ url, controls, onTap }: { url: string; controls: boolean; onTap(): void }): React.JSX.Element {
+// onError: o PDF não abriu (rede caiu no meio, link vencido); quem mostra decide se tenta de novo.
+export function PdfPages({ url, controls, onTap, onError }: { url: string; controls: boolean; onTap(): void; onError?(): void }): React.JSX.Element {
   const [state, setState] = useState<DocState>({ kind: 'loading' })
+  const onErrorRef = useRef(onError)
+  onErrorRef.current = onError
+  useEffect(() => { if (state.kind === 'error') onErrorRef.current?.() }, [state.kind])
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
   const [zoom, setZoom] = useState<number | 'fit'>('fit')

@@ -578,6 +578,61 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await expect.poll(() => page.locator('.mobile-app').evaluate((app) => Math.round(app.getBoundingClientRect().height))).toBe(fullHeight)
     await touch.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 })
     await expect.poll(() => page.evaluate(() => window.visualViewport!.scale)).toBe(1)
+    // App Android de antes da ponte de download não baixa nada: o botão não aparece.
+    const downloadButton = page.getByRole('button', { name: 'Baixar para o celular', exact: true })
+    await browserExpect(downloadButton).toHaveCount(0)
+    // O app novo recebe um link de leitura novo, o nome e a chave da página, e responde quando salvou em Downloads.
+    await page.evaluate(() => {
+      const app = (window as unknown as { KoraApp: Record<string, unknown> }).KoraApp
+      Object.assign(window, { koraChaveAudio: 'chave-da-pagina', __baixou: [] as string[][], __abriu: 0 })
+      app['baixar'] = (url: string, name: string, key: string) => (window as unknown as { __baixou: string[][] }).__baixou.push([url, name, key])
+      app['abrirBaixado'] = (key: string) => { if (key === 'chave-da-pagina') (window as unknown as { __abriu: number }).__abriu++ }
+    })
+    await page.goBack()
+    await page.locator('.file-row').filter({ hasText: 'pagina.html' }).click()
+    await downloadButton.click()
+    await browserExpect(downloadButton).toBeDisabled()
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __baixou: string[][] }).__baixou.length)).toBe(1)
+    const [asked, askedName, askedKey] = await page.evaluate(() => (window as unknown as { __baixou: [string, string, string][] }).__baixou[0]!)
+    expect([askedName, askedKey]).toEqual(['pagina.html', 'chave-da-pagina'])
+    expect(asked.startsWith(`http://127.0.0.1:${port}/raw/`)).toBe(true)
+    expect(asked).toMatch(/\/docs\/pagina\.html$/)
+    expect(await (await fetch(asked)).text()).toContain('Página de teste')
+    await page.evaluate(() => (window as unknown as { koraBaixado(event: unknown): void }).koraBaixado({ tipo: 'salvo', nome: 'pagina (1).html' }))
+    await browserExpect(page.locator('.file-notice[role="status"]')).toContainText('Salvo em Downloads/Kora como pagina (1).html.')
+    await browserExpect(downloadButton).toBeEnabled()
+    await page.screenshot({ path: join(artifacts, 'arquivo-baixado-350.png') })
+    await page.locator('.file-notice').getByRole('button', { name: 'Abrir', exact: true }).click()
+    expect(await page.evaluate(() => (window as unknown as { __abriu: number }).__abriu)).toBe(1)
+    // No navegador do celular, sem o app, é um download comum, com o nome e o conteúdo do arquivo do PC.
+    await page.evaluate(() => { delete (window as { KoraApp?: unknown }).KoraApp })
+    const [saved] = await Promise.all([page.waitForEvent('download'), downloadButton.click()])
+    expect(saved.suggestedFilename()).toBe('pagina.html')
+    expect(readFileSync(await saved.path(), 'utf8')).toContain('Página de teste')
+    await page.goBack()
+    // Fora de casa, a passagem do app responde 502 sem corpo quando não alcança o PC, com o motivo no cabeçalho: o aviso
+    // diz isso em vez do erro do JSON, e o arquivo abre sozinho quando a ligação com o PC volta.
+    await page.route(/\/api\/file\?/, (route) => route.fulfill({ status: 502, headers: { 'x-kora-erro': encodeURIComponent('O relay não respondeu a tempo.') }, body: '' }))
+    await page.locator('.file-row').filter({ hasText: 'pagina.html' }).click()
+    await browserExpect(page.locator('.file-notice[role="alert"]')).toHaveText('Sem conexão com o PC agora (O relay não respondeu a tempo). Confira a internet do celular; quando a conexão voltar, é só tentar de novo.')
+    await page.unroute(/\/api\/file\?/)
+    for (const client of (mobile as unknown as { clients: Set<{ response: { destroy(): void } }> }).clients) client.response.destroy()
+    await browserExpect(page.frameLocator('iframe.html-view').locator('h1')).toHaveText('Página de teste', { timeout: 15000 })
+    await browserExpect(page.locator('.file-notice')).toHaveCount(0)
+    // A ligação volta enquanto o pedido do arquivo ainda espera o relay (até 15 s) e só depois falha: tenta de novo na
+    // hora, em vez de esperar a próxima queda.
+    await page.goBack()
+    const held: import('@playwright/test').Route[] = []
+    await page.route(/\/api\/file\?/, (route) => (held.length === 0 ? void held.push(route) : route.continue()))
+    await page.locator('.file-row').filter({ hasText: 'pagina.html' }).click()
+    await expect.poll(() => held.length).toBe(1)
+    for (const client of (mobile as unknown as { clients: Set<{ response: { destroy(): void } }> }).clients) client.response.destroy()
+    await browserExpect(page.getByRole('status', { name: 'Reconectando ao PC' })).toBeVisible()
+    await browserExpect(page.getByRole('status', { name: 'PC conectado' })).toBeVisible({ timeout: 15000 })
+    await held[0]!.fulfill({ status: 502, headers: { 'x-kora-erro': encodeURIComponent('O relay não respondeu a tempo.') }, body: '' })
+    await browserExpect(page.frameLocator('iframe.html-view').locator('h1')).toHaveText('Página de teste')
+    await browserExpect(page.locator('.file-notice')).toHaveCount(0)
+    await page.unroute(/\/api\/file\?/)
     await page.goBack()
     await page.locator('.file-row').filter({ hasText: 'doc.pdf' }).click()
     // A página é desenhada de verdade (o canvas ganha pixels) e o zoom dos botões muda o tamanho dela.
@@ -602,8 +657,14 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await browserExpect(page.locator('.markdown-view h1')).toHaveText('Outra nota')
     await page.goBack()
     await page.goBack()
+    // A imagem que não chegou (a rede caiu no meio do /raw/) volta sozinha quando a ligação com o PC volta.
+    await page.route(/\/raw\/.*foto\.png/, (route) => route.abort('connectionreset'))
     await page.locator('.file-row').filter({ hasText: 'foto.png' }).click()
-    await expect.poll(() => page.locator('.image-view img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1)
+    await browserExpect(page.locator('.file-notice[role="alert"]')).toContainText('Não deu para trazer a imagem do PC.')
+    await page.unroute(/\/raw\/.*foto\.png/)
+    for (const client of (mobile as unknown as { clients: Set<{ response: { destroy(): void } }> }).clients) client.response.destroy()
+    await expect.poll(() => page.locator('.image-view img').evaluate((image: HTMLImageElement) => image.naturalWidth), { timeout: 15000 }).toBe(1)
+    await browserExpect(page.locator('.file-notice')).toHaveCount(0)
     const fileSize = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }))
     expect(fileSize.scroll).toBeLessThanOrEqual(fileSize.width)
     await page.screenshot({ path: join(artifacts, 'arquivo-voltar-conversa-350.png') })

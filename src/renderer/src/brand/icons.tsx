@@ -250,6 +250,12 @@ const BRAND = {
       <path d="M12 11v9M9 17l3 3 3-3" stroke={a} />
     </>
   ),
+  baixar: (a) => (
+    <>
+      <path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" />
+      <path d="M12 4v11M7.5 10.5 12 15l4.5-4.5" stroke={a} />
+    </>
+  ),
   publicar: (a) => (
     <>
       <path d={CLOUD} />

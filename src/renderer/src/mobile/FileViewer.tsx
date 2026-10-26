@@ -7,11 +7,13 @@ import { api } from './api'
 import { CodeEditor } from './CodeEditor'
 import { PdfPages } from './PdfPages'
 import { SkeletonCode } from './Skeleton'
+import { canDownload, download, onDownloaded, openDownloaded } from './downloads'
 
 type Kind = 'markdown' | 'html' | 'code' | 'pdf' | 'image' | 'external'
 const kindOf = (path: string): Kind => (/\.html?$/i.test(path) ? 'html' : viewerFor(path))
 interface TextFile { content: string; mtimeMs: number; raw: string }
-type Notice = { tone: 'error' | 'conflict' | 'info'; text: string }
+// downloaded: o app acabou de salvar o arquivo no celular, e o aviso oferece abrir.
+type Notice = { tone: 'error' | 'conflict' | 'info'; text: string; downloaded?: boolean }
 
 // O voltar do celular não pergunta nada: o texto editado e não salvo fica aqui e volta quando o arquivo é reaberto.
 // mtimeMs é a versão do arquivo em que o rascunho foi feito: se o agente mexeu depois, salvar dá conflito.
@@ -36,13 +38,16 @@ function markdownHtml(source: string, raw: string): string {
   return doc.body.innerHTML
 }
 
-export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }: { projectId: string; path: string; dark: boolean; onBack(): void; onChat?(): void; onOpenFile(path: string): void }): React.JSX.Element {
+// connection: muda a cada vez que a ligação com o PC volta (MobileApp); o arquivo que não abriu tenta de novo sozinho.
+export function FileViewer({ projectId, path, dark, connection, onBack, onChat, onOpenFile }: { projectId: string; path: string; dark: boolean; connection: number; onBack(): void; onChat?(): void; onOpenFile(path: string): void }): React.JSX.Element {
   const kind = kindOf(path)
   const textual = kind === 'markdown' || kind === 'html' || kind === 'code'
   const key = `${projectId}:${path}`
   const query = `project=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`
   const name = path.split(/[\\/]/).pop() ?? path
   const folder = path.slice(0, path.length - name.length).replace(/[\\/]$/, '')
+  // O link de leitura do PC não entrega arquivo oculto (.env, .git/...), nem para baixar.
+  const hidden = path.split(/[\\/]/).some((part) => part.startsWith('.'))
   const [file, setFile] = useState<TextFile | null>(null)
   const [raw, setRaw] = useState<string | null>(null)
   // Muda a cada leitura do PC: o editor remonta com o texto novo. Entre Ver e Editar ele remonta com o texto atual.
@@ -56,18 +61,29 @@ export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }
   const [base, setBase] = useState(0)
   // Toque no PDF esconde a barra de página e zoom; com o celular deitado, também a faixa do arquivo (só no CSS).
   const [immersive, setImmersive] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const draftRef = useRef(draft)
   draftRef.current = draft
   const baseRef = useRef(base)
   baseRef.current = base
   // Só depois de abrir: se a reabertura falhou (rede, PC fora), o rascunho guardado não pode ser apagado ao sair.
   const opened = useRef(false)
+  const failed = useRef(false)
+  const connectionRef = useRef(connection)
+  connectionRef.current = connection
 
-  const load = useCallback(async (restore: boolean) => {
+  const load = useCallback(async (restore: boolean): Promise<void> => {
     setLoading(true)
+    const since = connectionRef.current
+    let retry = false
     try {
-      if (!textual) return setRaw((await api<{ raw: string }>(`file-link?${query}`)).raw)
+      if (!textual) {
+        setRaw((await api<{ raw: string }>(`file-link?${query}`)).raw)
+        failed.current = false
+        return setNotice(null)
+      }
       const loaded = await api<TextFile>(`file?${query}`)
+      failed.current = false
       const saved = restore ? drafts.get(key) : undefined
       opened.current = true
       setFile(loaded)
@@ -79,12 +95,32 @@ export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }
         : saved.mtimeMs !== loaded.mtimeMs ? { tone: 'conflict', text: 'Suas alterações não salvas voltaram, mas o arquivo mudou no PC depois delas, talvez pelo agente.' }
         : { tone: 'info', text: 'Alterações que você não salvou voltaram.' })
     } catch (error) {
+      failed.current = true
       setNotice({ tone: 'error', text: message(error) })
+      // A ligação com o PC voltou enquanto este pedido ainda falhava (pelo relay ele leva até 15 s): tenta de novo já.
+      retry = connectionRef.current !== since
     } finally {
       setLoading(false)
+      if (retry) void load(restore)
     }
   }, [textual, query, key])
   useEffect(() => { void load(true) }, [load])
+  useEffect(() => { if (failed.current) void load(true) }, [connection, load])
+  useEffect(() => onDownloaded((event) => {
+    setDownloading(false)
+    setNotice(event.tipo === 'salvo' ? { tone: 'info', text: `Salvo em Downloads/Kora como ${event.nome}.`, downloaded: true } : { tone: 'error', text: event.mensagem })
+  }), [])
+  const fetchDownload = async (): Promise<void> => {
+    setDownloading(true)
+    setNotice(null)
+    try {
+      // No navegador o download segue sozinho; no app, a resposta chega por onDownloaded.
+      if (await download(query, name) === 'browser') setDownloading(false)
+    } catch (error) {
+      setDownloading(false)
+      setNotice({ tone: 'error', text: message(error) })
+    }
+  }
   useEffect(() => () => {
     if (!opened.current) return
     if (draftRef.current === null) drafts.delete(key)
@@ -139,6 +175,7 @@ export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }
         <button aria-pressed={mode === 'edit'} onClick={() => setMode('edit')}><Icon name="editar" />Editar</button>
       </div>}
       {!textual && raw && <button className="icon-button" aria-label="Recarregar do PC" onClick={() => void load(false)}><Icon name="atualizar" /></button>}
+      {canDownload() && !hidden && <button className="icon-button" aria-label="Baixar para o celular" aria-busy={downloading} disabled={downloading} onClick={() => void fetchDownload()}><Icon name="baixar" /></button>}
       {textual && draft !== null && <button className="primary save-button" disabled={saving} onClick={() => void save(base)}>{saving ? 'Salvando…' : 'Salvar'}</button>}
       {onChat && <button className="icon-button chat-return" aria-label="Voltar à conversa" onClick={onChat}><Icon name="conversa" active /></button>}
     </div>
@@ -148,6 +185,7 @@ export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }
         <button onClick={discard}>Recarregar do PC</button>
         <button onClick={() => void overwrite()}>Salvar por cima</button>
       </span>}
+      {notice.downloaded && <span className="file-notice-actions"><button onClick={openDownloaded}>Abrir</button></span>}
       {notice.tone !== 'conflict' && <button className="icon-button" aria-label="Dispensar aviso" onClick={() => setNotice(null)}><Icon name="fechar" /></button>}
     </div>}
     <div className="file-body">
@@ -173,9 +211,12 @@ export function FileViewer({ projectId, path, dark, onBack, onChat, onOpenFile }
         </div>
         <iframe title={name} className="html-view" sandbox="allow-scripts allow-popups" src={`${raw}?v=${file?.mtimeMs ?? 0}`} />
       </>}
-      {kind === 'image' && raw && <div className="image-view"><img src={raw} alt={name} /></div>}
-      {kind === 'pdf' && raw && <PdfPages url={raw} controls={!immersive} onTap={() => setImmersive((hidden) => !hidden)} />}
-      {kind === 'external' && <p className="empty-copy">Este tipo de arquivo não abre no celular. Abra pelo PC.</p>}
+      {kind === 'image' && raw && <div className="image-view"><img src={raw} alt={name} onError={() => {
+        failed.current = true
+        setNotice({ tone: 'error', text: 'Não deu para trazer a imagem do PC. Ela abre de novo quando a conexão voltar.' })
+      }} /></div>}
+      {kind === 'pdf' && raw && <PdfPages url={raw} controls={!immersive} onTap={() => setImmersive((on) => !on)} onError={() => { failed.current = true }} />}
+      {kind === 'external' && <p className="empty-copy">{canDownload() ? 'Este tipo de arquivo não abre no Kora. Baixe para abrir com outro app do celular.' : 'Este tipo de arquivo não abre no celular. Abra pelo PC.'}</p>}
     </div>
   </main>
 }
