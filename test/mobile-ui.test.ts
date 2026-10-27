@@ -77,9 +77,11 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     const page = await context.newPage()
     const errors: string[] = []
     page.on('pageerror', (error) => errors.push(error.message))
-    await page.goto(`http://127.0.0.1:${port}/#pair=${invitation.code}`)
-    // Primeira carga: o Vite prepara as dependências (CodeMirror, pdf.js) antes de servir a página, mais lento no CI.
-    await browserExpect(page.getByRole('button', { name: 'Vincular celular' })).toBeVisible({ timeout: 45000 })
+    // Primeira carga: o cache do Vite é novo a cada execução e ele prepara as dependências (CodeMirror, pdf.js) antes
+    // de servir a página; isso passa de 30 s numa máquina ocupada. O goto só espera a resposta chegar e a espera de
+    // verdade fica no botão.
+    await page.goto(`http://127.0.0.1:${port}/#pair=${invitation.code}`, { waitUntil: 'commit', timeout: 120_000 })
+    await browserExpect(page.getByRole('button', { name: 'Vincular celular' })).toBeVisible({ timeout: 120_000 })
     await page.getByRole('button', { name: 'Vincular celular' }).click()
     await browserExpect(page.getByRole('heading', { name: 'Seus projetos' })).toBeVisible()
     const { deviceId: device } = await page.evaluate(async () => (await fetch('/api/state')).json())
@@ -739,4 +741,4 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     terminals.killAll()
     await vite.close()
   }
-}, 120000)
+}, 300_000)
