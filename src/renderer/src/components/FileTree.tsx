@@ -21,9 +21,15 @@ interface Props {
   onPathMoved(from: string, to: string): void
   hasUnsavedUnder(rel: string): boolean
   reveal?: { path: string; n: number } | null
+  // Cada valor novo fecha todas as pastas abertas.
+  collapseAll: number
 }
 
 const key = gitPathKey
+
+// A árvore é recriada a cada troca de projeto e de aba do painel; as pastas abertas duram enquanto o app estiver
+// rodando (na bandeja também) e somem ao fechar.
+const expandedByProject = new Map<string, Set<string>>()
 
 type Target = { path: string; isDir: boolean } | null
 type Creating = { parent: string; kind: 'file' | 'dir' }
@@ -33,9 +39,9 @@ const parentOf = (rel: string): string => {
   return i < 0 ? '' : rel.slice(0, i)
 }
 
-export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFile, onPathMoved, hasUnsavedUnder, reveal }: Props): React.JSX.Element {
+export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFile, onPathMoved, hasUnsavedUnder, reveal, collapseAll }: Props): React.JSX.Element {
   const [children, setChildren] = useState<Record<string, FileEntry[]>>({})
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(() => expandedByProject.get(projectId) ?? new Set())
   const [error, setError] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; target: Target } | null>(null)
   const [creating, setCreating] = useState<Creating | null>(null)
@@ -114,8 +120,7 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
     const ancestors = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('\\'))
     const next = new Set(expandedRef.current)
     for (const dir of ancestors) next.add(dir)
-    expandedRef.current = next
-    setExpanded(next)
+    setExpandedDirs(next)
     setSelected(reveal.path)
     void Promise.all(ancestors.map((dir) => load(dir))).then(() =>
       requestAnimationFrame(() =>
@@ -126,8 +131,18 @@ export function FileTree({ projectId, projectPath, reloadKey, gitFiles, onOpenFi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reveal?.n])
 
-  const setExpandedDirs = (next: Set<string>): void => {
+  // A árvore remonta ao voltar para Arquivos com o mesmo valor; só um clique novo fecha.
+  const collapseSeen = useRef(collapseAll)
+  useEffect(() => {
+    if (collapseAll === collapseSeen.current) return
+    collapseSeen.current = collapseAll
+    setExpandedDirs(new Set())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapseAll])
+
+  function setExpandedDirs(next: Set<string>): void {
     expandedRef.current = next
+    expandedByProject.set(projectId, next)
     setExpanded(next)
   }
 

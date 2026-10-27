@@ -191,6 +191,7 @@ const BRAND = {
     </>
   ),
   expandir: () => <path d="M9.5 6l6 6-6 6" />,
+  recolher: () => <path d="M7 4.5l5 5 5-5M7 19.5l5-5 5 5" />,
   editar: (a) => (
     <>
       <path d="M15.5 4.5l4 4L9 19l-5 1 1-5z" />

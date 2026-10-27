@@ -66,6 +66,7 @@ export function RightPanel(props: Props): React.JSX.Element {
     }
   }
   const [reloadKey, setReloadKey] = useState(0)
+  const [collapseAll, setCollapseAll] = useState(0)
   const git = useGit(props.project.id, reloadKey, view === 'git')
   const id = props.project.id
 
@@ -75,6 +76,17 @@ export function RightPanel(props: Props): React.JSX.Element {
         <span className="min-w-0 flex-1 truncate text-sm font-semibold" data-tip={props.project.path}>
           {props.project.name}
         </span>
+        {view === 'files' && !props.missing && (
+          <button
+            type="button"
+            data-tip="Recolher pastas"
+            aria-label="Recolher pastas"
+            onClick={() => setCollapseAll((n) => n + 1)}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <Icon name="recolher" className="size-3.5" />
+          </button>
+        )}
         <button
           type="button"
           data-tip="Recarregar"
@@ -124,6 +136,7 @@ export function RightPanel(props: Props): React.JSX.Element {
                 onPathMoved={props.onPathMoved}
                 hasUnsavedUnder={props.hasUnsavedUnder}
                 reveal={props.reveal}
+                collapseAll={collapseAll}
               />
             </div>
           )}
