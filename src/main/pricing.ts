@@ -83,12 +83,33 @@ const OPENAI: Record<string, OpenAiRate> = {
     output: 10,
     long: { from: 272_000, input: 4, cached: 0.2, cacheWrite: 5, output: 15 }
   },
+  'gpt-6.1-terra': {
+    input: 1,
+    cached: 0.05,
+    cacheWrite: 1.25,
+    output: 5,
+    long: { from: 272_000, input: 2, cached: 0.1, cacheWrite: 2.5, output: 7.5 }
+  },
   'gpt-6-astra': {
     input: 10,
     cached: 1,
     cacheWrite: 12.5,
     output: 50,
     long: { from: 272_000, input: 20, cached: 2, cacheWrite: 25, output: 75 }
+  },
+  'gpt-6-sol': {
+    input: 2,
+    cached: 0.2,
+    cacheWrite: 2.5,
+    output: 10,
+    long: { from: 272_000, input: 4, cached: 0.4, cacheWrite: 5, output: 15 }
+  },
+  'gpt-6-luna': {
+    input: 0.1,
+    cached: 0.01,
+    cacheWrite: 0.125,
+    output: 0.5,
+    long: { from: 272_000, input: 0.2, cached: 0.02, cacheWrite: 0.25, output: 0.75 }
   }
 }
 
