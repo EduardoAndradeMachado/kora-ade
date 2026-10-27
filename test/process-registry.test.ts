@@ -80,7 +80,13 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const id of spawned.splice(0)) {
-    if (isAlive(id)) process.kill(id.pid)
+    if (!isAlive(id)) continue
+    // Processo que o killTree acabou de encerrar ainda aparece na lista por um instante; o kill chega depois.
+    try {
+      process.kill(id.pid)
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err
+    }
   }
   rmSync(dir, { recursive: true, force: true })
 })
