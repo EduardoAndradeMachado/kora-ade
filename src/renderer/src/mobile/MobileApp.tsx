@@ -4,7 +4,7 @@ import type { AgentUsage } from '@shared/usage-types'
 import type { SessionSummary } from '@shared/ipc'
 import { Wordmark, SymbolMark } from '@/brand/Logo'
 import { Icon } from '@/brand/icons'
-import { api, koraApp } from './api'
+import { api, koraApp, NO_CONNECTION } from './api'
 import { historyMark, useMobileNavigation } from './navigation'
 import { FolderPicker } from './FolderPicker'
 import { MobileProjectAvatar } from './MobileProjectAvatar'
@@ -23,6 +23,8 @@ import type { IconName } from '@/brand/icons'
 import { SessionView, type SessionFeed, type TerminalChunk } from './SessionView'
 import { saveSound, savedSound, useFinishedAlerts } from './alerts'
 import { useSwipe, type SwipeActions } from './swipe'
+
+const REOPEN_MS = 10_000
 
 const THEMES: { theme: ThemePreference; label: string; icon: IconName }[] = [
   { theme: 'system', label: 'Sistema', icon: 'temaSistema' },
@@ -132,13 +134,23 @@ export function MobileApp(): React.JSX.Element {
     return () => { window.visualViewport?.removeEventListener('resize', update); window.removeEventListener('resize', update) }
   }, [])
 
+  // Tentar de novo do aviso de sem conexão: abre de novo o fluxo de eventos, e a volta dele recarrega o que está aberto.
+  const [attempt, setAttempt] = useState(0)
+  const retry = (): void => {
+    setError(null)
+    setAttempt((value) => value + 1)
+  }
   useEffect(() => {
     if (!device) return
     const events = new EventSource('/api/events')
+    let reopen: ReturnType<typeof setTimeout> | undefined
     events.onopen = () => { setConnected(true); setConnection((version) => version + 1); setError(null) }
     events.onerror = () => {
       setConnected(false)
       void refresh().catch((error) => setError(error.message))
+      // Resposta que não é o fluxo (o 502 da passagem quando o relay não alcança o PC) faz o EventSource desistir de
+      // vez, sem tentar mais sozinho: a tela tenta de novo aqui.
+      if (events.readyState === EventSource.CLOSED) reopen = setTimeout(() => setAttempt((value) => value + 1), REOPEN_MS)
     }
     events.addEventListener('state', (event) => setState(JSON.parse(event.data) as MobileState))
     events.addEventListener('terminal', (event) => feed.current.terminal?.(JSON.parse(event.data) as TerminalChunk))
@@ -150,8 +162,11 @@ export function MobileApp(): React.JSX.Element {
       setState(null)
       setError('Este dispositivo foi desvinculado. Gere outro QR code no PC.')
     })
-    return () => events.close()
-  }, [device, refresh])
+    return () => {
+      events.close()
+      clearTimeout(reopen)
+    }
+  }, [device, refresh, attempt])
 
   useEffect(() => {
     setSessions([])
@@ -225,7 +240,7 @@ export function MobileApp(): React.JSX.Element {
       {project ? <div className="header-title"><MobileProjectAvatar id={project.id} path={project.path} /><span>{project.name}</span></div> : <span className="header-spacer" />}
       {!projectId && <button className="icon-button" aria-label="Novo projeto" onClick={() => picker(null)} disabled={busy || !connected}><Icon name="novoProjeto" active /></button>}
     </header>
-    {error && <div role="alert" className="error-banner"><Icon name="alerta" /><span>{error}</span><button className="icon-button" aria-label="Dispensar aviso" onClick={() => setError(null)}><Icon name="fechar" /></button></div>}
+    {error && <div role="alert" className="error-banner"><Icon name="alerta" /><span>{error}</span>{error === NO_CONNECTION && <button className="retry-button" onClick={retry}><Icon name="atualizar" />Tentar de novo</button>}<button className="icon-button" aria-label="Dispensar aviso" onClick={() => setError(null)}><Icon name="fechar" /></button></div>}
     {!projectId ? <><main className="project-list page-enter" ref={projectList} onScroll={(event) => { homeScroll = event.currentTarget.scrollTop }}>
       <div className="section-heading"><div><span className="eyebrow">SEU COMPUTADOR</span><h1>Seus projetos</h1></div><span className="section-count">{state.projects.length}</span></div>
       <label className="project-search"><Icon name="buscar" /><input aria-label="Buscar projetos e abas" placeholder="Buscar projetos e abas" value={search} onChange={(event) => setSearch(event.target.value)} autoComplete="off" /></label>

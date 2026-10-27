@@ -120,6 +120,9 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .error-banner { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 16px; border-bottom: 1px solid var(--border); font-size: 12px; flex-shrink: 0; background: var(--card); }
 .error-banner > span { flex: 1; }
 .error-banner svg { width: 15px; height: 15px; }
+.retry-button { flex-shrink: 0; min-height: 32px; padding: 0 8px; gap: 5px; font-size: 12px; white-space: nowrap; color: var(--foreground); border: 1px solid var(--border); border-radius: 6px; background: var(--secondary); }
+.error-banner > .icon-button { width: 32px; flex-shrink: 0; }
+.retry-button svg { width: 13px; height: 13px; }
 .pair-screen { height: var(--mobile-height); overflow: auto; padding: 24px; display: grid; place-items: center; }
 .pair-card { width: min(100%, 420px); border: 1px solid var(--border); border-radius: 10px; padding: 28px; background: var(--card); }
 .pair-card h1 { margin-top: 28px; }

@@ -10,16 +10,18 @@ export async function api<T>(path: string, body?: unknown): Promise<T> {
 }
 
 // O PC sempre responde com JSON. Resposta sem corpo vem da passagem do app (Passagem.kt), fora de casa: 502 quando não
-// alcançou o PC pelo relay, com o motivo em X-Kora-Erro, e 403 quando a tela perdeu o cookie dela.
+// alcançou o PC pelo relay, com o motivo em X-Kora-Erro, e 403 quando a tela perdeu o cookie dela. O aviso fica curto,
+// com o Tentar de novo ao lado; o motivo vai para o console, e o relay e o PC guardam o deles.
 function unreachable(response: Response): string {
   const reason = decodeReason(response.headers.get('x-kora-erro'))
-  if (response.status === 502) return `Sem conexão com o PC agora${reason ? ` (${reason.replace(/\.$/, '')})` : ''}. Confira a internet do celular; quando a conexão voltar, é só tentar de novo.`
+  if (reason) console.warn(`[kora] sem conexão com o PC: ${reason}`)
+  if (response.status === 502) return NO_CONNECTION
   if (response.status === 403) return 'O app perdeu a ligação com esta tela. Feche e abra o Kora de novo.'
   return 'Não foi possível conectar ao PC.'
 }
 
 // O fetch que nem chega a uma resposta (rede caiu, PC fora do ar) só diz "Failed to fetch", em inglês.
-export const NO_CONNECTION = 'Sem conexão com o PC agora. Confira a internet do celular; quando a conexão voltar, é só tentar de novo.'
+export const NO_CONNECTION = 'Sem conexão com o PC.'
 export function offline(error: unknown): never {
   if (error instanceof TypeError) throw new Error(NO_CONNECTION)
   throw error

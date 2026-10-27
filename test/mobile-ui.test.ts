@@ -141,7 +141,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.route('**/api/action', (route) => (route.request().postData()?.includes('"type":"send"') ? route.abort('connectionreset') : route.continue()))
     await page.getByRole('button', { name: 'Enviar', exact: true }).click()
     // Sem resposta nenhuma do PC, o aviso é em português, e não o "Failed to fetch" do navegador.
-    await browserExpect(page.locator('.composer').getByRole('alert')).toContainText('Sem conexão com o PC agora.')
+    await browserExpect(page.locator('.composer').getByRole('alert')).toHaveText('Sem conexão com o PC.')
     await browserExpect(page.getByRole('textbox', { name: 'Mensagem para a sessão' })).toHaveValue("Write-Output 'OLHA_O_PRINT'")
     await browserExpect(page.getByRole('img', { name: 'Imagem anexada' })).toBeVisible()
     await page.unroute('**/api/action')
@@ -615,9 +615,11 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     // diz isso em vez do erro do JSON, e o arquivo abre sozinho quando a ligação com o PC volta.
     await page.route(/\/api\/file\?/, (route) => route.fulfill({ status: 502, headers: { 'x-kora-erro': encodeURIComponent('O relay não respondeu a tempo.') }, body: '' }))
     await page.locator('.file-row').filter({ hasText: 'pagina.html' }).click()
-    await browserExpect(page.locator('.file-notice[role="alert"]')).toHaveText('Sem conexão com o PC agora (O relay não respondeu a tempo). Confira a internet do celular; quando a conexão voltar, é só tentar de novo.')
+    const notice = page.locator('.file-notice[role="alert"]')
+    await browserExpect(notice).toContainText('Sem conexão com o PC.')
+    // O Tentar de novo ao lado pede o arquivo de novo de fato.
     await page.unroute(/\/api\/file\?/)
-    for (const client of (mobile as unknown as { clients: Set<{ response: { destroy(): void } }> }).clients) client.response.destroy()
+    await notice.getByRole('button', { name: 'Tentar de novo', exact: true }).click()
     await browserExpect(page.frameLocator('iframe.html-view').locator('h1')).toHaveText('Página de teste', { timeout: 15000 })
     await browserExpect(page.locator('.file-notice')).toHaveCount(0)
     // A ligação volta enquanto o pedido do arquivo ainda espera o relay (até 15 s) e só depois falha: tenta de novo na
@@ -634,6 +636,29 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await browserExpect(page.frameLocator('iframe.html-view').locator('h1')).toHaveText('Página de teste')
     await browserExpect(page.locator('.file-notice')).toHaveCount(0)
     await page.unroute(/\/api\/file\?/)
+    // Fluxo de eventos respondido com 502 (o relay não alcançou o PC): o navegador desiste de vez de reconectar, e a
+    // tela tenta de novo sozinha.
+    const dropEvents = (): void => { for (const client of (mobile as unknown as { clients: Set<{ response: { destroy(): void } }> }).clients) client.response.destroy() }
+    let refused = 0
+    const offline = (route: import('@playwright/test').Route): Promise<void> => { refused++; return route.fulfill({ status: 502, body: '' }) }
+    await page.route('**/api/events', offline)
+    dropEvents()
+    await browserExpect(page.getByRole('status', { name: 'Reconectando ao PC' })).toBeVisible()
+    await expect.poll(() => refused, { timeout: 15000 }).toBeGreaterThan(0)
+    await page.unroute('**/api/events')
+    await browserExpect(page.getByRole('status', { name: 'PC conectado' })).toBeVisible({ timeout: 20000 })
+    // Sem o PC nem para o estado: o aviso do topo é curto, e o Tentar de novo religa na hora, sem esperar a tela sozinha.
+    await page.route('**/api/events', offline)
+    await page.route('**/api/state', offline)
+    dropEvents()
+    const banner = page.locator('.error-banner')
+    await browserExpect(banner).toHaveText('Sem conexão com o PC.Tentar de novo')
+    await page.screenshot({ path: join(artifacts, 'sem-conexao-350.png') })
+    await page.unroute('**/api/events')
+    await page.unroute('**/api/state')
+    await banner.getByRole('button', { name: 'Tentar de novo', exact: true }).click()
+    await browserExpect(page.getByRole('status', { name: 'PC conectado' })).toBeVisible({ timeout: 3000 })
+    await browserExpect(banner).toHaveCount(0)
     await page.goBack()
     await page.locator('.file-row').filter({ hasText: 'doc.pdf' }).click()
     // A página é desenhada de verdade (o canvas ganha pixels) e o zoom dos botões muda o tamanho dela.

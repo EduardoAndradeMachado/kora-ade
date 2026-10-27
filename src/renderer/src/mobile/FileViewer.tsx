@@ -186,6 +186,7 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
         <button onClick={() => void overwrite()}>Salvar por cima</button>
       </span>}
       {notice.downloaded && <span className="file-notice-actions"><button onClick={openDownloaded}>Abrir</button></span>}
+      {notice.tone === 'error' && failed.current && <span className="file-notice-actions"><button onClick={() => void load(true)}>Tentar de novo</button></span>}
       {notice.tone !== 'conflict' && <button className="icon-button" aria-label="Dispensar aviso" onClick={() => setNotice(null)}><Icon name="fechar" /></button>}
     </div>}
     <div className="file-body">
