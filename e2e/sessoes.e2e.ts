@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect } from './harness'
-import { AFTER_UPDATE_MESSAGE } from '../src/shared/agent'
 import {
   descendantsOf,
   isAlive,
@@ -87,8 +86,7 @@ test('R5b reabrir logo depois de instalar atualização: só as abas que rodavam
 
   const second = await kora.launch(env)
   const resumed = await waitFor(() => starts(env, 'claude')[2], 'claude falso retomado sem clique')
-  // A retomada leva o aviso de que o Kora reiniciou, como um argumento só (o texto inteiro).
-  expect(resumed.args).toEqual(['--resume', a.sessionId, AFTER_UPDATE_MESSAGE])
+  expect(resumed.args).toEqual(['--resume', a.sessionId])
   expect(existsSync(list)).toBe(false)
   await second.page.waitForTimeout(3000)
   expect(starts(env, 'claude').filter((s) => s.args?.includes(b.sessionId))).toHaveLength(1)

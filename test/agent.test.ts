@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, write
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { AFTER_UPDATE_MESSAGE, startupCommand } from '../src/shared/agent'
+import { startupCommand } from '../src/shared/agent'
 import { AgentDetector, claudeStateForPid, codexMetaIsSubagent, UNREADABLE } from '../src/main/agent-detect'
 import { fileHolders, listProcesses, withCreationTime } from '../src/main/processes'
 import { Terminals } from '../src/main/terminals'
@@ -31,10 +31,6 @@ describe('comando de abertura da aba', () => {
     expect(startupCommand({ kind: 'claude', mode: 'resume', sessionId: id })).toBe(`claude --resume ${id}`)
     expect(startupCommand({ kind: 'codex', mode: 'resume', sessionId: id })).toBe(`codex resume ${id} --no-daemon`)
     expect(startupCommand({ kind: 'codex', mode: 'new' })).toBe('codex --no-daemon')
-    // Reaberta depois da atualização: a retomada leva o aviso para o agente continuar de onde parou.
-    expect(startupCommand({ kind: 'claude', mode: 'resume', sessionId: id, afterUpdate: true })).toBe(`claude --resume ${id} '${AFTER_UPDATE_MESSAGE}'`)
-    expect(startupCommand({ kind: 'codex', mode: 'resume', sessionId: id, afterUpdate: true })).toBe(`codex resume ${id} --no-daemon '${AFTER_UPDATE_MESSAGE}'`)
-    expect(AFTER_UPDATE_MESSAGE).not.toContain("'")
     const opencode = 'ses_ea5258bf1ffeWny5CnC3VXe6V3'
     expect(startupCommand({ kind: 'opencode', mode: 'new', sessionId: opencode })).toBe(
       `opencode --standalone --session ${opencode}`

@@ -40,8 +40,7 @@ export type Launch =
   | { type: 'claude' }
   | { type: 'codex' }
   | { type: 'opencode' }
-  // afterUpdate: a aba voltou sozinha depois da atualização do Kora; o agente recebe um aviso para continuar.
-  | { type: 'resume'; agent: AgentSession; afterUpdate?: boolean }
+  | { type: 'resume'; agent: AgentSession }
 
 export interface SessionSummary {
   kind: AgentSession['kind']

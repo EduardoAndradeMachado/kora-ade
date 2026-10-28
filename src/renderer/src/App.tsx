@@ -219,7 +219,7 @@ export function App(): React.JSX.Element {
       for (const [projectId, list] of Object.entries(restored)) {
         restored[projectId] = list.map((tab) => {
           if (tab.kind !== 'terminal' || !resume.includes(tab.id)) return tab
-          const how: Launch = tab.agent ? { type: 'resume', agent: tab.agent, afterUpdate: true } : { type: 'shell' }
+          const how: Launch = tab.agent ? { type: 'resume', agent: tab.agent } : { type: 'shell' }
           pendingLaunch.current.set(tab.id, { tab: { id: tab.id, projectId, title: tab.title }, how })
           terminalBus.expect(tab.id)
           return { ...tab, live: true }
