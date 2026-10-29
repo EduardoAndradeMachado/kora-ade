@@ -36,7 +36,10 @@ const MORE_KEYS: [string, string][] = [
   ['Ctrl+X', '\x18'],
   // No Claude Code, troca o modo: normal, aceitar edições e planejar.
   ['Shift+Tab', '\x1b[Z'],
-  ['Tab', '\t']
+  ['Tab', '\t'],
+  ['PgUp', '\x1b[5~'],
+  ['PgDn', '\x1b[6~'],
+  ['Ctrl+End', '\x1b[1;5F']
 ]
 
 const MIN_COLS = 20
