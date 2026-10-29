@@ -1,6 +1,9 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createTranscriber, TranscriberUnavailableError } from '../src/main/transcriber'
+import { createTranscriber, TranscriberUnavailableError, transcriberInstalled } from '../src/main/transcriber'
 import fixture from './fixtures/transcritor-api.json'
 
 type Reply = { status: number; contentType: string | null; body: string }
@@ -106,5 +109,30 @@ describe('cliente do Transcritor', () => {
     expect(Date.now() - started).toBeLessThan(5000)
     expect(seen.at(-1)).toBe(`DELETE /trabalhos/${id}`)
     server.closeAllConnections()
+  })
+})
+
+describe('Transcritor instalado', () => {
+  const saved = { LOCALAPPDATA: process.env['LOCALAPPDATA'], APPDATA: process.env['APPDATA'] }
+  afterEach(() => {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  })
+
+  // O celular só mostra o microfone quando isto é verdade: quem não tem o Transcritor não grava à toa.
+  it('só conta como instalado com o token do Transcritor numa das duas pastas dele', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kora-transcritor-'))
+    process.env['LOCALAPPDATA'] = join(dir, 'local')
+    process.env['APPDATA'] = join(dir, 'roaming')
+    expect(transcriberInstalled()).toBe(false)
+    mkdirSync(join(dir, 'roaming', 'transcritor', 'api'), { recursive: true })
+    writeFileSync(join(dir, 'roaming', 'transcritor', 'api', 'token.txt'), 'token')
+    expect(transcriberInstalled()).toBe(true)
+    process.env['APPDATA'] = join(dir, 'outra')
+    mkdirSync(join(dir, 'local', 'Programs', 'Transcritor', 'dados', 'api'), { recursive: true })
+    writeFileSync(join(dir, 'local', 'Programs', 'Transcritor', 'dados', 'api', 'token.txt'), 'token')
+    expect(transcriberInstalled()).toBe(true)
   })
 })

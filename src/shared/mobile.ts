@@ -40,6 +40,8 @@ export interface MobileState {
   theme: KoraState['settings']['theme']
   alerts: Alerts
   tabs: MobileTab[]
+  // O PC tem o Transcritor, que transcreve o áudio do microfone do app.
+  dictation: boolean
 }
 // Login e remoção de conta ficam no PC: os dois abrem o navegador de lá.
 export interface MobileUsage { usage: AgentUsage[]; accounts: ClaudeAccountsView['accounts']; activeUnknown: boolean }

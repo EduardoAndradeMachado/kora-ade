@@ -36,6 +36,7 @@ export class MobileRuntime {
     usage?(): Promise<AgentUsage[]>
     accounts?(): Promise<ClaudeAccountsView>
     switchAccount?(id: string): Promise<void>
+    dictation?(): boolean
   }) {}
 
   snapshot(): MobileState {
@@ -47,6 +48,7 @@ export class MobileRuntime {
       missingProjectIds: missingProjectIds(state, isMobileDirectory),
       theme: state.settings.theme,
       alerts: state.settings.alerts,
+      dictation: this.host.dictation?.() ?? false,
       tabs: state.tabs.map((tab) => ({ ...tab, live: running.has(tab.id), activity: this.host.activities.get(tab.id) ?? null, holder: this.sizes.holder(tab.id) }))
     }
   }

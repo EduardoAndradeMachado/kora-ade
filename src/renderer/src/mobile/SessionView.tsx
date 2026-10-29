@@ -48,7 +48,7 @@ const drafts = new Map<string, { text: string; images: Attached[] }>()
 
 // O terminal do celular só mostra: as respostas automáticas do terminal (consulta de cor, de teclado) já vêm
 // da janela do PC, e uma segunda resposta chegaria ao programa como se fosse digitada.
-export function SessionView({ tab, device, connected, connection, feed, command, onError }: {
+export function SessionView({ tab, device, connected, connection, feed, command, onError, dictation }: {
   tab: MobileTab
   device: string
   connected: boolean
@@ -56,6 +56,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   feed: React.MutableRefObject<SessionFeed>
   command(command: MobileCommand): Promise<unknown>
   onError(message: string): void
+  dictation: boolean
 }): React.JSX.Element {
   const [holder, setHolder] = useState<string | null>(tab.holder)
   // Até o histórico do PC chegar, o terminal mostra o esqueleto em vez de uma tela vazia.
@@ -68,7 +69,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   const [composerError, setComposerError] = useState<string | null>(null)
   const [moreKeys, setMoreKeys] = useState(false)
   const [voice, setVoice] = useState<'idle' | 'recording' | 'transcribing'>('idle')
-  const [microphone] = useState(canRecord)
+  const microphone = dictation && canRecord()
   const transcription = useRef<AbortController | null>(null)
   // A gravação que esta tela acompanha: o áudio de uma descartada chega atrasado e não pode cair no campo.
   const take = useRef<number | null>(null)

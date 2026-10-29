@@ -43,6 +43,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
   const submitted: { text: string; images: string[] }[] = []
   const submit = terminals.submit.bind(terminals)
   terminals.submit = (id, text, agent, images = []) => { submitted.push({ text, images }); submit(id, text, agent, images) }
+  let transcriberInstalled = false
   const runtime: MobileRuntime = new MobileRuntime({
     state: () => state, commit: (next) => { state = next }, terminals, activities: new Map(),
     launch: (tab, cols, rows, how) => terminals.spawn(tab.id, dir, cols, rows, how.type === 'codex' ? { kind: 'codex', mode: 'new' } : undefined),
@@ -51,7 +52,8 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     icon: async (_id, path) => (await findProjectIcon(path))?.dataUrl ?? null,
     usage: async () => [{ agent: 'claude', windows: [{ label: '5 h', usedPercent: 91, resetsAt: Date.now() + 5_400_000, windowMinutes: 300 }, { label: 'Semanal', usedPercent: 30, resetsAt: Date.now() + 86_400_000, windowMinutes: 10080 }], updatedAt: Date.now(), source: 'api' }],
     accounts: async () => ({ activeUnknown: false, login: null, accounts: ['pessoal', 'trabalho'].map((id) => ({ id, email: `${id}@exemplo.com`, organizationName: null, subscriptionType: 'max', refreshTokenExpiresAt: null, weekly: null, active: id === activeAccount })) }),
-    switchAccount: async (id) => { activeAccount = id }
+    switchAccount: async (id) => { activeAccount = id },
+    dictation: () => transcriberInstalled
   })
   // Transcritor: o primeiro áudio vira texto, o segundo encontra o app fechado no PC e o terceiro só termina se o
   // celular desistir, como uma fila parada.
@@ -190,6 +192,11 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.getByRole('button', { name: 'Voltar', exact: true }).click()
     await page.goForward()
     const field = page.getByRole('textbox', { name: 'Mensagem para a sessão' })
+    // Dentro do app, mas sem o Transcritor no PC: o áudio não teria quem transcrevesse, então o microfone não aparece.
+    await browserExpect(field).toBeVisible()
+    await browserExpect(page.getByRole('button', { name: 'Gravar áudio' })).toHaveCount(0)
+    transcriberInstalled = true
+    mobile.publishState()
     await field.fill('Rode ')
     await page.getByRole('button', { name: 'Gravar áudio' }).click()
     // Ditando, anexar e enviar saem da linha: a mensagem não vai pela metade.
