@@ -58,9 +58,17 @@ na lateral; um clique fecha o app, instala e abre de novo. Projetos, categorias 
 
 ## Usar pelo celular (experimental)
 
-Em **Configurações → Celular**, ligue a conexão e clique em **Nova conexão**. Leia o QR code com o app Kora do celular
-(ou com a câmera, para usar no navegador), na mesma rede Wi-Fi. O celular fica vinculado até você desvinculá-lo ali,
-onde também dá para renomeá-lo e ver quais estão conectados agora.
+Abra o painel **Celular** pelo botão da lateral (ou em **Configurações → Celular**). Ele tem dois caminhos até o PC,
+que ligam separados:
+
+- **Rede de casa:** o celular no mesmo Wi-Fi do PC.
+- **Fora de casa:** o celular em qualquer rede (4G, outro Wi-Fi), passando pelo servidor do Kora. Pede uma conta do
+  Kora: crie com e-mail e senha no próprio painel e confirme com o código que chega por e-mail. A conta serve para
+  ligar este PC ao servidor; o celular não precisa de login.
+
+Com um caminho ligado, clique em **Conectar celular** e leia o QR com o app Kora do celular. O QR vale por 2 minutos
+e uma vez só. O celular fica vinculado até você desvinculá-lo no painel, onde também dá para renomeá-lo e ver quais
+estão conectados agora e por qual caminho. Na rede de casa, o QR também abre no navegador do celular, sem o app.
 
 O app Android é o [Kora-Celular.apk](https://github.com/EduardoAndradeMachado/kora-ade/releases/latest/download/Kora-Celular.apk)
 da última Release. Ao abrir, ele procura o Kora na rede e entra sozinho. Depois da primeira instalação, ele se
@@ -82,13 +90,42 @@ PC conectado.
 O código do app Android fica em `android/`. Para gerar o APK com o Android Studio instalado: `pnpm android` (precisa
 da chave de assinatura).
 
-A conexão usa HTTP na rede local, na porta 43127, e vem desligada. O Kora precisa estar aberto no PC: fechar a janela
-para a bandeja encerra os terminais, como sempre. Se o firewall do Windows perguntar, permita só em redes privadas.
+Os dois caminhos vêm desligados. O Kora precisa estar aberto no PC: fechar a janela para a bandeja encerra os
+terminais, como sempre. Com **Fora de casa** ligado, o PC não suspende sozinho enquanto o Kora está aberto; para ele
+voltar sozinho depois de reiniciar, ligue **Abrir o Kora com o Windows** nas Configurações.
+
+### Segurança da conexão com o celular
+
+- **Um celular vinculado controla o PC.** Ele abre terminais, roda comandos, lê e grava os arquivos dos projetos e
+  adiciona pastas como projeto, com as mesmas permissões do seu usuário no Windows. Vincule só aparelhos seus e
+  desvincule o que perder ou trocar.
+- **Rede de casa é HTTP sem criptografia**, na porta 43127. O servidor só responde a endereços de rede local e a
+  aparelhos vinculados, mas quem estiver na mesma rede consegue ler o tráfego e copiar a credencial do celular, e
+  com ela controlar o PC. Use só em rede de confiança: a sua casa, não Wi-Fi de café, hotel ou escritório
+  compartilhado. Se o firewall do Windows perguntar, permita só em redes privadas.
+- **Fora de casa é cifrado de ponta a ponta** (TLS 1.3 entre o celular e o PC, cada lado conferindo o certificado
+  do outro, registrado no pareamento). O servidor do Kora só repassa os bytes: ele não lê nem altera o que você
+  digita, os terminais ou os arquivos.
 
 ## Privacidade
 
-- Sem telemetria e sem servidor na nuvem: o Kora não coleta nem envia dados de uso. Ele só acessa a rede para o limite de uso do Claude, o ícone do projeto e as atualizações, descritos abaixo.
-- A conexão com o celular, quando ligada, abre um servidor HTTP no próprio PC e só responde a endereços da rede local e a navegadores pareados. O QR vale por 2 minutos e uma vez só; o PC guarda apenas o hash da credencial de cada celular. O tráfego não é criptografado: qualquer um na mesma rede consegue ler o que passa, então use em uma rede de confiança.
+- Sem telemetria: o Kora não coleta dados de uso. Ele só acessa a rede para o limite de uso do Claude, o ícone do
+  projeto, as atualizações e, se você ligar **Fora de casa**, o servidor do Kora, descritos abaixo.
+- **Rede de casa** abre um servidor HTTP no próprio PC; nada sai da sua rede. O PC guarda apenas o hash da
+  credencial de cada celular (veja [Segurança da conexão com o celular](#segurança-da-conexão-com-o-celular)).
+- **Fora de casa** usa o servidor do Kora (`kora-sync.eduardom.com.br`), mantido pelo autor do Kora, que pode ver
+  os dados abaixo pelo painel de administração:
+  - da conta: e-mail, hash da senha (scrypt; a senha em si não fica guardada) e datas de criação, confirmação e
+    último login;
+  - de cada PC e celular: a impressão digital do certificado, o nome, o sistema e a versão, a versão do Kora, o
+    último IP e horário de conexão, e o volume trafegado, o número de sessões e o tempo conectado. O consumo dia a
+    dia fica 90 dias; os totais ficam enquanto o aparelho estiver na conta.
+  - O conteúdo (terminais, arquivos, mensagens) passa cifrado de ponta a ponta e não é gravado.
+  - O e-mail com o código de confirmação e de troca de senha sai pelo [Resend](https://resend.com).
+  - **Sair** no painel tira o PC (e os celulares que só ele tinha) do servidor. A conta e o e-mail continuam lá;
+    ainda não há como apagar a conta pelo app.
+  - O código do servidor está em `relay/`. Dá para hospedar o seu e apontar o Kora do PC para ele com a variável
+    `KORA_RELAY_URL`, mas isso ainda não está documentado nem é suportado.
 - Para achar sessões e títulos de conversas, lê as pastas `~/.claude` e `~/.codex` do seu usuário.
 - Para mostrar o limite de uso do Claude, lê o login do Claude Code (`~/.claude/.credentials.json`) e envia o token
   **somente** para `api.anthropic.com` — o mesmo endereço que o `/usage` do Claude Code consulta —, no máximo uma vez
