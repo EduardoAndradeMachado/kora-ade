@@ -128,6 +128,9 @@ describe('Transcritor instalado', () => {
     process.env['APPDATA'] = join(dir, 'roaming')
     expect(transcriberInstalled()).toBe(false)
     mkdirSync(join(dir, 'roaming', 'transcritor', 'api'), { recursive: true })
+    // Token vazio a transcrição recusa ("não está instalado"): o botão também não aparece.
+    writeFileSync(join(dir, 'roaming', 'transcritor', 'api', 'token.txt'), ' \r\n')
+    expect(transcriberInstalled()).toBe(false)
     writeFileSync(join(dir, 'roaming', 'transcritor', 'api', 'token.txt'), 'token')
     expect(transcriberInstalled()).toBe(true)
     process.env['APPDATA'] = join(dir, 'outra')

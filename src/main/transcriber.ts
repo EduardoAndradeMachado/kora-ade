@@ -1,5 +1,4 @@
-import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 
@@ -25,15 +24,22 @@ const tokenPaths = (): string[] => [
   process.env['APPDATA'] && join(process.env['APPDATA'], 'transcritor', 'api', 'token.txt')
 ].filter((path): path is string => Boolean(path))
 
-// O Transcritor não vem com o Kora: sem ele instalado, o celular nem mostra o microfone. Instalado e fechado conta como
-// instalado, e o erro da transcrição pede para abrir.
-export const transcriberInstalled = (): boolean => tokenPaths().some((path) => existsSync(path))
-
-async function defaultToken(): Promise<string> {
+const savedToken = (): string => {
   for (const path of tokenPaths()) {
-    const token = (await readFile(path, 'utf8').catch(() => '')).trim()
+    let token = ''
+    try { token = readFileSync(path, 'utf8').trim() } catch { /* pasta sem o Transcritor: tenta a outra */ }
     if (token) return token
   }
+  return ''
+}
+
+// O Transcritor não vem com o Kora: sem ele instalado, o celular nem mostra o microfone. Instalado e fechado conta como
+// instalado, e o erro da transcrição pede para abrir.
+export const transcriberInstalled = (): boolean => savedToken() !== ''
+
+async function defaultToken(): Promise<string> {
+  const token = savedToken()
+  if (token) return token
   throw new TranscriberUnavailableError('O Transcritor não está instalado neste PC, ou nunca foi aberto.')
 }
 
