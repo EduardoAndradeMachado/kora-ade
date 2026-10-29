@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '@/brand/icons'
 import { AgentIcon } from '@/components/AgentIcon'
@@ -20,13 +20,30 @@ interface Props {
   iconClassName?: string
 }
 
+const WIDTH = 240
+const GAP = 4
+const MARGIN = 8
+
 export function NewTabMenu({ onChoose, className, iconClassName }: Props): React.JSX.Element {
+  const [anchor, setAnchor] = useState<DOMRect | null>(null)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Abre embaixo do botão; sem espaço embaixo (projeto no fim da lista lateral) abre para cima.
+  useLayoutEffect(() => {
+    if (!anchor) return setPos(null)
+    const height = menuRef.current!.getBoundingClientRect().height
+    const below = anchor.bottom + GAP + height <= window.innerHeight - MARGIN
+    setPos({
+      x: Math.min(anchor.left, window.innerWidth - WIDTH - MARGIN),
+      y: below ? anchor.bottom + GAP : Math.max(MARGIN, anchor.top - GAP - height)
+    })
+  }, [anchor])
 
   useEffect(() => {
-    if (!pos) return
-    const close = (): void => setPos(null)
+    if (!anchor) return
+    const close = (): void => setAnchor(null)
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') close()
     }
@@ -38,14 +55,11 @@ export function NewTabMenu({ onChoose, className, iconClassName }: Props): React
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('blur', close)
     }
-  }, [pos])
+  }, [anchor])
 
   const toggle = (e: React.MouseEvent): void => {
     e.stopPropagation()
-    if (pos) return setPos(null)
-    const rect = buttonRef.current!.getBoundingClientRect()
-    const width = 240
-    setPos({ x: Math.min(rect.left, window.innerWidth - width - 8), y: rect.bottom + 4 })
+    setAnchor(anchor ? null : buttonRef.current!.getBoundingClientRect())
   }
 
   return (
@@ -53,11 +67,12 @@ export function NewTabMenu({ onChoose, className, iconClassName }: Props): React
       <button ref={buttonRef} type="button" data-tip="Nova aba" aria-label="Nova aba" onClick={toggle} className={className}>
         <Icon name="novaAba" className={iconClassName ?? 'size-4'} />
       </button>
-      {pos &&
+      {anchor &&
         createPortal(
         <div
+          ref={menuRef}
           onMouseDown={(e) => e.stopPropagation()}
-          style={{ left: pos.x, top: pos.y, width: 240 }}
+          style={{ left: pos?.x ?? 0, top: pos?.y ?? 0, width: WIDTH, visibility: pos ? 'visible' : 'hidden' }}
           className="fixed z-50 rounded-lg border bg-card p-1 shadow-xl"
         >
           {OPTIONS.map((o) => (
@@ -65,7 +80,7 @@ export function NewTabMenu({ onChoose, className, iconClassName }: Props): React
               key={o.choice}
               type="button"
               onClick={() => {
-                setPos(null)
+                setAnchor(null)
                 onChoose(o.choice)
               }}
               className={cn('flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-secondary')}
