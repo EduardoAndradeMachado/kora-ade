@@ -9,7 +9,7 @@ import { addProject, applyLayout, forgetSessionName, mergeTabs, missingProjectId
 import { Terminals } from './terminals'
 import { MobileServer } from './mobile-server'
 import { MobileRuntime } from './mobile-runtime'
-import { createTranscriber } from './transcriber'
+import { createTranscriber, transcriberInstalled } from './transcriber'
 import { DESKTOP } from './terminal-sizes'
 import { Scrollbacks } from './scrollback'
 import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from './files'
@@ -1095,6 +1095,7 @@ void app.whenReady().then(() => {
     },
     icon: (id, path) => projectIcons.get(id, path),
     usage: () => usage.read(),
+    dictation: transcriberInstalled,
     accounts: () => claudeAccounts.list(),
     switchAccount: async (id) => {
       await claudeAccounts.switchTo(id)

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -19,12 +20,17 @@ const JobSchema = z.object({
   erro: z.string().optional()
 })
 
+const tokenPaths = (): string[] => [
+  process.env['LOCALAPPDATA'] && join(process.env['LOCALAPPDATA'], 'Programs', 'Transcritor', 'dados', 'api', 'token.txt'),
+  process.env['APPDATA'] && join(process.env['APPDATA'], 'transcritor', 'api', 'token.txt')
+].filter((path): path is string => Boolean(path))
+
+// O Transcritor não vem com o Kora: sem ele instalado, o celular nem mostra o microfone. Instalado e fechado conta como
+// instalado, e o erro da transcrição pede para abrir.
+export const transcriberInstalled = (): boolean => tokenPaths().some((path) => existsSync(path))
+
 async function defaultToken(): Promise<string> {
-  const candidates = [
-    process.env['LOCALAPPDATA'] && join(process.env['LOCALAPPDATA'], 'Programs', 'Transcritor', 'dados', 'api', 'token.txt'),
-    process.env['APPDATA'] && join(process.env['APPDATA'], 'transcritor', 'api', 'token.txt')
-  ].filter((path): path is string => Boolean(path))
-  for (const path of candidates) {
+  for (const path of tokenPaths()) {
     const token = (await readFile(path, 'utf8').catch(() => '')).trim()
     if (token) return token
   }
