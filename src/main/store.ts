@@ -17,6 +17,7 @@ export function loadState(file: string): KoraState {
 export function saveState(file: string, state: KoraState): void {
   const valid = StateSchema.parse(state)
   const tmp = `${file}.tmp`
-  writeFileSync(tmp, JSON.stringify(valid, null, 2), 'utf8')
+  // derivedName é o nome do processo do Claude que está rodando; gravado, voltaria como endereço de um processo morto.
+  writeFileSync(tmp, JSON.stringify(valid, (key, value: unknown) => (key === 'derivedName' ? undefined : value), 2), 'utf8')
   renameSync(tmp, file)
 }

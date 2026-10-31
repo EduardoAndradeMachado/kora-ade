@@ -70,6 +70,17 @@ describe('persistência de projetos', () => {
     ])
   })
 
+  it('nome derivado do processo do Claude não é gravado: depois de reabrir, o processo dele já morreu', () => {
+    let state = addProject(emptyState(), join(dir, 'alpha'))
+    const projectId = state.projects[0]!.id
+    const sessionId = '0f32f8a1-6ac8-4591-8c6f-3a67bf0c629e'
+    state = mergeTabs(state, [{ id: 't1', projectId, title: 'Claude' }])
+    state = setTabAgent(state, 't1', { kind: 'claude', sessionId, name: 'Hierarquia de pastas', derivedName: 'alpha-d6' })
+    saveState(file, state)
+
+    expect(loadState(file).tabs[0]!.agent).toEqual({ kind: 'claude', sessionId, name: 'Hierarquia de pastas' })
+  })
+
   it('save do renderer (título/ordem) não apaga a sessão detectada pelo main', () => {
     let state = addProject(emptyState(), join(dir, 'alpha'))
     const projectId = state.projects[0]!.id
