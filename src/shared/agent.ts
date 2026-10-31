@@ -27,7 +27,10 @@ function checkSessionId(value: { kind: AgentKind; sessionId: string }, ctx: z.Re
 export const AgentRefSchema = z.object(agentFields).superRefine(checkSessionId)
 export type AgentRef = z.infer<typeof AgentRefSchema>
 
-export const AgentSessionSchema = z.object({ ...agentFields, name: z.string().optional() }).superRefine(checkSessionId)
+// name é o nome atual da sessão no Claude; derivedName, o que ele deu ao abrir, quando ela foi renomeada depois.
+export const AgentSessionSchema = z
+  .object({ ...agentFields, name: z.string().optional(), derivedName: z.string().optional() })
+  .superRefine(checkSessionId)
 export type AgentSession = z.infer<typeof AgentSessionSchema>
 
 // Estado do agente rodando na aba: trabalhando (respondendo) ou esperando você (parado no prompt ou pedindo permissão).

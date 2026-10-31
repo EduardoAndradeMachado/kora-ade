@@ -202,7 +202,7 @@ function pruneScrollbacks(): void {
 }
 
 const sameAgent = (a: AgentSession | null, b: AgentSession | null): boolean =>
-  a?.kind === b?.kind && a?.sessionId === b?.sessionId && a?.name === b?.name
+  a?.kind === b?.kind && a?.sessionId === b?.sessionId && a?.name === b?.name && a?.derivedName === b?.derivedName
 
 function bindAgent(tabId: string, agent: AgentSession | null): void {
   const tab = state.tabs.find((t) => t.id === tabId)

@@ -58,6 +58,27 @@ describe('sessão do Claude pelo pid', () => {
     expect(claudeStateForPid(dir, 3576)).toMatchObject({ activity: 'working' })
   })
 
+  it('sessão renomeada mantém o nome que o Claude derivou ao abrir; nome de outro processo no mesmo pid, não', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kora-claude-'))
+    const sessionId = randomUUID()
+    const derivedNames = new Map<number, string>()
+    const write = (name: string, nameSource: string): void => {
+      const data = { ...JSON.parse(claudePidFile(3576, sessionId)), name, nameSource }
+      writeFileSync(join(dir, '3576.json'), JSON.stringify(data), 'utf8')
+    }
+    write('exemplo-75', 'derived')
+    expect(claudeStateForPid(dir, 3576, derivedNames)).toMatchObject({ agent: { name: 'exemplo-75' } })
+    expect(claudeStateForPid(dir, 3576, derivedNames)).not.toHaveProperty('agent.derivedName')
+
+    write('Hierarquia de pastas', 'user')
+    expect(claudeStateForPid(dir, 3576, derivedNames)).toMatchObject({
+      agent: { name: 'Hierarquia de pastas', derivedName: 'exemplo-75' }
+    })
+
+    // Processo retomado já com o nome dado pelo usuário: o Kora nunca viu nome derivado dele.
+    expect(claudeStateForPid(dir, 3576, new Map())).not.toHaveProperty('agent.derivedName')
+  })
+
   it('busy com o turno encerrado no transcript (subagente em segundo plano) é esperando você', () => {
     const root = mkdtempSync(join(tmpdir(), 'kora-claude-root-'))
     const dir = join(root, 'sessions')

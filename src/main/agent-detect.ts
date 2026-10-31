@@ -33,22 +33,35 @@ interface CodexLock {
 // aba passar por "sem estado" entre trabalhando e esperando, e o aviso de sessão parada se perdia.
 export const UNREADABLE = 'sem-leitura'
 
-export function claudeStateForPid(dir: string, pid: number): Detected | typeof UNREADABLE | null {
+// O Claude dá à sessão um nome derivado da pasta (exemplo-75) e depois pode trocá-lo, pelo /rename ou sozinho
+// pelo título da conversa. O arquivo do pid só guarda o nome atual; derivedNames lembra o primeiro enquanto o processo vive.
+export function claudeStateForPid(
+  dir: string,
+  pid: number,
+  derivedNames?: Map<number, string>
+): Detected | typeof UNREADABLE | null {
   let text: string
   try {
     text = readFileSync(join(dir, `${pid}.json`), 'utf8')
   } catch {
     return null
   }
-  let data: { pid?: number; sessionId?: string; name?: string; cwd?: string; status?: unknown }
+  let data: { pid?: number; sessionId?: string; name?: string; nameSource?: string; cwd?: string; status?: unknown }
   try {
     data = JSON.parse(text) as typeof data
   } catch {
     return UNREADABLE
   }
   if (data.pid !== pid || !data.sessionId || !SESSION_ID.test(data.sessionId)) return null
+  if (derivedNames && data.name && data.nameSource === 'derived') derivedNames.set(pid, data.name)
+  const derivedName = derivedNames?.get(pid)
   return {
-    agent: { kind: 'claude', sessionId: data.sessionId, ...(data.name ? { name: data.name } : {}) },
+    agent: {
+      kind: 'claude',
+      sessionId: data.sessionId,
+      ...(data.name ? { name: data.name } : {}),
+      ...(derivedName && derivedName !== data.name ? { derivedName } : {})
+    },
     activity: data.status === 'busy' && claudeTurnEndedFor(dir, data.cwd, data.sessionId) ? 'waiting' : claudeActivity(data.status)
   }
 }
@@ -82,6 +95,7 @@ export class AgentDetector {
   constructor(private readonly sources: DetectorSources) {}
 
   private readonly subagentThreads = new Map<string, boolean>()
+  private readonly derivedNames = new Map<number, string>()
 
   // O subagente do Codex roda dentro do processo que o criou, com conversa e lock próprios e mais novos que os da
   // conversa principal. A aba fica com a principal: é ela que o "Continuar" retoma e é nela que você responde.
@@ -107,6 +121,9 @@ export class AgentDetector {
   // do Claude e não troca a aba, e vice-versa. Entre agentes lado a lado no terminal, vale o mais novo.
   detect(shellPids: Map<string, number>): Map<string, Detected | typeof UNREADABLE> {
     const all = this.sources.listProcesses()
+    // O Windows reaproveita pid: o nome de um Claude que já saiu não pode ir parar no próximo processo com o mesmo número.
+    const alive = new Set(all.map((p) => p.pid))
+    for (const pid of this.derivedNames.keys()) if (!alive.has(pid)) this.derivedNames.delete(pid)
     const parentOf = new Map(all.map((p) => [p.pid, p.ppid]))
     const codex = this.codexThreadsByPid()
     const found = new Map<string, Detected | typeof UNREADABLE>()
@@ -118,7 +135,7 @@ export class AgentDetector {
         const lock = codex.get(proc.pid)
         const detected = lock
           ? { agent: { kind: 'codex' as const, sessionId: lock.threadId }, activity: this.codexActivityOf(lock.threadId) }
-          : claudeStateForPid(this.sources.claudeSessionsDir, proc.pid)
+          : claudeStateForPid(this.sources.claudeSessionsDir, proc.pid, this.derivedNames)
         if (detected === UNREADABLE) unreadable = true
         if (!detected || detected === UNREADABLE) continue
         agents.set(proc.pid, { detected, proc })
