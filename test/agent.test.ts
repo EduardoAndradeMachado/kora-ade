@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startupCommand } from '../src/shared/agent'
-import { AgentDetector, claudeStateForPid, codexMetaIsSubagent, UNREADABLE } from '../src/main/agent-detect'
-import { fileHolders, listProcesses, withCreationTime } from '../src/main/processes'
+import { AgentDetector, claudeStateForPid, codexMetaIsSubagent, UNREADABLE, type Detected, type DerivedName } from '../src/main/agent-detect'
+import { fileHolders, listProcesses, withCreationTime, type ProcInfo } from '../src/main/processes'
 import { Terminals } from '../src/main/terminals'
 
 // Formato real capturado de ~/.claude/sessions/3576.json (Claude Code 2.1.281).
@@ -61,7 +61,7 @@ describe('sessão do Claude pelo pid', () => {
   it('sessão renomeada mantém o nome que o Claude derivou ao abrir; nome de outro processo no mesmo pid, não', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kora-claude-'))
     const sessionId = randomUUID()
-    const derivedNames = new Map<number, string>()
+    const derivedNames = new Map<number, DerivedName>()
     const write = (name: string, nameSource: string): void => {
       const data = { ...JSON.parse(claudePidFile(3576, sessionId)), name, nameSource }
       writeFileSync(join(dir, '3576.json'), JSON.stringify(data), 'utf8')
@@ -77,6 +77,21 @@ describe('sessão do Claude pelo pid', () => {
 
     // Processo retomado já com o nome dado pelo usuário: o Kora nunca viu nome derivado dele.
     expect(claudeStateForPid(dir, 3576, new Map())).not.toHaveProperty('agent.derivedName')
+  })
+
+  it('/resume para outra conversa no mesmo processo: o nome derivado da anterior não vira nome dela', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kora-claude-'))
+    const first = randomUUID()
+    const other = randomUUID()
+    const derivedNames = new Map<number, DerivedName>()
+    const write = (sessionId: string, name: string, nameSource: string): void => {
+      const data = { ...JSON.parse(claudePidFile(3576, sessionId)), name, nameSource }
+      writeFileSync(join(dir, '3576.json'), JSON.stringify(data), 'utf8')
+    }
+    write(first, 'exemplo-75', 'derived')
+    claudeStateForPid(dir, 3576, derivedNames)
+    write(other, 'Conversa antiga', 'user')
+    expect(claudeStateForPid(dir, 3576, derivedNames)).not.toHaveProperty('agent.derivedName')
   })
 
   it('busy com o turno encerrado no transcript (subagente em segundo plano) é esperando você', () => {
@@ -118,6 +133,59 @@ describe('sessão do Claude pelo pid', () => {
     expect(claudeStateForPid(dir, 3576)).toBe(UNREADABLE)
     writeFileSync(join(dir, '3576.json'), '', 'utf8')
     expect(claudeStateForPid(dir, 3576)).toBe(UNREADABLE)
+  })
+})
+
+describe('AgentDetector: nome derivado entre uma leitura e outra', () => {
+  const shellPid = 100
+  const claudePid = 200
+  const tab = 'aba-1'
+  const sessionId = randomUUID()
+
+  function setup(): { detect: (procs: ProcInfo[]) => Detected | undefined; write: (name: string, nameSource: string) => void } {
+    const sessionsDir = mkdtempSync(join(tmpdir(), 'kora-sessions-'))
+    let procs: ProcInfo[] = []
+    const detector = new AgentDetector({
+      claudeSessionsDir: sessionsDir,
+      codexLocksDir: mkdtempSync(join(tmpdir(), 'kora-locks-')),
+      listProcesses: () => procs,
+      creationTime: () => 0,
+      lockHolders: () => [],
+      codexRollout: () => null
+    })
+    return {
+      detect: (list) => {
+        procs = list
+        const found = detector.detect(new Map([[tab, shellPid]])).get(tab)
+        return found === UNREADABLE ? undefined : found
+      },
+      write: (name, nameSource) => {
+        const data = { ...JSON.parse(claudePidFile(claudePid, sessionId)), name, nameSource }
+        writeFileSync(join(sessionsDir, `${claudePid}.json`), JSON.stringify(data), 'utf8')
+      }
+    }
+  }
+  const running: ProcInfo[] = [
+    { pid: shellPid, ppid: 1, name: 'pwsh.exe', createdMs: null },
+    { pid: claudePid, ppid: shellPid, name: 'claude.exe', createdMs: null }
+  ]
+
+  it('foto de processos que falhou (lista vazia) não apaga o nome derivado', () => {
+    const { detect, write } = setup()
+    write('exemplo-75', 'derived')
+    expect(detect(running)?.agent.name).toBe('exemplo-75')
+    write('Hierarquia de pastas', 'user')
+    detect([])
+    expect(detect(running)?.agent).toMatchObject({ name: 'Hierarquia de pastas', derivedName: 'exemplo-75' })
+  })
+
+  it('pid que sumiu da lista perde o nome: o próximo processo com o mesmo número não o herda', () => {
+    const { detect, write } = setup()
+    write('exemplo-75', 'derived')
+    detect(running)
+    detect([running[0]!])
+    write('Hierarquia de pastas', 'user')
+    expect(detect(running)?.agent).not.toHaveProperty('derivedName')
   })
 })
 

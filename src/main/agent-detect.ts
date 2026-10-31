@@ -15,6 +15,11 @@ export interface DetectorSources {
   codexRollout(threadId: string): string | null
 }
 
+export interface DerivedName {
+  sessionId: string
+  name: string
+}
+
 export interface Detected {
   agent: AgentSession
   activity: AgentActivity | null
@@ -34,11 +39,12 @@ interface CodexLock {
 export const UNREADABLE = 'sem-leitura'
 
 // O Claude dá à sessão um nome derivado da pasta (exemplo-75) e depois pode trocá-lo, pelo /rename ou sozinho
-// pelo título da conversa. O arquivo do pid só guarda o nome atual; derivedNames lembra o primeiro enquanto o processo vive.
+// pelo título da conversa. O arquivo do pid só guarda o nome atual; derivedNames lembra o primeiro enquanto o processo vive,
+// preso à conversa em que foi visto: depois de um /resume para outra conversa, ele não é nome dela.
 export function claudeStateForPid(
   dir: string,
   pid: number,
-  derivedNames?: Map<number, string>
+  derivedNames?: Map<number, DerivedName>
 ): Detected | typeof UNREADABLE | null {
   let text: string
   try {
@@ -53,8 +59,9 @@ export function claudeStateForPid(
     return UNREADABLE
   }
   if (data.pid !== pid || !data.sessionId || !SESSION_ID.test(data.sessionId)) return null
-  if (derivedNames && data.name && data.nameSource === 'derived') derivedNames.set(pid, data.name)
-  const derivedName = derivedNames?.get(pid)
+  if (derivedNames && data.name && data.nameSource === 'derived') derivedNames.set(pid, { sessionId: data.sessionId, name: data.name })
+  const seen = derivedNames?.get(pid)
+  const derivedName = seen?.sessionId === data.sessionId ? seen.name : undefined
   return {
     agent: {
       kind: 'claude',
@@ -95,7 +102,7 @@ export class AgentDetector {
   constructor(private readonly sources: DetectorSources) {}
 
   private readonly subagentThreads = new Map<string, boolean>()
-  private readonly derivedNames = new Map<number, string>()
+  private readonly derivedNames = new Map<number, DerivedName>()
 
   // O subagente do Codex roda dentro do processo que o criou, com conversa e lock próprios e mais novos que os da
   // conversa principal. A aba fica com a principal: é ela que o "Continuar" retoma e é nela que você responde.
@@ -122,8 +129,11 @@ export class AgentDetector {
   detect(shellPids: Map<string, number>): Map<string, Detected | typeof UNREADABLE> {
     const all = this.sources.listProcesses()
     // O Windows reaproveita pid: o nome de um Claude que já saiu não pode ir parar no próximo processo com o mesmo número.
-    const alive = new Set(all.map((p) => p.pid))
-    for (const pid of this.derivedNames.keys()) if (!alive.has(pid)) this.derivedNames.delete(pid)
+    // Lista vazia é a foto dos processos que falhou, não todos mortos; o nome derivado apagado não volta mais.
+    if (all.length > 0) {
+      const alive = new Set(all.map((p) => p.pid))
+      for (const pid of this.derivedNames.keys()) if (!alive.has(pid)) this.derivedNames.delete(pid)
+    }
     const parentOf = new Map(all.map((p) => [p.pid, p.ppid]))
     const codex = this.codexThreadsByPid()
     const found = new Map<string, Detected | typeof UNREADABLE>()
