@@ -410,41 +410,50 @@ function DayView({ points }: { points: DayPoint[] }): React.JSX.Element {
   )
 }
 
-// O Claude deriva o nome da sessão como <pasta>-<sufixo> e é o sufixo que separa duas sessões da mesma pasta;
-// com o painel estreito, cortar pelo fim escondia justamente ele.
+// O Claude deriva o nome da sessão como <pasta>-<sufixo curto> e é o sufixo que separa duas sessões da mesma pasta;
+// com o painel estreito, cortar pelo fim escondia justamente ele. Nome livre (título, /rename) corta pelo fim.
+const DERIVED_SUFFIX = /^(.+)(-[0-9a-z]{1,4})$/i
+
 function AgentName({ name }: { name: string }): React.JSX.Element {
-  const cut = name.lastIndexOf('-')
-  if (cut <= 0 || cut === name.length - 1) return <span className="truncate">{name}</span>
+  const parts = DERIVED_SUFFIX.exec(name)
+  if (!parts) return <span className="truncate">{name}</span>
   return (
     <span className="flex min-w-0">
-      <span className="truncate">{name.slice(0, cut)}</span>
-      <span className="shrink-0">{name.slice(cut)}</span>
+      <span className="truncate">{parts[1]}</span>
+      <span className="shrink-0">{parts[2]}</span>
     </span>
   )
 }
 
 function CopyableName({ name, className }: { name: string; className?: string }): React.JSX.Element {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<'ok' | 'falhou' | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
+  const show = (result: 'ok' | 'falhou'): void => {
+    setCopied(result)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setCopied(null), 1500)
+  }
   const copy = (): void => {
-    void navigator.clipboard.writeText(name).then(() => {
-      setCopied(true)
-      clearTimeout(timer.current)
-      timer.current = setTimeout(() => setCopied(false), 1500)
-    })
+    navigator.clipboard.writeText(name).then(
+      () => show('ok'),
+      () => show('falhou')
+    )
   }
   return (
     <button
       type="button"
       onClick={copy}
-      data-tip={copied ? 'Copiado' : `Copiar ${name}`}
+      data-tip={copied === 'ok' ? 'Copiado' : copied === 'falhou' ? 'Não foi possível copiar' : `Copiar ${name}`}
       className={cn('group flex min-w-0 items-center gap-1 rounded px-1 text-left hover:bg-secondary', className)}
     >
       <AgentName name={name} />
       <Icon
-        name={copied ? 'ok' : 'copiar'}
-        className={cn('size-3 shrink-0', copied ? 'text-[var(--brand-amber)]' : 'opacity-0 group-hover:opacity-100')}
+        name={copied === 'ok' ? 'ok' : 'copiar'}
+        className={cn(
+          'size-3 shrink-0',
+          copied === 'ok' ? 'text-[var(--brand-amber)]' : copied === 'falhou' ? 'text-destructive' : 'opacity-0 group-hover:opacity-100'
+        )}
       />
     </button>
   )
@@ -504,10 +513,18 @@ export function MetricsPanel({ projectId, agent, activity }: Props): React.JSX.E
       <div className="flex shrink-0 items-center gap-2 px-3 pb-2">
         {agent ? (
           <span className="flex min-w-0 flex-1 items-center gap-0.5 text-xs">
-            <AgentIcon kind={agent.kind} className="size-3.5 shrink-0" />
+            <span className="flex shrink-0" data-tip={`${agentLabel(agent.kind)} · ${agent.sessionId}`}>
+              <AgentIcon kind={agent.kind} className="size-3.5" />
+            </span>
             <span className="flex min-w-0 flex-col">
-              {agent.name ? <CopyableName name={agent.name} /> : <span className="truncate px-1">{agentLabel(agent.kind)}</span>}
-              {agent.derivedName && <CopyableName name={agent.derivedName} className="text-[11px] text-muted-foreground" />}
+              {agent.name ? (
+                <CopyableName key={agent.name} name={agent.name} />
+              ) : (
+                <span className="truncate px-1">{agentLabel(agent.kind)}</span>
+              )}
+              {agent.derivedName && (
+                <CopyableName key={agent.derivedName} name={agent.derivedName} className="text-[11px] text-muted-foreground" />
+              )}
             </span>
           </span>
         ) : (
