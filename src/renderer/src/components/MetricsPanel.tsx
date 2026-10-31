@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isOff, type DayPoint, type ResponseMetric, type SessionMetrics } from '@shared/metrics'
 import type { AgentActivity, AgentKind, AgentSession } from '@shared/agent'
 import { Icon } from '@/brand/icons'
@@ -410,6 +410,46 @@ function DayView({ points }: { points: DayPoint[] }): React.JSX.Element {
   )
 }
 
+// O Claude deriva o nome da sessão como <pasta>-<sufixo> e é o sufixo que separa duas sessões da mesma pasta;
+// com o painel estreito, cortar pelo fim escondia justamente ele.
+function AgentName({ name }: { name: string }): React.JSX.Element {
+  const cut = name.lastIndexOf('-')
+  if (cut <= 0 || cut === name.length - 1) return <span className="truncate">{name}</span>
+  return (
+    <span className="flex min-w-0">
+      <span className="truncate">{name.slice(0, cut)}</span>
+      <span className="shrink-0">{name.slice(cut)}</span>
+    </span>
+  )
+}
+
+function CopyableName({ name, className }: { name: string; className?: string }): React.JSX.Element {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const copy = (): void => {
+    void navigator.clipboard.writeText(name).then(() => {
+      setCopied(true)
+      clearTimeout(timer.current)
+      timer.current = setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      data-tip={copied ? 'Copiado' : `Copiar ${name}`}
+      className={cn('group flex min-w-0 items-center gap-1 rounded px-1 text-left hover:bg-secondary', className)}
+    >
+      <AgentName name={name} />
+      <Icon
+        name={copied ? 'ok' : 'copiar'}
+        className={cn('size-3 shrink-0', copied ? 'text-[var(--brand-amber)]' : 'opacity-0 group-hover:opacity-100')}
+      />
+    </button>
+  )
+}
+
 export function MetricsPanel({ projectId, agent, activity }: Props): React.JSX.Element {
   const [scope, setScope] = useState<Scope>('session')
   const [metrics, setMetrics] = useState<SessionMetrics | null>(null)
@@ -463,9 +503,12 @@ export function MetricsPanel({ projectId, agent, activity }: Props): React.JSX.E
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 px-3 pb-2">
         {agent ? (
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs" data-tip={`${agentLabel(agent.kind)} · ${agent.sessionId}`}>
-            <AgentIcon kind={agent.kind} className="size-3.5" />
-            <span className="truncate">{agent.name ?? agentLabel(agent.kind)}</span>
+          <span className="flex min-w-0 flex-1 items-center gap-0.5 text-xs">
+            <AgentIcon kind={agent.kind} className="size-3.5 shrink-0" />
+            <span className="flex min-w-0 flex-col">
+              {agent.name ? <CopyableName name={agent.name} /> : <span className="truncate px-1">{agentLabel(agent.kind)}</span>}
+              {agent.derivedName && <CopyableName name={agent.derivedName} className="text-[11px] text-muted-foreground" />}
+            </span>
           </span>
         ) : (
           <span className="flex-1 text-xs text-muted-foreground">Sem sessão de agente</span>
