@@ -8,6 +8,7 @@ import { CodeEditor } from './CodeEditor'
 import { PdfPages } from './PdfPages'
 import { SkeletonCode } from './Skeleton'
 import { canDownload, download, onDownloaded, openDownloaded } from './downloads'
+import { FileActions } from './FileActions'
 
 type Kind = 'markdown' | 'html' | 'code' | 'pdf' | 'image' | 'external'
 const kindOf = (path: string): Kind => (/\.html?$/i.test(path) ? 'html' : viewerFor(path))
@@ -39,7 +40,7 @@ function markdownHtml(source: string, raw: string): string {
 }
 
 // connection: muda a cada vez que a ligação com o PC volta (MobileApp); o arquivo que não abriu tenta de novo sozinho.
-export function FileViewer({ projectId, path, dark, connection, onBack, onChat, onOpenFile }: { projectId: string; path: string; dark: boolean; connection: number; onBack(): void; onChat?(): void; onOpenFile(path: string): void }): React.JSX.Element {
+export function FileViewer({ projectId, path, dark, connection, onBack, onChat, onOpenFile, actions, onActions }: { projectId: string; path: string; dark: boolean; connection: number; onBack(): void; onChat?(): void; onOpenFile(path: string): void; actions: boolean; onActions(open: boolean): void }): React.JSX.Element {
   const kind = kindOf(path)
   const textual = kind === 'markdown' || kind === 'html' || kind === 'code'
   const key = `${projectId}:${path}`
@@ -108,14 +109,16 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
   useEffect(() => { if (failed.current) void load(true) }, [connection, load])
   useEffect(() => onDownloaded((event) => {
     setDownloading(false)
-    setNotice(event.tipo === 'salvo' ? { tone: 'info', text: `Salvo em Downloads/Kora como ${event.nome}.`, downloaded: true } : { tone: 'error', text: event.mensagem })
+    if (event.tipo === 'cancelado' || event.tipo === 'compartilhado') return
+    setNotice(event.tipo === 'salvo' ? { tone: 'info', text: event.destino === 'escolhido' ? `Salvo no local escolhido como ${event.nome}.` : `Salvo em Downloads/Kora como ${event.nome}.`, downloaded: true } : { tone: 'error', text: event.mensagem })
   }), [])
-  const fetchDownload = async (): Promise<void> => {
+  const fetchDownload = async (action: 'baixar' | 'salvarComo' | 'compartilhar' = 'baixar'): Promise<void> => {
+    if (actions) onActions(false)
     setDownloading(true)
     setNotice(null)
     try {
       // No navegador o download segue sozinho; no app, a resposta chega por onDownloaded.
-      if (await download(query, name) === 'browser') setDownloading(false)
+      if (await download(query, name, action) === 'browser') setDownloading(false)
     } catch (error) {
       setDownloading(false)
       setNotice({ tone: 'error', text: message(error) })
@@ -170,6 +173,7 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
     <div className="file-header">
       <button className="icon-button back-button" aria-label="Voltar" onClick={onBack}><Icon name="expandir" className="back-icon" /></button>
       <span className="file-title"><strong>{name}</strong>{folder && <small>{folder}</small>}</span>
+      <button className="icon-button" aria-label="Opções do arquivo" onClick={() => onActions(true)}>⋯</button>
       {switchable && <div className="file-mode" role="group" aria-label="Modo do arquivo">
         <button aria-pressed={mode === 'view'} onClick={() => setMode('view')}><Icon name="visualizar" />Ver</button>
         <button aria-pressed={mode === 'edit'} onClick={() => setMode('edit')}><Icon name="editar" />Editar</button>
@@ -179,6 +183,7 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
       {textual && draft !== null && <button className="primary save-button" disabled={saving} onClick={() => void save(base)}>{saving ? 'Salvando…' : 'Salvar'}</button>}
       {onChat && <button className="icon-button chat-return" aria-label="Voltar à conversa" onClick={onChat}><Icon name="conversa" active /></button>}
     </div>
+    {actions && <FileActions name={name} path={path} busy={downloading} onClose={() => onActions(false)} onAction={(action) => void fetchDownload(action)} />}
     {notice && <div role={notice.tone === 'info' ? 'status' : 'alert'} className={`file-notice ${notice.tone}`}>
       <span>{notice.text}</span>
       {notice.tone === 'conflict' && <span className="file-notice-actions">

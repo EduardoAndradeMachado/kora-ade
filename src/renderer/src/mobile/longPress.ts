@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 
 const HOLD_MS = 450
 const MOVE_TOLERANCE = 10
@@ -30,10 +30,12 @@ export function useLongPress(): (onHold: () => void) => PressHandlers {
     if (press.current) clearTimeout(press.current.timer)
     press.current = null
   }
+  useEffect(() => () => { if (press.current) clearTimeout(press.current.timer) }, [])
   return (onHold) => ({
     onPointerDown: (event) => {
       cancel()
       held.current = false
+      if (!event.isPrimary || event.button !== 0) return
       const timer = window.setTimeout(() => {
         press.current = null
         held.current = true

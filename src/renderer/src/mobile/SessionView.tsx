@@ -7,7 +7,7 @@ import { Icon } from '@/brand/icons'
 import { currentTerminalLook, onThemeChange } from '@/lib/terminal-theme'
 import { api } from './api'
 import { pathForPrompt, uploadImage } from './images'
-import { canRecord, onNativeAudio, startRecording, stopRecording, transcribeAudio } from './voice'
+import { canRecord, discardAudio, onNativeAudio, recoverAudio, startRecording, stopRecording, transcribeAudio } from './voice'
 import { VoiceMeter } from './VoiceMeter'
 import { SkeletonTerminal } from './Skeleton'
 
@@ -71,7 +71,9 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   // Erro de imagem ou de envio aparece no campo, onde a pessoa agiu, e não no aviso do topo.
   const [composerError, setComposerError] = useState<string | null>(null)
   const [moreKeys, setMoreKeys] = useState(false)
-  const [voice, setVoice] = useState<'idle' | 'recording' | 'transcribing'>('idle')
+  const [voice, setVoice] = useState<'idle' | 'recording' | 'saved' | 'transcribing'>('idle')
+  const audioDraft = useRef<{ base64: string; mime: string } | null>(null)
+  const recoveryAllowed = useRef(true)
   const microphone = dictation && canRecord()
   const transcription = useRef<AbortController | null>(null)
   // A gravação que esta tela acompanha: o áudio de uma descartada chega atrasado e não pode cair no campo.
@@ -276,48 +278,76 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     element.style.height = `${element.scrollHeight}px`
   }, [draft])
 
-  // O texto cai no campo para revisar antes de enviar: uma palavra mal entendida não vai direto para o terminal.
+  const transcribePending = (): void => {
+    const audio = audioDraft.current
+    if (!audio || transcription.current) return
+    const abort = new AbortController()
+    transcription.current = abort
+    setComposerError(null)
+    setVoice('transcribing')
+    transcribeAudio(audio.base64, audio.mime, abort.signal)
+      .then((text) => {
+        if (abort.signal.aborted) return
+        if (!text.trim()) throw new Error('Não deu para entender o áudio. Você pode tentar transcrever novamente ou descartar.')
+        setDraft((current) => (current.trim() ? `${current.trimEnd()} ${text}` : text))
+        audioDraft.current = null
+        take.current = null
+        discardAudio()
+      })
+      .catch((error: Error) => { if (!abort.signal.aborted) setComposerError(`${error.message} O áudio continua guardado neste chat.`) })
+      .finally(() => {
+        if (transcription.current !== abort) return
+        transcription.current = null
+        setVoice(audioDraft.current ? 'saved' : 'idle')
+      })
+  }
+
   useEffect(() => {
     if (!microphone) return
     const off = onNativeAudio((event) => {
       if (event.tipo === 'gravando') {
+        recoveryAllowed.current = false
         take.current = event.gravacao ?? null
         return setVoice('recording')
       }
+      if (event.tipo === 'audio' && event.recuperado) {
+        if (!recoveryAllowed.current || event.tabId !== tab.id) return
+        recoveryAllowed.current = false
+        take.current = event.gravacao ?? null
+      }
       if (event.gravacao !== undefined && event.gravacao !== take.current) return
       if (event.tipo === 'nivel') return level.current?.(event.valor)
-      take.current = null
       if (event.tipo !== 'audio') {
+        take.current = null
         setVoice('idle')
         if (event.tipo === 'curto') setComposerError('Gravação curta demais: toque no microfone, fale e toque em ✓ para transcrever.')
         if (event.tipo === 'erro') setComposerError(event.mensagem)
         return
       }
-      const abort = new AbortController()
-      transcription.current = abort
-      setVoice('transcribing')
-      transcribeAudio(event.base64, event.mime, abort.signal)
-        .then((text) => {
-          if (abort.signal.aborted) return
-          if (!text) return setComposerError('Não deu para entender o áudio. Fale de novo, mais perto do celular.')
-          setDraft((current) => (current.trim() ? `${current.trimEnd()} ${text}` : text))
-        })
-        .catch((error: Error) => { if (!abort.signal.aborted) setComposerError(error.message) })
-        .finally(() => {
-          if (transcription.current !== abort) return
-          transcription.current = null
-          setVoice('idle')
-        })
+      if (audioDraft.current) return
+      audioDraft.current = { base64: event.base64, mime: event.mime }
+      if (event.rascunho) setVoice('saved')
+      else transcribePending()
     })
+    const recover = (): void => { if (recoveryAllowed.current) recoverAudio(tab.projectId, tab.id) }
+    window.addEventListener('kora-audio-pendente', recover)
+    recover()
     return () => {
+      window.removeEventListener('kora-audio-pendente', recover)
       off()
       stopRecording(false)
+      discardAudio()
+      audioDraft.current = null
       transcription.current?.abort()
+      transcription.current = null
     }
   }, [microphone])
   // Cancelar na transcrição fecha o pedido; o PC percebe e apaga o trabalho no Transcritor, que para de processar.
   const cancelVoice = (): void => {
+    recoveryAllowed.current = false
     if (voice === 'recording') stopRecording(false)
+    discardAudio()
+    audioDraft.current = null
     take.current = null
     transcription.current?.abort()
     transcription.current = null
@@ -397,7 +427,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
         {uploading > 0 && <figure className="uploading" aria-label="Enviando imagem ao PC"><span /></figure>}
       </div>
       // Caixa única, como no app do Claude e do ChatGPT: miniaturas e texto dentro, imagem e enviar embaixo.
-      // Sair da tela descarta a gravação e a transcrição em curso: ditando, o arrastar de lado não navega.
+      // O rascunho de áudio vale enquanto este chat está aberto, inclusive com o app em segundo plano.
       return <form className="composer" data-no-swipe data-swipe-lock={voice === 'idle' ? undefined : ''} onSubmit={(event) => { event.preventDefault(); submit() }}>
         <input ref={picker} type="file" accept="image/*" multiple hidden aria-label="Escolher imagem" onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void attach(files) }} />
         <div className="composer-box">
@@ -412,16 +442,18 @@ export function SessionView({ tab, device, connected, connection, feed, command,
             </div>
             <div className="composer-send">
               {microphone && <button type="button" className="mic-button" aria-label="Gravar áudio" disabled={!connected}
-                onClick={() => { setComposerError(null); startRecording() }}>
+                onClick={() => { recoveryAllowed.current = false; setComposerError(null); startRecording(tab.projectId, tab.id) }}>
                 <Icon name="microfone" />
               </button>}
               <button className={`send-button ${ready ? 'ready' : ''}`} aria-label="Enviar" disabled={!ready}><Icon name="setaCima" /></button>
             </div>
           </div> : <div className="composer-actions dictating">
-            <button type="button" className="voice-cancel" aria-label={voice === 'recording' ? 'Descartar gravação' : 'Cancelar transcrição'} onClick={cancelVoice}><Icon name="fechar" /></button>
+            <button type="button" className="voice-cancel" aria-label={voice === 'recording' || voice === 'saved' ? 'Descartar gravação' : 'Cancelar transcrição'} onClick={cancelVoice}><Icon name="fechar" /></button>
             {voice === 'recording'
               ? <VoiceMeter listen={listenLevel} />
-              : <p className="voice-status" role="status"><span className="mic-spinner" />Transcrevendo no PC…</p>}
+              : voice === 'saved' ? <p className="voice-status" role="status">Áudio guardado neste chat</p>
+                : <p className="voice-status" role="status"><span className="mic-spinner" />Transcrevendo no PC…</p>}
+            {voice === 'saved' && <button type="button" className="voice-confirm" aria-label="Transcrever áudio guardado" disabled={!connected} onClick={transcribePending}><Icon name="ok" /></button>}
             {voice === 'recording' && <button type="button" className="voice-confirm" aria-label="Parar e transcrever" onClick={() => { setVoice('transcribing'); stopRecording(true) }}><Icon name="ok" /></button>}
           </div>}
         </div>

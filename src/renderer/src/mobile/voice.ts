@@ -8,7 +8,7 @@ export type NativeAudioEvent = { gravacao?: number } & (
   | { tipo: 'gravando' }
   // De 0 (silêncio) a 1, a cada 80 ms enquanto grava.
   | { tipo: 'nivel'; valor: number }
-  | { tipo: 'audio'; mime: string; base64: string }
+  | { tipo: 'audio'; mime: string; base64: string; rascunho?: boolean; recuperado?: boolean; tabId?: string }
   | { tipo: 'curto' }
   | { tipo: 'cancelado' }
   | { tipo: 'erro'; mensagem: string })
@@ -17,8 +17,16 @@ export const canRecord = (): boolean => typeof koraApp()?.gravarAudio === 'funct
 
 // O app põe a chave só no documento principal; sem ela, um iframe com a mesma ponte não liga o microfone.
 const key = (): string => (window as unknown as { koraChaveAudio?: string }).koraChaveAudio ?? ''
-export const startRecording = (): void => koraApp()?.gravarAudio?.(key())
+export const startRecording = (projectId: string, tabId: string): void => {
+  const app = koraApp()
+  if (app?.gravarAudioNoChat) app.gravarAudioNoChat(projectId, tabId, key())
+  else app?.gravarAudio?.(key())
+}
+export const recoverAudio = (projectId: string, tabId: string): void => {
+  if (key()) koraApp()?.recuperarAudio?.(projectId, tabId, key())
+}
 export const stopRecording = (send: boolean): void => koraApp()?.pararAudio?.(send, key())
+export const discardAudio = (): void => koraApp()?.descartarAudio?.(key())
 
 export function onNativeAudio(handler: (event: NativeAudioEvent) => void): () => void {
   const target = window as unknown as { koraAudio?: (event: NativeAudioEvent) => void }

@@ -220,6 +220,9 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.getByRole('button', { name: 'Parar e transcrever' }).click()
     await browserExpect(page.locator('.composer').getByRole('alert')).toContainText('não está aberto no PC')
     await browserExpect(field).toHaveValue('Rode os testes do servidor do celular')
+    await browserExpect(page.getByRole('button', { name: 'Transcrever áudio guardado' })).toBeVisible()
+    await browserExpect(page.getByRole('status').filter({ hasText: 'Áudio guardado neste chat' })).toBeVisible()
+    await page.getByRole('button', { name: 'Descartar gravação' }).click()
     // Descartar a gravação não manda nada ao PC.
     await page.getByRole('button', { name: 'Gravar áudio' }).click()
     await page.getByRole('button', { name: 'Descartar gravação' }).click()
@@ -247,6 +250,54 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await browserExpect(page.getByRole('button', { name: 'Enviar', exact: true })).toBeVisible()
     await browserExpect(field).toHaveValue('Rode os testes do servidor do celular')
     await expect.poll(() => readdirSync(join(dir, 'audio'))).toEqual([])
+    // O Android entrega o trecho guardado ao bloquear a tela; ele só sobe ao PC após confirmação.
+    await page.getByRole('button', { name: 'Gravar áudio' }).click()
+    await page.evaluate(() => (window as unknown as { koraAudio(event: unknown): void }).koraAudio({ tipo: 'audio', gravacao: 6, mime: 'audio/ogg', base64: btoa('OggS-guardado'), rascunho: true }))
+    await browserExpect(page.getByRole('button', { name: 'Transcrever áudio guardado' })).toBeVisible()
+    expect(heard).toHaveLength(3)
+    await page.screenshot({ path: join(artifacts, 'audio-guardado-350.png') })
+    await page.route('**/api/audio', (route) => route.abort('connectionreset'))
+    await page.getByRole('button', { name: 'Transcrever áudio guardado' }).click()
+    await browserExpect(page.locator('.composer').getByRole('alert')).toContainText('O áudio continua guardado neste chat.')
+    expect(heard).toHaveLength(3)
+    await page.unroute('**/api/audio')
+    await page.getByRole('button', { name: 'Transcrever áudio guardado' }).click()
+    await browserExpect(field).toHaveValue('Rode os testes do servidor do celular os testes do servidor do celular')
+    expect(heard.at(-1)).toBe('OggS-guardado')
+    await context.addInitScript(() => {
+      if (window.top !== window) return
+      const saved = sessionStorage.getItem('teste-audio-recuperado')
+      if (!saved) return
+      const pending = JSON.parse(saved) as { projectId: string; tabId: string }
+      const target = window as unknown as { koraAudio?(event: unknown): void }
+      Object.assign(window, {
+        KoraApp: {
+          lerQr() {}, escolherPc() {}, pronto() {}, gravarAudio() {}, pararAudio() {},
+          recuperarAudio(projectId: string, tabId: string, key: string) {
+            if (key === 'chave-recuperada' && projectId === pending.projectId && tabId === pending.tabId) {
+              target.koraAudio?.({ tipo: 'audio', gravacao: 99, mime: 'audio/ogg', base64: btoa('OggS-recuperado'), rascunho: true, recuperado: true, tabId })
+            }
+          },
+          descartarAudio() { sessionStorage.removeItem('teste-audio-recuperado') }
+        }
+      })
+      window.addEventListener('load', () => {
+        Object.assign(window, { koraChaveAudio: 'chave-recuperada', koraAudioPendente: pending })
+        window.dispatchEvent(new Event('kora-audio-pendente'))
+      }, { once: true })
+    })
+    await page.evaluate((pending) => {
+      sessionStorage.setItem('teste-audio-recuperado', JSON.stringify(pending))
+      history.replaceState(null, '', '/')
+    }, { projectId: tab.projectId, tabId: tab.id })
+    await page.reload()
+    await browserExpect(page.getByRole('button', { name: 'Transcrever áudio guardado' })).toBeVisible()
+    await page.getByRole('button', { name: 'Transcrever áudio guardado' }).click()
+    await browserExpect(field).toHaveValue('os testes do servidor do celular')
+    expect(heard.at(-1)).toBe('OggS-recuperado')
+    expect(await page.evaluate(() => sessionStorage.getItem('teste-audio-recuperado'))).toBeNull()
+    await page.evaluate((tabId) => (window as unknown as { koraAudio(event: unknown): void }).koraAudio({ tipo: 'audio', gravacao: 99, mime: 'audio/ogg', base64: btoa('OggS-recuperado'), rascunho: true, recuperado: true, tabId }), tab.id)
+    await browserExpect(page.getByRole('button', { name: 'Transcrever áudio guardado' })).toHaveCount(0)
     await field.fill('')
     await page.evaluate(() => { delete (window as { KoraApp?: unknown }).KoraApp })
 
@@ -327,6 +378,17 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.goBack()
     await browserExpect(page.getByRole('heading', { name: 'Seus projetos' })).toBeVisible()
     await browserExpect(page.locator('.tree-tabs').getByRole('button', { name: /Sessão do celular/ })).toBeVisible()
+
+    await page.evaluate(() => Object.assign(window, {
+      koraChaveAudio: 'chave-menu', __copiado: [] as string[],
+      KoraApp: { copiar(text: string, key: string) { Object.assign(window, { __copiado: [text, key] }) } }
+    }))
+    await page.locator('.tree-project-name').filter({ hasText: 'Projeto de validação' }).click({ button: 'right' })
+    await page.getByRole('button', { name: 'Copiar caminho', exact: true }).click()
+    expect(await page.evaluate(() => (window as unknown as { __copiado: string[] }).__copiado)).toEqual([dir, 'chave-menu'])
+    await page.goBack()
+    await browserExpect(page.getByRole('dialog')).toHaveCount(0)
+    await page.evaluate(() => { delete (window as { KoraApp?: unknown }).KoraApp })
 
     // Segurar a aba na lista abre as opções dela sem abrir a sessão.
     const treeTab = page.locator('.tree-tab').filter({ hasText: 'Sessão do celular' })
@@ -597,6 +659,11 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
       Object.assign(window, { koraChaveAudio: 'chave-da-pagina', __baixou: [] as string[][], __abriu: 0 })
       app['baixar'] = (url: string, name: string, key: string) => (window as unknown as { __baixou: string[][] }).__baixou.push([url, name, key])
       app['abrirBaixado'] = (key: string) => { if (key === 'chave-da-pagina') (window as unknown as { __abriu: number }).__abriu++ }
+      Object.assign(window, { __acaoArquivo: '' })
+      for (const action of ['compartilhar', 'salvarComo']) app[action] = (url: string, name: string, key: string) => {
+        Object.assign(window, { __acaoArquivo: action })
+        ;(app['baixar'] as (url: string, name: string, key: string) => void)(url, name, key)
+      }
     })
     await page.goBack()
     await page.locator('.file-row').filter({ hasText: 'pagina.html' }).click()
@@ -614,6 +681,29 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.screenshot({ path: join(artifacts, 'arquivo-baixado-350.png') })
     await page.locator('.file-notice').getByRole('button', { name: 'Abrir', exact: true }).click()
     expect(await page.evaluate(() => (window as unknown as { __abriu: number }).__abriu)).toBe(1)
+    for (const action of ['Compartilhar arquivo', 'Salvar como…']) {
+      await page.getByRole('button', { name: 'Opções do arquivo', exact: true }).click()
+      await browserExpect(page.getByRole('dialog')).toBeVisible()
+      await page.goBack()
+      await browserExpect(page.getByRole('dialog')).toHaveCount(0)
+      await browserExpect(page.locator('iframe.html-view')).toBeVisible()
+      await page.getByRole('button', { name: 'Opções do arquivo', exact: true }).click()
+      for (const [width, height] of SIZES) {
+        await page.setViewportSize({ width, height })
+        expect(await page.getByRole('dialog').evaluate((sheet) => sheet.scrollWidth <= sheet.clientWidth)).toBe(true)
+      }
+      await page.setViewportSize({ width: 350, height: 700 })
+      await page.screenshot({ path: join(artifacts, action === 'Compartilhar arquivo' ? 'arquivo-opcoes-350.png' : 'arquivo-salvar-como-350.png') })
+      const previous = await page.evaluate(() => (window as unknown as { __baixou: string[][] }).__baixou.length)
+      await page.getByRole('button', { name: action, exact: true }).click()
+      await expect.poll(() => page.evaluate(() => (window as unknown as { __baixou: string[][] }).__baixou.length)).toBe(previous + 1)
+      const args = await page.evaluate(() => (window as unknown as { __baixou: string[][] }).__baixou.at(-1)!)
+      expect(args.slice(1)).toEqual(['pagina.html', 'chave-da-pagina'])
+      expect(await page.evaluate(() => (window as unknown as { __acaoArquivo: string }).__acaoArquivo)).toBe(action === 'Compartilhar arquivo' ? 'compartilhar' : 'salvarComo')
+      expect(await (await fetch(args[0]!)).text()).toContain('Página de teste')
+      await page.evaluate(() => (window as unknown as { koraBaixado(event: unknown): void }).koraBaixado({ tipo: 'cancelado' }))
+      await browserExpect(downloadButton).toBeEnabled()
+    }
     // No navegador do celular, sem o app, é um download comum, com o nome e o conteúdo do arquivo do PC.
     await page.evaluate(() => { delete (window as { KoraApp?: unknown }).KoraApp })
     const [saved] = await Promise.all([page.waitForEvent('download'), downloadButton.click()])

@@ -5,21 +5,47 @@ import { Icon, type IconName } from '@/brand/icons'
 import { GIT_STYLE, gitMaps, gitPathKey } from '@/lib/git-decorations'
 import { api } from './api'
 import { SkeletonRows } from './Skeleton'
+import { useLongPress } from './longPress'
+import { FileActions } from './FileActions'
+import { download, onDownloaded } from './downloads'
 
 const FILE_ICON: Record<ReturnType<typeof viewerFor>, IconName> = { markdown: 'arquivo', code: 'codigo', pdf: 'pdf', image: 'imagem', external: 'arquivo' }
 
 // Uma pasta por vez, com as cores do git do explorador do PC; tocar na pasta entra nela, no arquivo abre.
-export function FilesPanel({ projectId, dir, onFailed, onDir, onFile }: {
+export function FilesPanel({ projectId, dir, onFailed, onDir, onFile, selected, onSelect }: {
   projectId: string
   dir: string
   onFailed(): void
   onDir(dir: string): void
   onFile(path: string): void
+  selected: { path: string; name: string; isDir: boolean } | null
+  onSelect(entry: { path: string; name: string; isDir: boolean } | null): void
 }): React.JSX.Element {
   const [listing, setListing] = useState<MobileDirectory | null>(null)
   const [gitFiles, setGitFiles] = useState<MobileGit['files']>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [transferring, setTransferring] = useState(false)
+  const [notice, setNotice] = useState('')
+  const longPress = useLongPress()
+  useEffect(() => onDownloaded((event) => {
+    setTransferring(false)
+    if (event.tipo === 'erro') setError(event.mensagem)
+    if (event.tipo === 'salvo') setNotice(event.destino === 'escolhido' ? `Salvo no local escolhido: ${event.nome}.` : `Salvo em Downloads/Kora: ${event.nome}.`)
+  }), [])
+  const transfer = async (action: 'baixar' | 'salvarComo' | 'compartilhar'): Promise<void> => {
+    if (!selected) return
+    onSelect(null)
+    setTransferring(true)
+    setError(null)
+    setNotice('')
+    try {
+      if (await download(`project=${encodeURIComponent(projectId)}&path=${encodeURIComponent(selected.path)}`, selected.name, action) === 'browser') setTransferring(false)
+    } catch (error) {
+      setTransferring(false)
+      setError(error instanceof Error ? error.message : String(error))
+    }
+  }
   // Toques rápidos em pastas: só a resposta do último pedido vale, uma atrasada não troca a tela.
   const request = useRef(0)
   // Outra pasta: a lista da anterior sai na hora, para não parecer o conteúdo da nova enquanto ela carrega ou falha.
@@ -52,12 +78,14 @@ export function FilesPanel({ projectId, dir, onFailed, onDir, onFile }: {
       <button className="icon-button" aria-label="Atualizar arquivos" disabled={loading} onClick={() => { load(); loadGit() }}><Icon name="atualizar" /></button>
     </nav>
     {error && <p role="alert" className="error">{error}</p>}
+    {notice && <p role="status">{notice}</p>}
+    {selected && <FileActions name={selected.name} path={selected.path} directory={selected.isDir} busy={transferring} onClose={() => onSelect(null)} onAction={(action) => void transfer(action)} />}
     {!listing && !error && <SkeletonRows label="Abrindo a pasta…" row="file-row" count={9} />}
     {listing?.entries.length === 0 && <p className="empty-copy">Pasta vazia.</p>}
     {listing?.entries.map((entry) => {
       const status = (entry.isDir ? git.dirs : git.files).get(gitPathKey(entry.path))
       const style = status ? GIT_STYLE[status] : null
-      return <button key={entry.path} className="file-row" onClick={() => (entry.isDir ? onDir(entry.path) : onFile(entry.path))}>
+      return <button key={entry.path} className="file-row" {...longPress(() => onSelect(entry))} onClick={() => (entry.isDir ? onDir(entry.path) : onFile(entry.path))}>
         <Icon name={entry.isDir ? 'projeto' : FILE_ICON[viewerFor(entry.name)]} />
         <span className={`file-name ${style?.className ?? ''}`}>{entry.name}</span>
         {style && !entry.isDir && <small className={style.className}>{style.letter}</small>}

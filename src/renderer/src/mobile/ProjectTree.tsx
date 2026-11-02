@@ -6,6 +6,7 @@ import { descendantIds } from '@shared/groups'
 import { agentLabel } from '@/components/AgentIcon'
 import { MobileProjectAvatar } from './MobileProjectAvatar'
 import { TabIcon } from './NewTabSheet'
+import { type CopyMenu } from './CopyActions'
 import { useLongPress } from './longPress'
 
 // Abrir e recolher no celular vale só para ele e sobrevive a sair da lista e reabrir o app; o que nunca foi mexido
@@ -21,7 +22,7 @@ const savedExpanded = (): Record<string, boolean> => {
 
 export const tabStatus = (tab: MobileTab, alert = false): string => !tab.live ? 'Suspensa' : tab.activity === 'working' ? 'Trabalhando' : alert ? 'Esperando você' : 'Aberta'
 
-export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewTab, onTab, onTabActions, onRelocate }: {
+export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewTab, onTab, onTabActions, onRelocate, onActions }: {
   state: MobileState
   alerted: ReadonlySet<string>
   search: string
@@ -31,6 +32,7 @@ export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewT
   onTab(tab: MobileTab): void
   onTabActions(tab: MobileTab): void
   onRelocate(id: string): void
+  onActions(menu: CopyMenu): void
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(() => remembered ?? savedExpanded())
   useEffect(() => {
@@ -49,7 +51,7 @@ export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewT
     return <div className={`tree-project ${open ? 'expanded' : ''} ${missing ? 'missing' : ''}`} key={project.id}>
       <div className="tree-project-row">
         <button className={`tree-toggle ${open ? 'expanded' : ''}`} aria-label={`${open ? 'Recolher' : 'Expandir'} ${project.name}`} aria-expanded={open} onClick={toggle}><Icon name="expandir" /></button>
-        <button className="tree-project-name" onClick={() => tabs.length ? toggle() : onProject(project.id)}><MobileProjectAvatar id={project.id} path={project.path} open={open} /><strong>{project.name}</strong>{missing && <Icon name="alerta" active />}</button>
+        <button className="tree-project-name" {...longPress(() => onActions({ title: project.name, values: [{ label: 'Copiar caminho', text: project.path }, { label: 'Copiar ID do projeto', text: project.id }] }))} onClick={() => tabs.length ? toggle() : onProject(project.id)}><MobileProjectAvatar id={project.id} path={project.path} open={open} /><strong>{project.name}</strong>{missing && <Icon name="alerta" active />}</button>
         {!open && tabs.length > 0 && <span className="tree-count">{tabs.length}</span>}
         {!missing && <button className="icon-button tree-new" aria-label={`Arquivos de ${project.name}`} onClick={() => onFiles(project.id)}><Icon name="projeto" /></button>}
         <button className="icon-button tree-new" aria-label={`Nova conversa em ${project.name}`} disabled={missing} onClick={() => onNewTab(project.id)}><Icon name="novaAba" /></button>
@@ -75,7 +77,7 @@ export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewT
     if (query && !hasMatches(group)) return null
     const open = query ? true : expanded[group.id] ?? !group.collapsed
     return <section className="tree-group" key={group.id}>
-      <button className={`group-heading ${open ? 'expanded' : ''}`} aria-expanded={open} onClick={() => setExpanded((previous) => ({ ...previous, [group.id]: !open }))}><Icon name="expandir" /><span>{group.name}</span><span className="tree-count">{projectsIn(group.id)}</span></button>
+      <button className={`group-heading ${open ? 'expanded' : ''}`} aria-expanded={open} {...longPress(() => onActions({ title: group.name, values: [{ label: 'Copiar ID da pasta', text: group.id }] }))} onClick={() => setExpanded((previous) => ({ ...previous, [group.id]: !open }))}><Icon name="expandir" /><span>{group.name}</span><span className="tree-count">{projectsIn(group.id)}</span></button>
       {open && <div className="group-content">{state.projects.filter((project) => !project.hidden && project.groupId === group.id).map(projectRow)}{state.groups.filter((child) => child.parentId === group.id).map(groupRow)}</div>}
     </section>
   }

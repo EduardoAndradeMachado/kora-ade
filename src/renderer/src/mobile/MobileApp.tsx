@@ -9,6 +9,7 @@ import { historyMark, useMobileNavigation } from './navigation'
 import { FolderPicker } from './FolderPicker'
 import { MobileProjectAvatar } from './MobileProjectAvatar'
 import { ProjectTree, tabStatus } from './ProjectTree'
+import { CopyActions } from './CopyActions'
 import { SessionActions } from './SessionActions'
 import { NewTabSheet, TabIcon, type NewTabKind } from './NewTabSheet'
 import { AgentIcon, agentLabel } from '@/components/AgentIcon'
@@ -23,6 +24,7 @@ import type { IconName } from '@/brand/icons'
 import { SessionView, type SessionFeed, type TerminalChunk } from './SessionView'
 import { saveSound, savedSound, useFinishedAlerts } from './alerts'
 import { useSwipe, type SwipeActions } from './swipe'
+import { discardAudio } from './voice'
 
 const REOPEN_MS = 10_000
 
@@ -76,6 +78,25 @@ export function MobileApp(): React.JSX.Element {
     setDevice(result.deviceId)
     setState(result.state)
   }, [])
+
+  useEffect(() => {
+    const target = window as unknown as { koraAudioPendente?: { projectId: string; tabId: string } | null }
+    const restore = (): void => {
+      const pending = target.koraAudioPendente
+      if (!state || !pending) return
+      target.koraAudioPendente = null
+      if (state.tabs.some((tab) => tab.id === pending.tabId && tab.projectId === pending.projectId && tab.live)) {
+        if (!history.state?.koraMobile?.depth) {
+          replace({ projectId: null, tabId: null, picker: null })
+          navigate({ projectId: pending.projectId, tabId: null, picker: null })
+          navigate({ projectId: pending.projectId, tabId: pending.tabId, picker: null })
+        } else replace({ projectId: pending.projectId, tabId: pending.tabId, picker: null })
+      } else discardAudio()
+    }
+    window.addEventListener('kora-audio-pendente', restore)
+    restore()
+    return () => window.removeEventListener('kora-audio-pendente', restore)
+  }, [state, replace, navigate])
 
   useEffect(() => {
     history.replaceState(history.state, '', location.pathname)
@@ -198,7 +219,7 @@ export function MobileApp(): React.JSX.Element {
   const toChat = chat && state?.tabs.some((tab) => tab.id === chat.tabId) ? () => returnTo(chat) : undefined
   const chatFiles = (chatTab: string): void => { if (projectId) navigate({ projectId, tabId: null, picker: null, files: folderOf(projectId), chat: { tabId: chatTab, ...historyMark() } }) }
   // Os mesmos caminhos dos botões da faixa: voltar, arquivos do projeto e voltar à conversa. Com folha aberta, nada.
-  const sheetOpen = Boolean(route.picker || route.pc || route.newTab || route.actions || route.rename)
+  const sheetOpen = Boolean(route.picker || route.pc || route.newTab || route.actions || route.rename || route.menu || route.fileOptions)
   const swipe: SwipeActions = !projectId || sheetOpen ? {}
     : route.file !== undefined || !tabId ? { right: toChat }
     : selectedTab ? { left: () => chatFiles(selectedTab.id), right: back } : {}
@@ -244,15 +265,15 @@ export function MobileApp(): React.JSX.Element {
     {!projectId ? <><main className="project-list page-enter" ref={projectList} onScroll={(event) => { homeScroll = event.currentTarget.scrollTop }}>
       <div className="section-heading"><div><span className="eyebrow">SEU COMPUTADOR</span><h1>Seus projetos</h1></div><span className="section-count">{state.projects.length}</span></div>
       <label className="project-search"><Icon name="buscar" /><input aria-label="Buscar projetos e abas" placeholder="Buscar projetos e abas" value={search} onChange={(event) => setSearch(event.target.value)} autoComplete="off" /></label>
-      {state.projects.length === 0 ? <div className="empty-state"><SymbolMark size={56} /><h2>Seu espaço de trabalho</h2><p>Adicione uma pasta do PC para começar uma conversa.</p><button className="primary" onClick={() => picker(null)} disabled={busy || !connected}><Icon name="novoProjeto" active />Adicionar projeto</button></div> : <ProjectTree state={state} alerted={alerted} search={search} onProject={openProject} onFiles={(id) => navigate({ projectId: id, tabId: null, picker: null, files: folderOf(id) })} onNewTab={newTab} onTab={(tab: MobileTab) => open(tab.id, tab.projectId)} onTabActions={tabActions} onRelocate={picker} />}
+      {state.projects.length === 0 ? <div className="empty-state"><SymbolMark size={56} /><h2>Seu espaço de trabalho</h2><p>Adicione uma pasta do PC para começar uma conversa.</p><button className="primary" onClick={() => picker(null)} disabled={busy || !connected}><Icon name="novoProjeto" active />Adicionar projeto</button></div> : <ProjectTree state={state} alerted={alerted} search={search} onProject={openProject} onFiles={(id) => navigate({ projectId: id, tabId: null, picker: null, files: folderOf(id) })} onNewTab={newTab} onTab={(tab: MobileTab) => open(tab.id, tab.projectId)} onTabActions={tabActions} onRelocate={picker} onActions={(menu) => navigate({ ...route, menu })} />}
     </main>
     {/* Uma linha só: os limites ocupam o espaço e a engrenagem fica ao lado; o tema mora nas configurações. */}
     <footer className="mobile-footer">
-      {usage.length > 0 && <button className="usage-footer" aria-label="Limites de uso e conta" onClick={() => navigate({ ...route, pc: 'usage' })}>
+      {usage.length > 0 && <button className="usage-footer" aria-label="Limites de uso e conta" onClick={() => navigate({ ...route, pc: 'usage' })} {...longPress(() => navigate({ ...route, pc: 'usage' }))}>
         {usage.map((agent) => <CompactAgent key={agent.agent} usage={agent} now={Date.now()} />)}
       </button>}
       <button className="icon-button footer-settings" aria-label="Configurações" onClick={() => navigate({ ...route, pc: 'settings' })}><Icon name="engrenagem" /></button>
-    </footer></> : route.file !== undefined ? <FileViewer key={route.file} projectId={projectId} path={route.file} dark={document.documentElement.classList.contains('dark')} connection={connection} onBack={back} onChat={toChat} onOpenFile={(file) => navigate({ ...route, file })} />
+    </footer></> : route.file !== undefined ? <FileViewer actions={Boolean(route.fileOptions)} onActions={(open) => open ? navigate({ ...route, fileOptions: { path: route.file!, name: route.file!.split(/[\\/]/).pop() ?? route.file!, isDir: false } }) : back()} key={route.file} projectId={projectId} path={route.file} dark={document.documentElement.classList.contains('dark')} connection={connection} onBack={back} onChat={toChat} onOpenFile={(file) => navigate({ ...route, file })} />
     : !tabId ? <main className="session-list page-enter" key={projectId}>
       <div className="project-heading"><button className="icon-button back-button" aria-label="Voltar" onClick={back}><Icon name="expandir" className="back-icon" /></button><MobileProjectAvatar id={projectId} path={project?.path ?? ''} open /><div><h1>{project?.name ?? 'Projeto removido'}</h1></div>{toChat && <button className="icon-button chat-return" aria-label="Voltar à conversa" onClick={toChat}><Icon name="conversa" active /></button>}</div>
       {missing && <div className="missing-notice"><Icon name="alerta" active /><div><strong>Pasta não encontrada</strong><p>Localize a pasta no PC para continuar usando este projeto.</p><button onClick={() => picker(projectId)}><Icon name="mover" active />Revincular pasta</button></div></div>}
@@ -260,7 +281,7 @@ export function MobileApp(): React.JSX.Element {
         <button role="tab" aria-selected={route.files === undefined} onClick={() => replace({ ...route, files: undefined })}><Icon name="sessoes" />Sessões</button>
         <button role="tab" aria-selected={route.files !== undefined} disabled={missing} onClick={() => replace({ ...route, files: folderOf(projectId) })}><Icon name="arquivo" />Arquivos</button>
       </div>
-      {route.files !== undefined ? <FilesPanel projectId={projectId} dir={route.files} onFailed={() => { if (lastFolder.get(projectId) === route.files) lastFolder.delete(projectId) }} onDir={(dir) => navigate({ ...route, files: dir })} onFile={(file) => navigate({ ...route, file })} /> : <>
+      {route.files !== undefined ? <FilesPanel selected={route.fileOptions ?? null} onSelect={(entry) => entry ? navigate({ ...route, fileOptions: entry }) : back()} projectId={projectId} dir={route.files} onFailed={() => { if (lastFolder.get(projectId) === route.files) lastFolder.delete(projectId) }} onDir={(dir) => navigate({ ...route, files: dir })} onFile={(file) => navigate({ ...route, file })} /> : <>
       <button className="primary new-tab-button" disabled={busy || !connected || missing} onClick={() => newTab(projectId)}><Icon name="novaAba" />Nova aba</button>
         <div className="list-heading"><h2>Abas do projeto</h2><span>{tabs.length}</span></div>
         {tabs.length === 0 && <p className="empty-copy">Nenhuma aba aberta. Inicie uma conversa acima.</p>}
@@ -268,10 +289,10 @@ export function MobileApp(): React.JSX.Element {
         <div className="list-heading"><h2>Conversas salvas</h2><span>{saved.length}</span></div>
         {sessionsLoading && <SkeletonRows label="Carregando as conversas salvas" row="session-row" count={2} detail />}
         {!sessionsLoading && saved.length === 0 && <p className="empty-copy">As conversas salvas neste projeto aparecem aqui.</p>}
-        {saved.map((session) => <button className="session-row" disabled={busy || !connected || missing} key={`${session.kind}:${session.sessionId}`} onClick={() => void run(async () => { const result = await command({ type: 'open-session', projectId, agent: { kind: session.kind, sessionId: session.sessionId }, ...START_SIZE }); await refresh(); if (result.tabId) open(result.tabId) })}><AgentIcon kind={session.kind} /><span><strong>{session.title}</strong><small>{agentLabel(session.kind)} · {new Date(session.updatedAt).toLocaleDateString('pt-BR')}</small></span><Icon name="expandir" /></button>)}
+        {saved.map((session) => <button className="session-row" disabled={busy || !connected || missing} key={`${session.kind}:${session.sessionId}`} {...longPress(() => navigate({ ...route, menu: { title: session.title, values: [{ label: 'Copiar ID da sessão', text: session.sessionId }] } }))} onClick={() => void run(async () => { const result = await command({ type: 'open-session', projectId, agent: { kind: session.kind, sessionId: session.sessionId }, ...START_SIZE }); await refresh(); if (result.tabId) open(result.tabId) })}><AgentIcon kind={session.kind} /><span><strong>{session.title}</strong><small>{agentLabel(session.kind)} · {new Date(session.updatedAt).toLocaleDateString('pt-BR')}</small></span><Icon name="expandir" /></button>)}
       </>}
     </main> : !selectedTab ? <main className="session-message"><Icon name="sessoes" /><p>Esta aba foi fechada.</p><button onClick={back}>Voltar às conversas</button></main> : <>
-      <div className="session-strip"><button className="icon-button back-button" aria-label="Voltar" onClick={back}><Icon name="expandir" className="back-icon" /></button><TabIcon tab={selectedTab} /><button className="session-name" aria-label={`Renomear ${selectedTab.title}`} onClick={() => navigate({ ...route, rename: selectedTab.id })}><span>{selectedTab.title}</span><Icon name="editar" /></button><button className="icon-button" aria-label="Arquivos do projeto" onClick={() => chatFiles(selectedTab.id)}><Icon name="projeto" /></button></div>
+      <div className="session-strip"><button className="icon-button back-button" aria-label="Voltar" onClick={back}><Icon name="expandir" className="back-icon" /></button><TabIcon tab={selectedTab} /><button className="session-name" aria-label={`Renomear ${selectedTab.title}`} onClick={() => navigate({ ...route, rename: selectedTab.id })} {...longPress(() => tabActions(selectedTab))}><span>{selectedTab.title}</span><Icon name="editar" /></button><button className="icon-button" aria-label="Arquivos do projeto" onClick={() => chatFiles(selectedTab.id)}><Icon name="projeto" /></button></div>
       {live
         ? <SessionView key={selectedTab.id} tab={selectedTab} device={device} connected={connected} connection={connection} feed={feed} command={command} onError={showError} dictation={state.dictation} />
         : <main className="session-message page-enter"><div className="message-symbol"><Icon name="pausar" active /></div><h1>Sessão suspensa</h1><p className="muted">Continue para abrir o agente de novo.</p>{missing && <button onClick={() => picker(projectId)}>Revincular pasta</button>}<button className="primary" disabled={busy || !connected || missing} onClick={() => void resume(selectedTab.id)}><Icon name="retomar" active />Continuar conversa</button></main>}
@@ -284,8 +305,9 @@ export function MobileApp(): React.JSX.Element {
         replace(route.picker!.projectId ? { ...route, picker: null } : { projectId: result.projectId ?? null, tabId: null, picker: null })
       } finally { setBusy(false) }
     }} />}
+    {route.menu && <CopyActions menu={route.menu} onClose={back} onUsage={() => replace({ ...route, menu: undefined, pc: 'usage' })} />}
     {route.pc && <PcSheet view={route.pc} themes={THEMES} theme={phoneTheme ?? state.theme} onTheme={chooseTheme} alerts={state.alerts} sound={sound} onSound={(on) => { setSound(on); saveSound(on) }} connected={connected} onClose={back} onError={showError} onSwitchAccount={async (accountId) => { await command({ type: 'switch-account', accountId }) }} onAlerts={async (alerts) => { await command({ type: 'alerts', alerts }) }} />}
     {route.newTab && <NewTabSheet projectName={state.projects.find((project) => project.id === route.newTab)?.name ?? ''} busy={busy} onClose={back} onChoose={(kind) => create(route.newTab!, kind)} />}
-    {actionTab && <SessionActions tab={actionTab} busy={busy} renameOnly={!route.actions} onClose={back} onRename={async (title) => run(async () => { await command({ type: 'rename', tabId: actionTab.id, title }); await refresh(); back() })} onSuspend={async () => run(async () => { await command(actionTab.live ? { type: 'suspend', tabId: actionTab.id } : { type: 'resume', tabId: actionTab.id, ...START_SIZE }); await refresh(); back() })} onDelete={async () => run(async () => { await command({ type: 'close', tabId: actionTab.id }); await refresh(); if (tabId === actionTab.id) replace({ projectId, tabId: null, picker: null }); else back() })} />}
+    {actionTab && <SessionActions tab={actionTab} busy={busy} onUsage={() => replace({ ...route, actions: undefined, rename: undefined, pc: 'usage' })} renameOnly={!route.actions} onClose={back} onRename={async (title) => run(async () => { await command({ type: 'rename', tabId: actionTab.id, title }); await refresh(); back() })} onSuspend={async () => run(async () => { await command(actionTab.live ? { type: 'suspend', tabId: actionTab.id } : { type: 'resume', tabId: actionTab.id, ...START_SIZE }); await refresh(); back() })} onDelete={async () => run(async () => { await command({ type: 'close', tabId: actionTab.id }); await refresh(); if (tabId === actionTab.id) replace({ projectId, tabId: null, picker: null }); else back() })} />}
   </div>
 }

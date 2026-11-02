@@ -44,4 +44,13 @@ function decodeReason(header: string | null): string {
 // por window.koraAudio.
 // baixar e abrirBaixado só existem a partir do app 0.5.2 (downloads.ts); a resposta vem por window.koraBaixado.
 export interface KoraApp { lerQr(): void; escolherPc(): void; pronto(): void; versao?(): string; buscarAtualizacao?(): void; gravarAudio?(chave: string): void; pararAudio?(enviar: boolean, chave: string): void; certificado?(): string; baixar?(endereco: string, nome: string, chave: string): void; abrirBaixado?(chave: string): void }
+// Operações disponíveis a partir do app Android 0.5.3.
+export interface KoraApp {
+  copiar?(texto: string, chave: string): void
+  compartilhar?(endereco: string, nome: string, chave: string): void
+  salvarComo?(endereco: string, nome: string, chave: string): void
+  descartarAudio?(chave: string): void
+  gravarAudioNoChat?(projeto: string, aba: string, chave: string): void
+  recuperarAudio?(projeto: string, aba: string, chave: string): void
+}
 export const koraApp = (): KoraApp | undefined => (window as unknown as { KoraApp?: KoraApp }).KoraApp

@@ -168,7 +168,7 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .folder-selected { font-family: var(--terminal-font-family); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
 .folder-footer .primary { width: 100%; }
 .folder-error { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 0; padding: 12px 16px; }
-.action-sheet { padding: 0 12px max(20px, env(safe-area-inset-bottom)); }
+.action-sheet { padding: 0 12px max(20px, env(safe-area-inset-bottom)); overflow-y: auto; }
 .action-sheet .sheet-header { padding-inline: 4px; }
 .action-row { width: 100%; justify-content: flex-start; border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: 14px 8px; min-height: 52px; }
 .action-row svg:last-child { margin-left: auto; width: 14px; height: 14px; }
@@ -295,8 +295,8 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
    quase toda (a barra de status do Android fica); a barra de página e zoom some pelo PdfPages. */
 .mobile-app > .mobile-header, .file-header { max-height: 160px; transition: max-height .2s, min-height .2s, opacity .2s, padding .2s, visibility .2s; }
 .file-page.immersive .file-header, .mobile-app:has(.file-page.immersive) > .mobile-header { min-height: 0; max-height: 0; padding-block: 0; border-bottom-width: 0; opacity: 0; visibility: hidden; overflow: hidden; }
-.file-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; min-height: 52px; }
-.file-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.file-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px 6px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; min-height: 52px; }
+.file-title { flex: 1; min-width: 60px; display: flex; flex-direction: column; }
 .file-title strong, .file-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-title strong { font-size: 14px; font-weight: 600; }
 .file-title small { font-size: 11px; }

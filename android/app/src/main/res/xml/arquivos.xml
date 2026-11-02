@@ -3,4 +3,5 @@
 <paths>
     <cache-path name="atualizacao" path="atualizacao/" />
     <cache-path name="imagens" path="imagens/" />
+    <cache-path name="compartilhar" path="compartilhar/" />
 </paths>

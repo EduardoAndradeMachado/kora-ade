@@ -8,10 +8,12 @@ export interface MobileRoute {
   newTab?: string
   actions?: string
   rename?: string
+  menu?: import('./CopyActions').CopyMenu
   pc?: 'usage' | 'settings'
   // Arquivos do projeto: files é a pasta aberta ('' é a raiz); file, o arquivo aberto por cima dela.
   files?: string
   file?: string
+  fileOptions?: { path: string; name: string; isDir: boolean }
   // Arquivos abertos de dentro de uma conversa: a entrada dela no histórico, para voltar pulando as pastas.
   chat?: { tabId: string } & HistoryMark
 }

@@ -6,6 +6,7 @@ import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.ClipboardManager
+import android.content.ClipData
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -166,6 +167,9 @@ class MainActivity : ComponentActivity() {
     // e devolve o áudio por window.koraAudio.
     private var gravador: MediaRecorder? = null
     private var gravacao: File? = null
+    private var audioPendente: File? = null
+    private var contextoDoAudio: JSONObject? = null
+    private var contextoMicrofone: JSONObject? = null
     private var inicioDaGravacao = 0L
     // Os eventos levam o número da gravação: o áudio de uma gravação já descartada na página chega depois e é ignorado.
     private var numeroDaGravacao = 0
@@ -176,6 +180,43 @@ class MainActivity : ComponentActivity() {
     private var chaveDoAudio = UUID.randomUUID().toString()
     // O último arquivo salvo em Downloads, para o Abrir do aviso na tela.
     private var ultimoBaixado: Pair<Uri, String>? = null
+    private var arquivoParaSalvar: Pair<File, String>? = null
+    private val salvarDocumento = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultado ->
+        val destino = resultado.data?.data
+        val pendente = arquivoParaSalvar
+        arquivoParaSalvar = null
+        if (pendente == null) {
+            if (resultado.resultCode == RESULT_OK && destino != null) {
+                runCatching { contentResolver.delete(destino, null, null) }
+                Toast.makeText(this, "O pedido de salvar não pôde ser recuperado. Tente novamente.", Toast.LENGTH_LONG).show()
+            }
+            return@registerForActivityResult
+        }
+        if (resultado.resultCode != RESULT_OK || destino == null) {
+            pendente.first.delete()
+            avisarBaixado(JSONObject().put("tipo", "cancelado"))
+            return@registerForActivityResult
+        }
+        Thread {
+            val salvo = runCatching {
+                pendente.first.inputStream().use { entrada ->
+                    checkNotNull(contentResolver.openOutputStream(destino, "wt")).use { entrada.copyTo(it) }
+                }
+            }
+            pendente.first.delete()
+            principal.post {
+                salvo.onSuccess {
+                    ultimoBaixado = destino to pendente.second
+                    Toast.makeText(this, "Arquivo salvo no local escolhido.", Toast.LENGTH_SHORT).show()
+                    avisarBaixado(JSONObject().put("tipo", "salvo").put("nome", pendente.first.name).put("destino", "escolhido"))
+                }.onFailure {
+                    runCatching { contentResolver.delete(destino, null, null) }
+                    avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Não deu para salvar o arquivo no local escolhido."))
+                    Toast.makeText(this, "Não deu para salvar o arquivo no local escolhido.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
     // Nível do microfone para as barras do campo: quem fala vê que o áudio está chegando.
     private val medirNivel = object : Runnable {
         override fun run() {
@@ -193,7 +234,7 @@ class MainActivity : ComponentActivity() {
     }
     // A pessoa tocou no microfone para gravar: liberado, a gravação começa sem pedir outro toque.
     private val pedirMicrofone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { liberado ->
-        if (liberado) comecarGravacao()
+        if (liberado) comecarGravacao(contextoMicrofone)
         else avisarAudio(JSONObject().put("tipo", "erro").put("mensagem", "Sem o microfone, o app não grava. Libere o microfone do Kora nas configurações do Android."))
     }
 
@@ -223,6 +264,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        val caminhoPendente = savedInstanceState?.getString("arquivoParaSalvar")
+        val tipoPendente = savedInstanceState?.getString("tipoParaSalvar")
+        if (caminhoPendente != null && tipoPendente != null) {
+            val arquivo = File(caminhoPendente)
+            val raizDoCache = File(cacheDir, "compartilhar").canonicalPath + File.separator
+            if (arquivo.canonicalPath.startsWith(raizDoCache) && arquivo.isFile) arquivoParaSalvar = arquivo to tipoPendente
+        }
         CookieManager.getInstance().setAcceptCookie(true)
         web = criarWebView()
         abertura = criarAbertura()
@@ -277,13 +325,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        arquivoParaSalvar?.let { (arquivo, tipo) ->
+            outState.putString("arquivoParaSalvar", arquivo.absolutePath)
+            outState.putString("tipoParaSalvar", tipo)
+        }
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onPause() {
+        pararGravacao(enviar = true, rascunho = true)
         super.onPause()
         CookieManager.getInstance().flush()
     }
 
     override fun onStart() {
         super.onStart()
+        audioPendente?.let { entregarAudio(it, numeroDaGravacao, rascunho = true) }
         // De volta ao app depois de mudar de lugar: o caminho é conferido de novo.
         principal.removeCallbacks(voltou)
         principal.postDelayed(voltou, 300)
@@ -291,10 +349,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        pararGravacao(enviar = false)
+        pararGravacao(enviar = true, rascunho = true)
     }
 
     override fun onDestroy() {
+        pararGravacao(enviar = false)
+        descartarAudio()
         busca?.shutdownNow()
         runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(redes) }
         fecharPassagem()
@@ -353,22 +413,53 @@ class MainActivity : ComponentActivity() {
         fun gravarAudio(chave: String) = runOnUiThread { if (chave == chaveDoAudio) comecarGravacao() }
 
         @JavascriptInterface
+        fun gravarAudioNoChat(projeto: String, aba: String, chave: String) = runOnUiThread {
+            if (chave == chaveDoAudio && projeto.isNotBlank() && aba.isNotBlank()) {
+                comecarGravacao(JSONObject().put("projectId", projeto).put("tabId", aba).put("pc", atual?.id))
+            }
+        }
+
+        @JavascriptInterface
+        fun recuperarAudio(projeto: String, aba: String, chave: String) = runOnUiThread {
+            val contexto = contextoDoAudio
+            if (chave == chaveDoAudio && contexto?.optString("projectId") == projeto && contexto.optString("tabId") == aba && contexto.optString("pc") == atual?.id) {
+                audioPendente?.let { entregarAudio(it, numeroDaGravacao, rascunho = true, recuperado = true) }
+            }
+        }
+
+        @JavascriptInterface
         fun pararAudio(enviar: Boolean, chave: String) = runOnUiThread { if (chave == chaveDoAudio) pararGravacao(enviar) }
+
+        @JavascriptInterface
+        fun descartarAudio(chave: String) = runOnUiThread { if (chave == chaveDoAudio) descartarAudio() }
 
         @JavascriptInterface
         fun baixar(endereco: String, nome: String, chave: String) = runOnUiThread { if (chave == chaveDoAudio) baixarArquivo(endereco, nome) }
 
         @JavascriptInterface
         fun abrirBaixado(chave: String) = runOnUiThread { if (chave == chaveDoAudio) abrirBaixado() }
+
+        @JavascriptInterface
+        fun copiar(texto: String, chave: String) = runOnUiThread {
+            if (chave == chaveDoAudio) getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Kora", texto))
+        }
+
+        @JavascriptInterface
+        fun compartilhar(endereco: String, nome: String, chave: String) = runOnUiThread {
+            if (chave == chaveDoAudio) baixarArquivo(endereco, nome, "compartilhar")
+        }
+
+        @JavascriptInterface
+        fun salvarComo(endereco: String, nome: String, chave: String) = runOnUiThread {
+            if (chave == chaveDoAudio) baixarArquivo(endereco, nome, "salvarComo")
+        }
     }
 
     private fun avisarAudio(evento: JSONObject) = web.evaluateJavascript("window.koraAudio && window.koraAudio($evento)", null)
 
     private fun avisarBaixado(evento: JSONObject) = web.evaluateJavascript("window.koraBaixado && window.koraBaixado($evento)", null)
 
-    // Baixa pelo mesmo caminho da tela (rede de casa, ou a passagem pelo relay com o cookie dela) direto para
-    // Downloads/Kora: o arquivo fica no celular e abre sem o PC.
-    private fun baixarArquivo(endereco: String, nome: String) {
+    private fun baixarArquivo(endereco: String, nome: String, acao: String = "baixar") {
         val kora = atual
         val origem = kora?.let { enderecoParaBaixar(endereco, it.host, it.porta) }
         if (origem == null) return avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Esse arquivo não é do Kora aberto."))
@@ -380,6 +471,7 @@ class MainActivity : ComponentActivity() {
                 cookie?.let { conexao.setRequestProperty("Cookie", it) }
                 conexao.connectTimeout = 5000
                 conexao.readTimeout = 30_000
+                conexao.instanceFollowRedirects = false
                 try {
                     check(conexao.responseCode == 200) {
                         conexao.getHeaderField("X-Kora-Erro")?.let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrNull() }?.trimEnd('.')
@@ -389,6 +481,21 @@ class MainActivity : ComponentActivity() {
                     // extensão dele ao nome (README.md viraria README.md.txt).
                     val extensao = nomeParaSalvar(nome).substringAfterLast('.', "").lowercase()
                     val tipo = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extensao) ?: tipoDoArquivo(conexao.contentType)
+                    if (acao != "baixar") {
+                        val pasta = File(cacheDir, "compartilhar").apply { mkdirs() }
+                        pasta.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 86_400_000 }?.forEach { antiga ->
+                            antiga.listFiles()?.forEach { if (it.isFile) it.delete() }
+                            antiga.delete()
+                        }
+                        val temporario = File(File(pasta, UUID.randomUUID().toString()).apply { mkdirs() }, nomeParaSalvar(nome))
+                        try {
+                            conexao.inputStream.use { entrada -> temporario.outputStream().use { entrada.copyTo(it) } }
+                        } catch (erro: Exception) {
+                            temporario.delete()
+                            throw erro
+                        }
+                        return@runCatching Triple(FileProvider.getUriForFile(this, "$packageName.arquivos", temporario), tipo, temporario.absolutePath)
+                    }
                     val dados = ContentValues().apply {
                         put(MediaStore.Downloads.DISPLAY_NAME, nomeParaSalvar(nome))
                         put(MediaStore.Downloads.MIME_TYPE, tipo)
@@ -413,6 +520,30 @@ class MainActivity : ComponentActivity() {
             principal.post {
                 if (isFinishing) return@post
                 resultado.onSuccess { (uri, tipo, final) ->
+                    if (acao != "baixar") {
+                        val arquivo = File(final)
+                        val abriu = runCatching {
+                            if (acao == "compartilhar") {
+                                val pedido = Intent(Intent.ACTION_SEND).setType(tipo)
+                                    .putExtra(Intent.EXTRA_STREAM, uri)
+                                    .apply { clipData = ClipData.newRawUri(arquivo.name, uri) }
+                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                startActivity(Intent.createChooser(pedido, "Compartilhar arquivo"))
+                                avisarBaixado(JSONObject().put("tipo", "compartilhado"))
+                            } else {
+                                check(arquivoParaSalvar == null) { "Espere a escolha do local anterior." }
+                                arquivoParaSalvar = arquivo to tipo
+                                salvarDocumento.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                                    .setType(tipo).putExtra(Intent.EXTRA_TITLE, arquivo.name))
+                            }
+                        }
+                        abriu.onFailure {
+                            if (arquivoParaSalvar?.first == arquivo) arquivoParaSalvar = null
+                            arquivo.delete()
+                            avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Não deu para abrir o seletor de arquivos do Android."))
+                        }
+                        return@onSuccess
+                    }
                     ultimoBaixado = uri to tipo
                     avisarBaixado(JSONObject().put("tipo", "salvo").put("nome", final))
                 }.onFailure { erro ->
@@ -430,9 +561,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun comecarGravacao() {
+    private fun comecarGravacao(contexto: JSONObject? = null) {
         // Gravação que a página perdeu de vista (recarregou no meio) não trava o microfone: é descartada.
         pararGravacao(enviar = false)
+        descartarAudio()
+        contextoMicrofone = contexto
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             pedirMicrofone.launch(Manifest.permission.RECORD_AUDIO)
             return
@@ -464,6 +597,7 @@ class MainActivity : ComponentActivity() {
         }
         gravador = novo
         gravacao = arquivo
+        contextoDoAudio = contexto
         inicioDaGravacao = SystemClock.elapsedRealtime()
         numeroDaGravacao++
         avisarAudio(JSONObject().put("tipo", "gravando").put("gravacao", numeroDaGravacao))
@@ -471,7 +605,7 @@ class MainActivity : ComponentActivity() {
         principal.postDelayed(pararPorTempo, 15 * 60_000L)
     }
 
-    private fun pararGravacao(enviar: Boolean, erro: String? = null) {
+    private fun pararGravacao(enviar: Boolean, erro: String? = null, rascunho: Boolean = false) {
         val parado = gravador ?: return
         val arquivo = gravacao!!
         gravador = null
@@ -491,12 +625,23 @@ class MainActivity : ComponentActivity() {
             )
             return
         }
+        audioPendente = arquivo
+        entregarAudio(arquivo, numero, rascunho)
+    }
+
+    private fun descartarAudio() {
+        audioPendente?.delete()
+        audioPendente = null
+        contextoDoAudio = null
+    }
+
+    private fun entregarAudio(arquivo: File, numero: Int, rascunho: Boolean, recuperado: Boolean = false) {
         Thread {
             val audio = runCatching { Base64.encodeToString(arquivo.readBytes(), Base64.NO_WRAP) }
-            arquivo.delete()
             principal.post {
+                if (audioPendente != arquivo || isDestroyed) return@post
                 avisarAudio(audio.fold(
-                    { JSONObject().put("tipo", "audio").put("gravacao", numero).put("mime", "audio/ogg").put("base64", it) },
+                    { JSONObject().put("tipo", "audio").put("gravacao", numero).put("mime", "audio/ogg").put("base64", it).put("rascunho", rascunho).put("recuperado", recuperado).put("tabId", contextoDoAudio?.optString("tabId")) },
                     { JSONObject().put("tipo", "erro").put("gravacao", numero).put("mensagem", "Não deu para ler a gravação no celular.") }
                 ))
             }
@@ -504,16 +649,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private inner class Cliente : WebViewClient() {
-        // Página nova (trocar de PC, recarregar) não sabe da gravação da anterior: o microfone desliga.
         override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-            pararGravacao(enviar = false)
+            pararGravacao(enviar = true, rascunho = true)
+            if (contextoDoAudio?.optString("pc") != atual?.id) descartarAudio()
             chaveDoAudio = UUID.randomUUID().toString()
             super.onPageStarted(view, url, favicon)
         }
 
         // evaluateJavascript roda só no documento principal: o iframe do visualizador não recebe a chave.
         override fun onPageFinished(view: WebView, url: String?) {
-            if (recebeAChave(url)) view.evaluateJavascript("window.koraChaveAudio = '$chaveDoAudio'", null)
+            if (recebeAChave(url)) {
+                val contexto = contextoDoAudio?.takeIf { audioPendente != null && it.optString("pc") == atual?.id }
+                view.evaluateJavascript("window.koraChaveAudio = '$chaveDoAudio'; window.koraAudioPendente = ${contexto ?: "null"}; window.dispatchEvent(new Event('kora-audio-pendente'))", null)
+            }
             if (passagem == null) atual?.let(::registrarCertificado)
             super.onPageFinished(view, url)
         }
