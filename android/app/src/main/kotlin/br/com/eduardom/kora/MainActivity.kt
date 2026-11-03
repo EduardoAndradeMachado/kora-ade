@@ -21,6 +21,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -142,7 +143,7 @@ class MainActivity : ComponentActivity() {
         // caído (NotReadableError). Copiar para o cache do app e entregar a cópia tira a galeria do caminho.
         Thread {
             val copias = runCatching { arquivos.map(::copiarParaCache).toTypedArray() }
-                .onFailure { Log.w(TAG, "falha ao copiar a imagem escolhida", it) }
+                .onFailure { Log.w(TAG, "falha ao copiar o arquivo escolhido", it) }
                 .getOrNull()
             principal.post { callback?.onReceiveValue(copias) }
         }.start()
@@ -150,18 +151,23 @@ class MainActivity : ComponentActivity() {
     private fun copiarParaCache(origem: Uri): Uri {
         val pasta = File(cacheDir, "imagens").apply { mkdirs() }
         // As cópias só servem até a página ler; as de escolhas antigas saem aqui.
-        pasta.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 3_600_000 }?.forEach { it.delete() }
-        val extensao = when (contentResolver.getType(origem)) {
-            "image/png" -> "png"
-            "image/webp" -> "webp"
-            "image/gif" -> "gif"
-            else -> "jpg"
-        }
-        val destino = File(pasta, "imagem-${System.nanoTime()}.$extensao")
-        val entrada = contentResolver.openInputStream(origem) ?: error("a galeria não entregou a imagem")
+        pasta.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 3_600_000 }?.forEach { it.deleteRecursively() }
+        // O nome original vai junto: a extensão dá o tipo que a página vê (o FileProvider responde por ela) e o
+        // agente no PC recebe "contrato.pdf", e não uma imagem. Cada escolha numa pasta, para nomes iguais não colidirem.
+        val tipo = contentResolver.getType(origem)
+        val nome = nomeOriginal(origem)?.map { if (it == '/' || it == '\\' || it.code < 32) '_' else it }?.joinToString("")?.takeIf { it.isNotBlank() && it != "." && it != ".." }
+            ?: "arquivo" + (MimeTypeMap.getSingleton().getExtensionFromMimeType(tipo)?.let { ".$it" } ?: "")
+        val destino = File(File(pasta, System.nanoTime().toString()).apply { mkdirs() }, nome)
+        val entrada = contentResolver.openInputStream(origem) ?: error("o seletor não entregou o arquivo")
         entrada.use { dados -> destino.outputStream().use { dados.copyTo(it) } }
         return FileProvider.getUriForFile(this, "$packageName.arquivos", destino)
     }
+
+    private fun nomeOriginal(origem: Uri): String? = runCatching {
+        contentResolver.query(origem, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    }.getOrNull()
 
     // Microfone do campo de mensagem (src/renderer/src/mobile/voice.ts): a página não abre o microfone em HTTP, então o app grava
     // e devolve o áudio por window.koraAudio.
