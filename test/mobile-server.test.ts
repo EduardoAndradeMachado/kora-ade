@@ -751,6 +751,25 @@ describe('uso, conta e avisos do PC pelo celular', () => {
   })
 })
 
+describe('link tocado no terminal do celular', () => {
+  it('vira arquivo do projeto só quando existe dentro da pasta dele', async () => {
+    const s = await setup()
+    mkdirSync(join(s.dir, 'src'), { recursive: true })
+    writeFileSync(join(s.dir, 'src', 'app.ts'), 'export {}')
+    writeFileSync(join(dirname(s.dir), 'fora.ts'), 'export {}')
+    const resolveLink = async (text: string, project = 'p'): Promise<Response> =>
+      fetch(`${s.url}/api/resolve-link?project=${project}&text=${encodeURIComponent(text)}`, { headers: { cookie: s.cookie } })
+
+    expect(await (await resolveLink('src/app.ts:12')).json()).toEqual({ rel: join('src', 'app.ts'), line: 12 })
+    expect(await (await resolveLink(join(s.dir, 'src', 'app.ts'))).json()).toEqual({ rel: join('src', 'app.ts'), line: null })
+    expect(await (await resolveLink('src/nao-existe.ts')).json()).toBeNull()
+    expect(await (await resolveLink('../fora.ts')).json()).toBeNull()
+    expect(await (await resolveLink('src')).json()).toBeNull()
+    expect((await resolveLink('src/app.ts', 'inventado')).status).toBe(400)
+    expect((await fetch(`${s.url}/api/resolve-link?project=p&text=src/app.ts`)).status).toBe(401)
+  })
+})
+
 describe('abas alteradas por dois clientes', () => {
   it('salvamento atrasado do desktop preserva aba criada no celular', () => {
     const a = { id: 'a', projectId: 'p', title: 'A', titleLocked: false, agent: null }

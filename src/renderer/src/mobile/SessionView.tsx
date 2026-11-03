@@ -5,11 +5,16 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { DESKTOP, type MobileCommand, type MobileTab, type TerminalSizeEvent, type TerminalSnapshot } from '@shared/mobile'
 import { Icon } from '@/brand/icons'
 import { currentTerminalLook, onThemeChange } from '@/lib/terminal-theme'
-import { api } from './api'
+import { api, koraApp } from './api'
 import { pathForPrompt, uploadAttachment } from './images'
 import { canRecord, discardAudio, onNativeAudio, recoverAudio, startRecording, stopRecording, transcribeAudio } from './voice'
 import { VoiceMeter } from './VoiceMeter'
 import { SkeletonTerminal } from './Skeleton'
+import { targetAt } from './terminalTap'
+
+// Toque curto e parado é toque em link; mais longo é seleção de texto, e com o dedo andando é rolagem.
+const TAP_MS = 450
+const TAP_MOVE = 10
 
 export interface TerminalChunk { id: string; data: string; sequence: number }
 
@@ -52,7 +57,7 @@ const drafts = new Map<string, { text: string; images: Attached[] }>()
 
 // O terminal do celular só mostra: as respostas automáticas do terminal (consulta de cor, de teclado) já vêm
 // da janela do PC, e uma segunda resposta chegaria ao programa como se fosse digitada.
-export function SessionView({ tab, device, connected, connection, feed, command, onError, dictation }: {
+export function SessionView({ tab, device, connected, connection, feed, command, onError, onOpenFile, dictation }: {
   tab: MobileTab
   device: string
   connected: boolean
@@ -60,8 +65,11 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   feed: React.MutableRefObject<SessionFeed>
   command(command: MobileCommand): Promise<unknown>
   onError(message: string): void
+  onOpenFile(path: string): void
   dictation: boolean
 }): React.JSX.Element {
+  const openFile = useRef(onOpenFile)
+  openFile.current = onOpenFile
   const [holder, setHolder] = useState<string | null>(tab.holder)
   // Até o histórico do PC chegar, o terminal mostra o esqueleto em vez de uma tela vazia.
   const [hydrating, setHydrating] = useState(true)
@@ -97,6 +105,14 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   useEffect(() => {
     const element = mount.current
     if (!element || !live || !connected) return
+    let oscOpened = 0
+    // No app, navegar para outro endereço cai no shouldOverrideUrlLoading da MainActivity, que manda a página de fora ao
+    // navegador do celular e deixa o Kora onde está; o window.open depende de o WebView aceitar abrir janela. No navegador,
+    // aba nova.
+    const openUrl = (uri: string): void => {
+      if (koraApp()) location.assign(uri)
+      else window.open(uri, '_blank')
+    }
     const term = new Terminal({
       allowProposedApi: true,
       fontSize: 13,
@@ -105,7 +121,10 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       cursorBlink: false,
       disableStdin: true,
       ...currentTerminalLook(),
-      windowsPty: { backend: 'conpty' }
+      windowsPty: { backend: 'conpty' },
+      // Link OSC 8 (os que o Claude e o Codex imprimem). Sem isto o xterm pede confirmação num confirm(), que o
+      // WebView do app engole sem mostrar.
+      linkHandler: { activate: (_event, uri) => { oscOpened = Date.now(); openUrl(uri) }, allowNonHttpProtocols: false }
     })
     const fit = new FitAddon()
     const unicode = new Unicode11Addon()
@@ -220,6 +239,50 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       wheelTimer ??= setTimeout(flushWheel, 0)
     }
     const touchEnd = (): void => { touchY = null }
+    // Toque em URL ou caminho de arquivo. O PC descobre o link no hover, antes do clique; no toque não há hover, então
+    // o link é procurado na hora, na célula tocada.
+    const openAt = (clientX: number, clientY: number): void => {
+      if (Date.now() - oscOpened < 500 || term.hasSelection()) return
+      const screen = term.element?.querySelector<HTMLElement>('.xterm-screen')
+      const box = screen?.getBoundingClientRect()
+      if (!box || !box.width || !box.height) return
+      const x = Math.floor(((clientX - box.left) / box.width) * term.cols)
+      const row = Math.floor(((clientY - box.top) / box.height) * term.rows)
+      if (x < 0 || x >= term.cols || row < 0 || row >= term.rows) return
+      const buffer = term.buffer.active
+      const target = targetAt(buffer, term.cols, x, buffer.viewportY + row)
+      if (!target) return
+      if (target.kind === 'url') return openUrl(target.text)
+      void api<{ rel: string } | null>(`resolve-link?project=${encodeURIComponent(tab.projectId)}&text=${encodeURIComponent(target.text)}`)
+        .then((found) => { if (found && !disposed) openFile.current(found.rel) }, () => {})
+    }
+    // O xterm chama preventDefault no toque, e aí o navegador não gera mousedown nem click: o toque é reconhecido pelos
+    // eventos de ponteiro. O link OSC 8 só o xterm conhece; ele o ativa com o mouse passando por cima e clicando,
+    // então o toque é repassado a ele assim antes da busca do texto.
+    let touchDown: { x: number; y: number; at: number } | null = null
+    let touchTapped = 0
+    const pointerDown = (event: PointerEvent): void => {
+      touchDown = event.pointerType === 'mouse' || !event.isPrimary ? null : { x: event.clientX, y: event.clientY, at: Date.now() }
+    }
+    const pointerUp = (event: PointerEvent): void => {
+      const down = touchDown
+      touchDown = null
+      if (!down || Date.now() - down.at > TAP_MS || Math.hypot(event.clientX - down.x, event.clientY - down.y) > TAP_MOVE) return
+      touchTapped = Date.now()
+      const under = document.elementFromPoint(event.clientX, event.clientY)
+      if (under && element.contains(under)) {
+        const mouse = { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY, button: 0, view: window }
+        under.dispatchEvent(new MouseEvent('mousemove', mouse))
+        under.dispatchEvent(new MouseEvent('mousedown', { ...mouse, buttons: 1 }))
+        under.dispatchEvent(new MouseEvent('mouseup', mouse))
+      }
+      openAt(event.clientX, event.clientY)
+    }
+    // Clique de mouse (PC com a página do celular). Se o navegador também gerar o click depois do toque, ele já foi tratado.
+    const click = (event: MouseEvent): void => { if (Date.now() - touchTapped > 700) openAt(event.clientX, event.clientY) }
+    element.addEventListener('pointerdown', pointerDown, { capture: true })
+    element.addEventListener('pointerup', pointerUp, { capture: true })
+    element.addEventListener('click', click)
     // Captura: o xterm trata o toque nos elementos dele e não deixa o evento subir até aqui.
     element.addEventListener('touchstart', touchStart, { passive: true, capture: true })
     element.addEventListener('touchmove', touchMove, { passive: true, capture: true })
@@ -257,6 +320,9 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       element.removeEventListener('touchmove', touchMove, { capture: true })
       element.removeEventListener('touchend', touchEnd, { capture: true })
       element.removeEventListener('touchcancel', touchEnd, { capture: true })
+      element.removeEventListener('pointerdown', pointerDown, { capture: true })
+      element.removeEventListener('pointerup', pointerUp, { capture: true })
+      element.removeEventListener('click', click)
       observer.disconnect()
       offTheme()
       if (feed.current.terminal === receive) feed.current.terminal = null

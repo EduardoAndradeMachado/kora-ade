@@ -7,6 +7,7 @@ import { browseMobileFolders, createMobileFolder, isMobileDirectory, mobileDirec
 import { listProjectSessions } from './sessions'
 import { listDir, readText, resolveInside, writeText } from './files'
 import { gitStatus } from './git'
+import { resolveTerminalLink, type ResolvedLink } from './terminal-links'
 import { statSync } from 'node:fs'
 import { DESKTOP, TerminalSizes, type SizeChange, type TerminalSize } from './terminal-sizes'
 import type { AgentActivity } from '../shared/agent'
@@ -102,6 +103,11 @@ export class MobileRuntime {
   async usage(): Promise<MobileUsage> {
     const [usage, view] = await Promise.all([this.host.usage?.() ?? [], this.host.accounts?.() ?? null])
     return { usage, accounts: view?.accounts ?? [], activeUnknown: view?.activeUnknown ?? false }
+  }
+
+  // Caminho tocado no terminal do celular: só vira link o arquivo que existe dentro do projeto, como no PC.
+  resolveLink(projectId: string, text: string): Promise<ResolvedLink | null> {
+    return resolveTerminalLink(this.projectRoot(projectId), text)
   }
 
   snapshotTerminal(id: string): ReturnType<Terminals['snapshot']> { return this.host.terminals.snapshot(id) }

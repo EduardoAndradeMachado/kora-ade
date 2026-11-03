@@ -653,6 +653,7 @@ export class MobileServer {
         }
         if (url.pathname === '/api/project-icon' && request.method === 'GET') return json(response, 200, { icon: await this.options.runtime.projectIcon(url.searchParams.get('project') ?? '') })
         if (url.pathname === '/api/usage' && request.method === 'GET') return json(response, 200, await this.options.runtime.usage())
+        if (url.pathname === '/api/resolve-link' && request.method === 'GET') return json(response, 200, await this.options.runtime.resolveLink(url.searchParams.get('project') ?? '', (url.searchParams.get('text') ?? '').slice(0, 4096)))
         if (url.pathname === '/api/image' && request.method === 'POST') return await this.image(request, response)
         if (url.pathname === '/api/attachment' && request.method === 'POST') return await this.attachment(request, response)
         if (url.pathname === '/api/audio' && request.method === 'POST') return await this.audio(request, response)
