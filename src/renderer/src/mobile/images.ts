@@ -1,15 +1,21 @@
+import { imageTypeOf } from '@shared/image-bytes'
+
 const SENT_AS_IS = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 // Print de tela costuma ficar abaixo disto e vai como está, nítido. Foto de câmera passa e é reduzida: o Claude
 // reduz imagem grande de qualquer jeito, e assim a rede de casa não carrega 10 MB à toa.
 const MAX_BYTES = 3 * 1024 * 1024
 const MAX_SIDE = 2048
 
+// O celular não abre como imagem (TIFF, PSD, PDF com nome de .jpg): vai como arquivo, ou não vai.
+class NotAnImage extends Error {}
+
 export async function imageForUpload(file: File): Promise<Blob> {
-  if (SENT_AS_IS.has(file.type) && file.size <= MAX_BYTES) return file
+  const real = imageTypeOf(new Uint8Array(await file.slice(0, 12).arrayBuffer()))
+  if (real && SENT_AS_IS.has(file.type) && file.size <= MAX_BYTES) return real === file.type ? file : new Blob([file], { type: real })
   const bitmap = await createImageBitmap(file).catch(() => null)
   if (!bitmap) {
-    if (SENT_AS_IS.has(file.type)) return file
-    throw new Error('Este formato de imagem não abre no navegador do celular.')
+    if (real) return new Blob([file], { type: real })
+    throw new NotAnImage('Este formato de imagem não abre no navegador do celular.')
   }
   const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height))
   const canvas = document.createElement('canvas')
@@ -45,6 +51,7 @@ export async function uploadImage(file: File): Promise<{ path: string; preview: 
     const prepared = await imageForUpload(file)
     image = new Blob([await prepared.arrayBuffer()], { type: prepared.type })
   } catch (error) {
+    if (error instanceof NotAnImage) throw error
     throw new Error(`Não deu para ler a imagem no celular (${detail(error)}). Escolha de novo.`)
   }
   const path = await postToPc('/api/image', { 'content-type': image.type }, image, 'a imagem')
@@ -61,7 +68,9 @@ async function postToPc(url: string, headers: Record<string, string>, body: Blob
   })
   const result = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(result.error ?? `Não deu para enviar ${what} ao PC.`)
-  return result.path as string
+  // Conexão caída depois do 200 deixa o JSON pela metade: sem caminho, o anexo apareceria no campo e falharia no envio.
+  if (typeof result.path !== 'string' || result.path === '') throw new Error(`Não deu para enviar ${what} ao PC (resposta incompleta). Tente de novo.`)
+  return result.path
 }
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -77,6 +86,21 @@ export async function uploadFile(file: File): Promise<{ path: string; name: stri
   }
   const path = await postToPc('/api/attachment', { 'content-type': 'application/octet-stream', 'x-kora-filename': encodeURIComponent(file.name) }, bytes, 'o arquivo')
   return { path, name: file.name }
+}
+
+// Como o app Android até a 0.5.3 entrega qualquer arquivo escolhido: o nome e o tipo originais se perdem.
+const OLD_APP_COPY = /^imagem-\d+\.(jpg|png|webp|gif)$/
+
+export async function uploadAttachment(file: File): Promise<{ path: string; preview: string; name?: string }> {
+  // SVG é texto: vai como arquivo, como PDF e planilha.
+  if (!file.type.startsWith('image/') || file.type === 'image/svg+xml') return { ...await uploadFile(file), preview: '' }
+  try {
+    return await uploadImage(file)
+  } catch (error) {
+    if (!(error instanceof NotAnImage)) throw error
+    if (OLD_APP_COPY.test(file.name)) throw new Error('Este arquivo não é imagem, e o app do celular está desatualizado para anexar outros arquivos. Atualize o app Kora no celular.')
+    return { ...await uploadFile(file), preview: '' }
+  }
 }
 
 // Mesmo formato do arrastar arquivo no PC: caminho com espaço vai entre aspas.

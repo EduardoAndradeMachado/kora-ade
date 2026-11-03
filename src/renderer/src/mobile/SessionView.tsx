@@ -6,7 +6,7 @@ import { DESKTOP, type MobileCommand, type MobileTab, type TerminalSizeEvent, ty
 import { Icon } from '@/brand/icons'
 import { currentTerminalLook, onThemeChange } from '@/lib/terminal-theme'
 import { api } from './api'
-import { pathForPrompt, uploadFile, uploadImage } from './images'
+import { pathForPrompt, uploadAttachment } from './images'
 import { canRecord, discardAudio, onNativeAudio, recoverAudio, startRecording, stopRecording, transcribeAudio } from './voice'
 import { VoiceMeter } from './VoiceMeter'
 import { SkeletonTerminal } from './Skeleton'
@@ -362,12 +362,15 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   // Codex anexam.
   const attach = async (files: File[]): Promise<void> => {
     setComposerError(null)
+    // O PC aceita até 10 por mensagem (MobileCommandSchema); passar disso só falharia no envio, depois de subir tudo.
+    if (images.length + uploading + files.length > 10) {
+      setComposerError('Anexe no máximo 10 arquivos por mensagem.')
+      return
+    }
     for (const file of files) {
       setUploading((count) => count + 1)
       try {
-        // Foto vira anexo de imagem (HEIC é convertida no caminho); SVG é texto e vai como arquivo, como PDF e planilha.
-        const picture = file.type.startsWith('image/') && file.type !== 'image/svg+xml'
-        const attached = picture ? await uploadImage(file) : { ...await uploadFile(file), preview: '' }
+        const attached = await uploadAttachment(file)
         setImages((list) => [...list, attached])
       } catch (error) {
         setComposerError(error instanceof Error ? error.message : String(error))

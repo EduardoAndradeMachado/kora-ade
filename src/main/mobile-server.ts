@@ -13,6 +13,7 @@ import { DeviceNameSchema, FileSaveSchema, FolderCreateSchema, MobileCommandSche
 import { MobilePairingStore } from './mobile-pairing'
 import { MAX_PASTED_IMAGE_BYTES, savePastedImage } from './pasted-image'
 import { MAX_PASTED_FILE_BYTES, savePastedFile } from './pasted-file'
+import { imageTypeOf } from '../shared/image-bytes'
 import { ConflictError } from './files'
 import type { MobileRuntime } from './mobile-runtime'
 import type { TLSSocket } from 'node:tls'
@@ -457,7 +458,9 @@ export class MobileServer {
     }
     console.info(`[kora] imagem do celular: ${size} bytes, ${mime}`)
     if (size > MAX_PASTED_IMAGE_BYTES) return json(response, 413, { error: 'Imagem grande demais: o limite é 20 MB.' })
-    json(response, 200, { path: savePastedImage(this.options.imageDir, Buffer.concat(chunks), mime) })
+    const bytes = Buffer.concat(chunks)
+    if (imageTypeOf(bytes) !== mime) return json(response, 415, { error: 'O conteúdo não é a imagem que o nome diz: anexe como arquivo.' })
+    json(response, 200, { path: savePastedImage(this.options.imageDir, bytes, mime) })
   }
 
   // Como a imagem, cru no corpo; o nome vem no cabeçalho, codificado, porque cabeçalho HTTP não leva acento.

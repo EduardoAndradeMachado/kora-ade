@@ -167,6 +167,13 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
 
     // Arquivo que não é imagem vai com o nome original e o caminho segue no texto, para o agente ler.
     const pdf = Buffer.from('%PDF-1.4 relatório')
+    // Resposta cortada depois do 200: o anexo não aparece como pronto para depois falhar no envio.
+    await page.route('**/api/attachment', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{"pa' }))
+    await page.getByLabel('Escolher arquivo').setInputFiles({ name: 'Relatório final.pdf', mimeType: 'application/pdf', buffer: pdf })
+    await browserExpect(page.locator('.composer').getByRole('alert')).toContainText('resposta incompleta')
+    await browserExpect(page.getByLabel('Arquivo anexado: Relatório final.pdf')).toHaveCount(0)
+    await page.unroute('**/api/attachment')
+    await page.getByRole('button', { name: 'Dispensar aviso' }).click()
     await page.getByLabel('Escolher arquivo').setInputFiles({ name: 'Relatório final.pdf', mimeType: 'application/pdf', buffer: pdf })
     await browserExpect(page.getByLabel('Arquivo anexado: Relatório final.pdf')).toBeVisible()
     await page.screenshot({ path: join(resolve('e2e/.results/mobile-validation'), 'arquivo-350.png') })
@@ -177,6 +184,15 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     expect(sentFile).toMatch(/\\anexos\\[^\\]+\\Relatório final\.pdf$/)
     expect(readFileSync(sentFile!)).toEqual(pdf)
     expect(submitted.at(-1)!.images).toEqual([])
+    // App Android antigo: o PDF chega como "imagem-<n>.jpg". Não vira imagem; o aviso pede para atualizar o app.
+    await page.getByLabel('Escolher arquivo').setInputFiles({ name: 'imagem-123456.jpg', mimeType: 'image/jpeg', buffer: pdf })
+    await browserExpect(page.locator('.composer').getByRole('alert')).toContainText('Atualize o app Kora no celular')
+    await browserExpect(page.getByRole('img', { name: 'Imagem anexada' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Dispensar aviso' }).click()
+    // Imagem que o celular não abre (TIFF) vai como arquivo, com o nome dela.
+    await page.getByLabel('Escolher arquivo').setInputFiles({ name: 'scan.tiff', mimeType: 'image/tiff', buffer: Buffer.from('II*\0tiff') })
+    await browserExpect(page.getByLabel('Arquivo anexado: scan.tiff')).toBeVisible()
+    await page.getByRole('button', { name: 'Remover scan.tiff' }).click()
     const sentBeforeDictation = submitted.length
 
     // O microfone só existe dentro do app Android: o navegador não abre o microfone em HTTP.

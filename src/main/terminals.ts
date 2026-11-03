@@ -158,7 +158,10 @@ export class Terminals {
     if (!proc) throw new Error('A sessão está suspensa.')
     const bracketed = this.mirrors.get(id)?.terminal.modes.bracketedPasteMode ?? false
     const typed = text.trim() === '' ? '' : text
-    const message = [typed, ...files.map((file) => (file.includes(' ') ? `"${file}"` : file))].filter(Boolean).join(' ')
+    // Só arquivo, no agente: a linha não começa pelo caminho. Se o agente saiu e sobrou o PowerShell da aba, o Enter
+    // roda "Anexo:", que não existe, e não o arquivo (um .cmd vindo do celular).
+    const lead = typed === '' && agent && files.length > 0 ? 'Anexo:' : typed
+    const message = [lead, ...files.map((file) => (file.includes(' ') ? `"${file}"` : file))].filter(Boolean).join(' ')
     // O texto vem primeiro, como quem digita e depois dá Ctrl+V no print: a linha nunca começa pelo caminho, que o
     // shell executaria (o PowerShell abria o app de Fotos). No agente, cada caminho numa colagem vira anexo.
     const pastes = bracketed && agent
@@ -167,8 +170,9 @@ export class Terminals {
     pastes.forEach((paste, index) => setTimeout(() => {
       if (this.sessions.get(id) === proc) proc.write(paste)
     }, index * IMAGE_PASTE_GAP_MS))
-    // Só anexo num terminal comum: cola o caminho e não aperta Enter, para não executar o arquivo.
-    if (!agent && typed === '') return
+    // Num terminal comum, só imagem não aperta Enter, para não executar o arquivo. Com arquivo, também não: o nome
+    // vem do celular e o shell expandiria $(...), ; e & dele.
+    if (!agent && (typed === '' || files.length > 0)) return
     setTimeout(() => {
       if (this.sessions.get(id) === proc) proc.write('\r')
     }, (pastes.length - 1) * IMAGE_PASTE_GAP_MS + (agent === 'codex' ? CODEX_SUBMIT_DELAY_MS : SUBMIT_DELAY_MS))

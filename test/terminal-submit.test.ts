@@ -95,8 +95,13 @@ it('arquivo que não é imagem vai no fim do texto, entre aspas se tiver espaço
     .toEqual({ pastes: ['resuma "C:\\temp\\a\\Relatório final.pdf" C:\\temp\\b\\dados.csv'], enter: true })
 })
 
-it('só arquivo num terminal comum cola o caminho sem apertar Enter', async () => {
+it('só arquivo no agente não começa pelo caminho: se o agente saiu, o shell não executa o anexo', async () => {
+  expect(await filePastes('claude', ' ', ['C:\\temp\\a\\rodar.cmd'])).toEqual({ pastes: ['Anexo: C:\\temp\\a\\rodar.cmd'], enter: true })
+})
+
+it('arquivo num terminal comum cola o caminho sem apertar Enter, nem com texto: o nome vem do celular', async () => {
   expect(await filePastes(undefined, '', ['C:\\temp\\a\\dados.csv'])).toEqual({ pastes: ['C:\\temp\\a\\dados.csv'], enter: false })
+  expect(await filePastes(undefined, 'type', ['C:\\temp\\a\\$(calc).csv'])).toEqual({ pastes: ['type C:\\temp\\a\\$(calc).csv'], enter: false })
 })
 
 it('no Codex o Enter espera o bastante para não virar quebra de linha da colagem', async () => {

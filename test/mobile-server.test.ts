@@ -370,6 +370,8 @@ describe('acesso ao servidor do celular', () => {
     const post = (headers: Record<string, string>, body: Buffer): Promise<Response> => fetch(`${s.url}/api/image`, { method: 'POST', headers, body: new Uint8Array(body) })
     expect((await post({ 'content-type': 'image/png' }, png)).status).toBe(401)
     expect((await post({ cookie: s.cookie, 'content-type': 'text/plain' }, png)).status).toBe(415)
+    // Um PDF com nome de .jpg (o app Android antigo copia assim) não entra como imagem: travaria a conversa no agente.
+    expect((await post({ cookie: s.cookie, 'content-type': 'image/jpeg' }, Buffer.from('%PDF-1.4 contrato'))).status).toBe(415)
     const sent = await post({ cookie: s.cookie, 'content-type': 'image/png' }, png)
     expect(sent.status).toBe(200)
     const { path } = await sent.json()

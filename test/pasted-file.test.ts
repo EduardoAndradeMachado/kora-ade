@@ -20,6 +20,9 @@ describe('arquivo anexado pelo celular', () => {
     expect(safeFileName('..\\..\\Windows\\win.ini')).toBe('win.ini')
     expect(safeFileName('../../etc/passwd')).toBe('passwd')
     expect(safeFileName('a<b>:c"d|e?f*.txt')).toBe('a_b__c_d_e_f_.txt')
+    // Colado no terminal, nada do nome pode virar comando no PowerShell, no cmd ou no bash.
+    expect(safeFileName("nota $(Start-Process calc);x&y%PATH%`z'O^!{a}[b]~.pdf")).toBe('nota __Start-Process calc__x_y_PATH__z_O___a__b__.pdf')
+    expect(safeFileName('Relatório final #2 (v3).pdf')).toBe('Relatório final #2 _v3_.pdf')
     expect(safeFileName('CON')).toBe('_CON')
     expect(safeFileName('nul.txt')).toBe('_nul.txt')
     expect(safeFileName('relatorio. . ')).toBe('relatorio')
