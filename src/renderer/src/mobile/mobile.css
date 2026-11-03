@@ -25,7 +25,7 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
    para o corpo das letras ficar na linha do voltar, do ícone do projeto e do divisor. */
 .home-button { border: 0; background: transparent; padding: 0; min-height: 44px; }
 .home-button svg { transform: translateY(-15%); }
-.back-button { width: 36px; height: 36px; min-height: 36px; margin-left: -8px; color: var(--muted-foreground); }
+.back-button { width: 36px; height: 36px; min-height: 36px; margin-left: -8px; color: var(--foreground); }
 .back-button svg { width: 16px; height: 16px; }
 .connection-dot, .activity-dot { width: 6px; height: 6px; background: var(--brand-steel); border-radius: 50%; flex-shrink: 0; }
 .connection-dot { margin: 0 0 0 -4px; align-self: center; }
@@ -47,7 +47,7 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .tree-project-name strong { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .project-avatar { width: 18px; height: 18px; border-radius: 3px; object-fit: contain; flex-shrink: 0; }
 .tree-count { font-size: 11px; color: var(--muted-foreground); padding: 0 5px; font-variant-numeric: tabular-nums; }
-.tree-new { color: var(--muted-foreground); }
+.tree-new { color: var(--foreground); }
 .tree-tabs { margin: 0 12px 10px 40px; border-left: 1px solid var(--input); padding-left: 8px; animation: rows-enter .16s ease-out; }
 .tree-tab { background: transparent; border: 0; width: 100%; padding: 8px 10px; text-align: left; gap: 10px; justify-content: flex-start; min-height: 58px; }
 .tree-tab > span:nth-child(2) { min-width: 0; flex: 1; }
@@ -90,12 +90,12 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .session-row > span { flex: 1; min-width: 0; }
 .session-row strong { display: block; font-size: 13px; font-weight: 400; overflow-wrap: anywhere; }
 .session-row small { display: block; font-size: 11px; margin-top: 5px; }
-.session-row > svg:last-child { width: 14px; height: 14px; color: var(--muted-foreground); }
+.session-row > svg:last-child { width: 14px; height: 14px; color: var(--foreground); }
 .session-strip { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding: 0 8px 0 12px; min-height: 44px; flex-shrink: 0; }
 .session-strip > svg { width: 14px; height: 14px; }
 .session-name { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-start; gap: 6px; min-height: 40px; padding: 0; border: 0; background: transparent; color: inherit; font-size: 12px; font-weight: 400; }
 .session-name span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-name svg { width: 12px; height: 12px; color: var(--muted-foreground); }
+.session-name svg { width: 12px; height: 12px; color: var(--foreground); }
 .session-strip .icon-button { width: 38px; min-height: 40px; height: 40px; }
 .session-strip .icon-button svg { width: 15px; height: 15px; }
 .size-banner { flex-shrink: 0; border: 0; border-radius: 0; border-bottom: 1px solid var(--border); background: var(--secondary); color: var(--muted-foreground); font-size: 12px; padding: 8px 16px; min-height: 36px; text-align: left; }
@@ -163,7 +163,7 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .folder-entries { flex: 1; overflow: auto; min-height: 50px; padding: 0 12px 12px; }
 .folder-entry { display: flex; width: 100%; justify-content: flex-start; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; gap: 10px; min-height: 48px; padding: 10px; text-align: left; }
 .folder-entry span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.folder-entry svg:last-child { width: 14px; height: 14px; color: var(--muted-foreground); }
+.folder-entry svg:last-child { width: 14px; height: 14px; color: var(--foreground); }
 .folder-footer { border-top: 1px solid var(--border); padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; background: var(--card); }
 .folder-selected { font-family: var(--terminal-font-family); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
 .folder-footer .primary { width: 100%; }
@@ -171,7 +171,14 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .action-sheet { padding: 0 12px max(20px, env(safe-area-inset-bottom)); overflow-y: auto; }
 .action-sheet .sheet-header { padding-inline: 4px; }
 .action-row { width: 100%; justify-content: flex-start; border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: 14px 8px; min-height: 52px; }
-.action-row svg:last-child { margin-left: auto; width: 14px; height: 14px; }
+.action-row svg:last-child:not(:first-child) { margin-left: auto; width: 14px; height: 14px; }
+.session-id { padding: 4px 4px 12px; border-bottom: 1px solid var(--border); }
+.session-id p { font-size: 12px; color: var(--muted-foreground); margin: 6px 0 0; }
+.session-id-card { width: 100%; justify-content: space-between; gap: 10px; padding: 8px 10px; min-height: 48px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); text-align: left; }
+.session-id-card > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.session-id-card small { font-size: 11px; color: var(--muted-foreground); }
+.session-id-card code { font-family: var(--terminal-font-family); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-id-card svg { width: 15px; height: 15px; flex-shrink: 0; }
 .metrics-page { display: flex; flex-direction: column; }
 .danger-button { color: var(--destructive); }
 .pc-sheet { height: min(760px, calc(var(--mobile-height) - 24px)); }
@@ -200,6 +207,7 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .switch-row[aria-checked="true"] .switch { background: var(--brand-amber); }
 .switch-row[aria-checked="true"] .switch::after { transform: translateX(16px); background: var(--brand-ink); }
 .rename-form { display: flex; flex-direction: column; gap: 10px; padding: 12px 4px; font-size: 12px; }
+.rename-form small { color: var(--muted-foreground); font-size: 11px; }
 .close-confirm { font-size: 12px; padding: 14px 8px; }
 .close-confirm > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .page-enter { animation: page-enter .18s ease-out; }
@@ -234,9 +242,9 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .composer textarea { resize: none; flex: 1; min-height: 40px; max-height: 140px; border: 0; background: transparent; line-height: 1.4; padding: 10px 4px; }
 .composer textarea:focus-visible { outline: none; }
 .attach-button, .send-button { flex-shrink: 0; padding: 0; border-radius: 50%; }
-.attach-button { width: 36px; height: 36px; min-height: 36px; border: 0; background: transparent; color: var(--muted-foreground); }
+.attach-button { width: 36px; height: 36px; min-height: 36px; border: 0; background: transparent; color: var(--foreground); }
 .attach-button svg { width: 20px; height: 20px; }
-.send-button { width: 36px; height: 36px; min-height: 36px; border: 0; background: var(--secondary); color: var(--muted-foreground); }
+.send-button { width: 36px; height: 36px; min-height: 36px; border: 0; background: var(--secondary); color: var(--foreground); }
 .send-button.ready { background: var(--brand-amber); color: var(--brand-ink); --icon-accent: currentColor; }
 .send-button svg { width: 18px; height: 18px; }
 .composer-box { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--input); border-radius: 20px; background: var(--card); padding: 4px 6px 6px 10px; }
@@ -251,12 +259,12 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .composer-send { display: flex; align-items: center; gap: 4px; }
 .composer-tools { display: flex; align-items: center; gap: 4px; }
 /* No cinza dos vizinhos, e não no vermelho de excluir: aparece em toda mensagem escrita e não deve chamar o dedo. */
-.clear-draft { flex-shrink: 0; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: transparent; color: var(--muted-foreground); }
+.clear-draft { flex-shrink: 0; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: transparent; color: var(--foreground); }
 .composer .clear-draft svg { width: 18px; height: 18px; color: inherit; }
-.mic-button { flex-shrink: 0; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: transparent; color: var(--muted-foreground); }
+.mic-button { flex-shrink: 0; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: transparent; color: var(--foreground); }
 .mic-button svg { width: 20px; height: 20px; }
 .voice-cancel, .voice-confirm { flex-shrink: 0; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; }
-.voice-cancel { margin-left: -4px; background: transparent; color: var(--muted-foreground); animation: voice-pop .18s ease-out both; }
+.voice-cancel { margin-left: -4px; background: transparent; color: var(--foreground); animation: voice-pop .18s ease-out both; }
 .voice-cancel svg { width: 18px; height: 18px; }
 /* O ✓ nasce de onde estava o microfone (36 px + 4 de vão à esquerda do enviar) e desliza para o lugar do enviar. */
 .voice-confirm { background: var(--brand-amber); color: var(--brand-ink); animation: voice-slide .22s ease-out both; }
@@ -283,19 +291,19 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 /* Arquivos do projeto */
 .files-panel.refreshing .file-row { opacity: .45; transition: opacity .12s .08s; }
 .project-panels { display: flex; gap: 4px; padding: 3px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
-.project-panels button { flex: 1; min-height: 38px; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); font-size: 13px; }
+.project-panels button { flex: 1; min-height: 38px; border: 0; border-radius: 8px; background: transparent; color: var(--foreground); font-size: 13px; }
 .project-panels button svg { width: 16px; height: 16px; }
 .project-panels .panel-icon { flex: 0 0 44px; }
 .project-panels .panel-icon svg { width: 18px; height: 18px; }
 .project-panels button[aria-selected="true"] { background: var(--secondary); color: var(--foreground); font-weight: 600; }
 .files-path { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin-bottom: 8px; color: var(--muted-foreground); font-size: 12px; }
 .files-path button { min-height: 32px; padding: 0 6px; border: 0; background: transparent; color: var(--foreground); font-size: 12px; }
-.files-path .icon-button { margin-left: auto; width: 36px; height: 36px; min-height: 36px; color: var(--muted-foreground); }
+.files-path .icon-button { margin-left: auto; width: 36px; height: 36px; min-height: 36px; color: var(--foreground); }
 .file-row { width: 100%; justify-content: flex-start; gap: 10px; min-height: 46px; padding: 8px 6px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; text-align: left; }
-.file-row > svg:first-child { width: 17px; height: 17px; color: var(--muted-foreground); }
+.file-row > svg:first-child { width: 17px; height: 17px; color: var(--foreground); }
 .file-row .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .file-row small { font-family: var(--terminal-font-family, monospace); font-size: 11px; font-weight: 600; }
-.file-row > svg:last-child { width: 14px; height: 14px; color: var(--muted-foreground); }
+.file-row > svg:last-child { width: 14px; height: 14px; color: var(--foreground); }
 .file-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* Leitura do PDF: um toque esconde o cabeçalho do Kora e a faixa do arquivo, em pé ou deitado, e o PDF fica com a tela
    quase toda (a barra de status do Android fica); a barra de página e zoom some pelo PdfPages. */
@@ -307,7 +315,7 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .file-title strong { font-size: 14px; font-weight: 600; }
 .file-title small { font-size: 11px; }
 .file-mode { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; flex-shrink: 0; }
-.file-mode button { min-height: 32px; padding: 0 8px; gap: 4px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font-size: 12px; }
+.file-mode button { min-height: 32px; padding: 0 8px; gap: 4px; border: 0; border-radius: 6px; background: transparent; color: var(--foreground); font-size: 12px; }
 .file-mode button svg { width: 14px; height: 14px; }
 .file-mode button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); }
 /* Celular estreito: Ver e Editar só com o ícone, para o nome do arquivo caber ao lado do Baixar e da conversa. O texto
@@ -376,10 +384,10 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .mobile-footer { flex-shrink: 0; display: flex; align-items: center; gap: 4px; padding: 6px 8px max(6px, env(safe-area-inset-bottom)) 4px; border-top: 1px solid var(--border); background: var(--background); }
 .usage-footer { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 4px; border: 0; border-radius: 8px; background: transparent; padding: 6px 8px 6px 12px; font-size: 12px; color: var(--muted-foreground); text-align: left; min-height: 0; }
 .usage-footer > span { width: 100%; }
-.footer-settings { margin-left: auto; color: var(--muted-foreground); }
+.footer-settings { margin-left: auto; color: var(--foreground); }
 .theme-choice { display: flex; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; }
 /* Sem transição: a troca de tema muda as cores de tudo junto, e a animação do fundo ficava presa no meio. */
-.theme-choice button { flex: 1; min-height: 40px; gap: 6px; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); font-size: 13px; transition: none; }
+.theme-choice button { flex: 1; min-height: 40px; gap: 6px; border: 0; border-radius: 8px; background: transparent; color: var(--foreground); font-size: 13px; transition: none; }
 .theme-choice button svg { width: 16px; height: 16px; }
 .theme-choice button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); font-weight: 600; }
 
@@ -453,3 +461,7 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .metrics-page .overflow-y-auto { overflow: visible; }
 /* No PC o ícone de copiar o nome aparece no hover; no toque não há hover. */
 .metrics-page svg[data-icon="copiar"] { opacity: 1; }
+/* Ícone no celular: aceso é âmbar, o resto na cor do texto. Detalhe cinza ao lado de âmbar não fica bom (o PC
+   continua com o detalhe cinza do tokens.css). O texto secundário ao lado do ícone segue cinza. */
+:root, .dark { --icon-accent-idle: currentColor; }
+.project-search svg, .folder-filter svg, .tree-project-link svg, .group-heading svg, .folder-trail svg { color: var(--foreground); }

@@ -184,8 +184,8 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
       <span className="file-title"><strong>{name}</strong>{folder && <small>{folder}</small>}</span>
       <button className="icon-button" aria-label="Opções do arquivo" onClick={() => onActions(true)}>⋯</button>
       {switchable && <div className="file-mode" role="group" aria-label="Modo do arquivo">
-        <button aria-pressed={mode === 'view'} onClick={() => setMode('view')}><Icon name="visualizar" />Ver</button>
-        <button aria-pressed={mode === 'edit'} onClick={() => setMode('edit')}><Icon name="editar" />Editar</button>
+        <button aria-pressed={mode === 'view'} onClick={() => setMode('view')}><Icon name="visualizar" active={mode === 'view'} />Ver</button>
+        <button aria-pressed={mode === 'edit'} onClick={() => setMode('edit')}><Icon name="editar" active={mode === 'edit'} />Editar</button>
       </div>}
       {!textual && raw && <button className="icon-button" aria-label="Recarregar do PC" onClick={() => void load(false)}><Icon name="atualizar" /></button>}
       {canDownload() && !hidden && <button className="icon-button download-button" aria-label="Baixar para o celular" aria-busy={downloading} disabled={downloading} onClick={() => void fetchDownload()}>{downloading ? <span className="download-spinner" /> : <Icon name="baixar" />}</button>}

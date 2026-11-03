@@ -807,6 +807,21 @@ describe('métricas da sessão pelo celular', () => {
   })
 })
 
+describe('projeto renomeado pelo celular', () => {
+  it('muda só o nome, avisa o PC, e nome vazio volta ao nome da pasta', async () => {
+    const s = await setup()
+    const name = (): string => s.runtime.snapshot().projects.find((project) => project.id === 'p')!.name
+    const stream = await events(s.url, s.cookie)
+    expect((await action(s.url, s.cookie, { type: 'rename-project', projectId: 'p', name: '  Meu app  ' })).status).toBe(200)
+    expect(name()).toBe('Meu app')
+    expect(s.runtime.snapshot().projects[0]!.path).toBe(s.dir)
+    await expect.poll(() => stream.text()).toContain('"name":"Meu app"')
+    expect((await action(s.url, s.cookie, { type: 'rename-project', projectId: 'p', name: '' })).status).toBe(200)
+    expect(name()).toBe(basename(s.dir))
+    expect((await action(s.url, s.cookie, { type: 'rename-project', projectId: 'inventado', name: 'x' })).status).toBe(400)
+  })
+})
+
 describe('link tocado no terminal do celular', () => {
   it('vira arquivo do projeto só quando existe dentro da pasta dele', async () => {
     const s = await setup()

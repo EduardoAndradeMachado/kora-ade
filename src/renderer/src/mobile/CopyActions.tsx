@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Icon } from '@/brand/icons'
 import { koraApp } from './api'
 
 export interface CopyMenu { title: string; values: { label: string; text: string }[] }
@@ -20,13 +21,12 @@ export async function copyText(text: string): Promise<void> {
   if (!copied) throw new Error('Não foi possível copiar. Tente novamente.')
 }
 
-export function CopyActions({ menu, onClose, onUsage }: { menu: CopyMenu; onClose(): void; onUsage?(): void }): React.JSX.Element {
+export function CopyActions({ menu, onClose }: { menu: CopyMenu; onClose(): void }): React.JSX.Element {
   const [notice, setNotice] = useState('')
   return <div className="sheet-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section className="action-sheet" role="dialog" aria-modal="true" aria-label={menu.title}>
-      <div className="sheet-handle" /><header className="sheet-header"><h1>{menu.title}</h1><button className="icon-button" aria-label="Fechar opções" onClick={onClose}>×</button></header>
-      {menu.values.map(({ label, text }) => <button className="action-row" key={label} onClick={() => void copyText(text).then(() => setNotice('Copiado.'), (error: Error) => setNotice(error.message))}>{label}</button>)}
-      {onUsage && <button className="action-row" onClick={onUsage}>Ver limites de uso</button>}
+      <div className="sheet-handle" /><header className="sheet-header"><h1>{menu.title}</h1><button className="icon-button" aria-label="Fechar opções" onClick={onClose}><Icon name="fechar" /></button></header>
+      {menu.values.map(({ label, text }) => <button className="action-row" key={label} onClick={() => void copyText(text).then(() => setNotice('Copiado.'), (error: Error) => setNotice(error.message))}><Icon name="copiar" active />{label}</button>)}
       {notice && <p role="status">{notice}</p>}
     </section>
   </div>

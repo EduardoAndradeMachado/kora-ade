@@ -90,7 +90,7 @@ export function PcSheet({ view, themes, theme, onTheme, alerts, sound, onSound, 
         <div className="pc-heading"><h2 id="theme-title">Aparência</h2></div>
         <p className="pc-note">Vale só para este celular; em Sistema, segue o tema do celular.</p>
         <div className="theme-choice" role="group" aria-label="Tema do celular">
-          {themes.map((option) => <button key={option.theme} aria-pressed={theme === option.theme} onClick={() => onTheme(option.theme)}><Icon name={option.icon} />{option.label}</button>)}
+          {themes.map((option) => <button key={option.theme} aria-pressed={theme === option.theme} onClick={() => onTheme(option.theme)}><Icon name={option.icon} active={theme === option.theme} />{option.label}</button>)}
         </div>
       </section>
       <section aria-labelledby="phone-alerts-title">

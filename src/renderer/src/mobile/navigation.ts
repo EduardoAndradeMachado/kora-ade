@@ -7,6 +7,7 @@ export interface MobileRoute {
   // Folhas abertas por cima da tela: o voltar do celular fecha a folha antes de sair da tela.
   newTab?: string
   actions?: string
+  projectActions?: string
   rename?: string
   menu?: import('./CopyActions').CopyMenu
   pc?: 'usage' | 'settings'

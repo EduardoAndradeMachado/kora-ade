@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Terminals } from './terminals'
-import { addProject, relocateProject, missingProjectIds, namedSessions, mergeTabs } from './projects'
+import { addProject, relocateProject, missingProjectIds, namedSessions, mergeTabs, renameProject } from './projects'
 import { browseMobileFolders, createMobileFolder, isMobileDirectory, mobileDirectory } from './mobile-folders'
 import { listProjectSessions } from './sessions'
 import { listDir, readText, resolveInside, writeText } from './files'
@@ -196,6 +196,11 @@ export class MobileRuntime {
       this.host.commit(next)
       this.host.changed()
       return { projectId: next.projects.find((project) => project.path.toLowerCase() === path.toLowerCase())!.id }
+    }
+    if (command.type === 'rename-project') {
+      this.host.commit(renameProject(this.host.state(), command.projectId, command.name))
+      this.host.changed()
+      return { projectId: command.projectId }
     }
     if (command.type === 'switch-account') {
       if (!this.host.switchAccount) throw new Error('Troca de conta indisponível.')

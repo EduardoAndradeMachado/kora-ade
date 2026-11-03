@@ -22,12 +22,13 @@ const savedExpanded = (): Record<string, boolean> => {
 
 export const tabStatus = (tab: MobileTab, alert = false): string => !tab.live ? 'Suspensa' : tab.activity === 'working' ? 'Trabalhando' : alert ? 'Esperando você' : 'Aberta'
 
-export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewTab, onTab, onTabActions, onRelocate, onActions }: {
+export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewTab, onTab, onTabActions, onProjectActions, onRelocate, onActions }: {
   state: MobileState
   alerted: ReadonlySet<string>
   search: string
   onProject(id: string): void
   onFiles(id: string): void
+  onProjectActions(id: string): void
   onNewTab(projectId: string): void
   onTab(tab: MobileTab): void
   onTabActions(tab: MobileTab): void
@@ -51,7 +52,7 @@ export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewT
     return <div className={`tree-project ${open ? 'expanded' : ''} ${missing ? 'missing' : ''}`} key={project.id}>
       <div className="tree-project-row">
         <button className={`tree-toggle ${open ? 'expanded' : ''}`} aria-label={`${open ? 'Recolher' : 'Expandir'} ${project.name}`} aria-expanded={open} onClick={toggle}><Icon name="expandir" /></button>
-        <button className="tree-project-name" {...longPress(() => onActions({ title: project.name, values: [{ label: 'Copiar caminho', text: project.path }, { label: 'Copiar ID do projeto', text: project.id }] }))} onClick={() => tabs.length ? toggle() : onProject(project.id)}><MobileProjectAvatar id={project.id} path={project.path} open={open} /><strong>{project.name}</strong>{missing && <Icon name="alerta" active />}</button>
+        <button className="tree-project-name" {...longPress(() => onProjectActions(project.id))} onClick={() => tabs.length ? toggle() : onProject(project.id)}><MobileProjectAvatar id={project.id} path={project.path} open={open} /><strong>{project.name}</strong>{missing && <Icon name="alerta" active />}</button>
         {!open && tabs.length > 0 && <span className="tree-count">{tabs.length}</span>}
         {!missing && <button className="icon-button tree-new" aria-label={`Arquivos de ${project.name}`} onClick={() => onFiles(project.id)}><Icon name="projeto" /></button>}
         <button className="icon-button tree-new" aria-label={`Nova conversa em ${project.name}`} disabled={missing} onClick={() => onNewTab(project.id)}><Icon name="novaAba" /></button>
@@ -63,7 +64,6 @@ export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewT
           <span className={`activity-dot ${tab.live ? tab.activity === 'working' ? 'working' : 'live' : ''}`} aria-label={tabStatus(tab, alerted.has(tab.id))} />
         </button>)}
         <button className="tree-project-link" onClick={() => onProject(project.id)}><Icon name="sessoes" />Conversas e novas abas<Icon name="expandir" /></button>
-        {!missing && <button className="tree-project-link" onClick={() => onFiles(project.id)}><Icon name="arquivo" />Arquivos do projeto<Icon name="expandir" /></button>}
       </div>}
     </div>
   }

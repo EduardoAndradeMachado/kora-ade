@@ -28,6 +28,8 @@ export const MobileCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('suspend'), tabId: id }),
   z.object({ type: z.literal('close'), tabId: id }),
   z.object({ type: z.literal('rename'), tabId: id, title: z.string().trim().min(1).max(100) }),
+  // Nome vazio volta ao nome da pasta, como no PC.
+  z.object({ type: z.literal('rename-project'), projectId: id, name: z.string().max(200) }),
   z.object({ type: z.literal('switch-account'), accountId: id }),
   z.object({ type: z.literal('alerts'), alerts: z.object({ sound: z.boolean(), windowsNotification: z.boolean() }) })
 ])
