@@ -1095,6 +1095,8 @@ void app.whenReady().then(() => {
     },
     icon: (id, path) => projectIcons.get(id, path),
     usage: () => usage.read(),
+    metrics: (agent, path) => sessionMetrics(metricsSources, agent, path),
+    dayMetrics: (since) => dayMetrics(metricsSources, since),
     dictation: transcriberInstalled,
     accounts: () => claudeAccounts.list(),
     switchAccount: async (id) => {

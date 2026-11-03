@@ -12,6 +12,10 @@ import { DESKTOP, type SizeChange } from '../src/main/terminal-sizes'
 import { emptyState, type KoraState } from '../src/shared/state'
 import type { MobileStatus } from '../src/shared/mobile'
 import { mergeTabs } from '../src/main/projects'
+import { dayMetrics, sessionMetrics } from '../src/main/metrics'
+import { claudeProjectDir } from '../src/main/sessions'
+import type { AgentSession } from '../src/shared/agent'
+import type { DayPoint, SessionMetrics } from '../src/shared/metrics'
 import { createTranscriber, type Transcribe } from '../src/main/transcriber'
 import transcritor from './fixtures/transcritor-api.json'
 
@@ -36,7 +40,9 @@ interface Setup {
   // O que o PC recebe do pty, como o main repassa para a janela.
   desktop: () => string
   sizes: { id: string; change: SizeChange }[]
-  addTab(id: string): void
+  addTab(id: string, agent?: AgentSession): void
+  // Onde a métrica da conversa procura os transcripts do Claude.
+  claudeRoot: string
   // Contas trocadas pelo celular, na ordem.
   switched: string[]
   // O que a tela de Configurações do PC recebeu, na ordem.
@@ -45,6 +51,8 @@ interface Setup {
 
 async function setup(transcribe?: Transcribe): Promise<Setup> {
   const dir = mkdtempSync(join(tmpdir(), 'kora-mobile-'))
+  const claudeRoot = join(dir, 'claude-home')
+  const metricSources = { claudeRoot, codexSessions: join(dir, 'sem-codex'), codexRollout: () => null, opencodeDb: join(dir, 'sem-opencode.db') }
   const config = join(dir, 'mobile.json')
   writeFileSync(join(dir, 'mobile.html'), '<html>Kora mobile</html>')
   mkdirSync(join(dir, 'android'))
@@ -79,7 +87,9 @@ async function setup(transcribe?: Transcribe): Promise<Setup> {
       { agent: 'codex', windows: [], updatedAt: Date.now(), source: 'disco', account: 'codex@exemplo.com' }
     ],
     accounts: async () => ({ activeUnknown: false, login: null, accounts: ['a1', 'a2'].map((id) => ({ id, email: `${id}@exemplo.com`, organizationName: null, subscriptionType: 'max', refreshTokenExpiresAt: null, weekly: null, active: id === active })) }),
-    switchAccount: async (id) => { switched.push(id); active = id }
+    switchAccount: async (id) => { switched.push(id); active = id },
+    metrics: (agent, path) => sessionMetrics(metricSources, agent, path),
+    dayMetrics: (since) => dayMetrics(metricSources, since)
   })
   server = new MobileServer({ configFile: config, rendererDir: dir, androidDir: join(dir, 'android'), imageDir: join(dir, 'imagens'), fileDir: join(dir, 'anexos'), audioDir: join(dir, 'audio'), transcribe, pdfjsDir: resolve('node_modules', 'pdfjs-dist'), runtime, changed: () => {}, statusChanged: (status) => statuses.push(status), port: 0 })
   servers.push(server)
@@ -89,8 +99,12 @@ async function setup(transcribe?: Transcribe): Promise<Setup> {
   const paired = await fetch(`${url}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, name: 'Celular de teste' }) })
   const cookie = paired.headers.get('set-cookie')!.split(';')[0]!
   const { deviceId: device } = await (await fetch(`${url}/api/state`, { headers: { cookie } })).json()
-  const addTab = (id: string): void => { state = mergeTabs(state, [...state.tabs, { id, projectId: 'p', title: 'PC' }]) }
-  return { server, runtime, terminals, url, cookie, device, config, dir, desktop: () => desktop, sizes, addTab, switched, statuses }
+  const addTab = (id: string, agent?: AgentSession): void => {
+    const merged = mergeTabs(state, [...state.tabs, { id, projectId: 'p', title: 'PC' }])
+    // mergeTabs só guarda o agente de aba que já existia; o PC grava o agente depois, quando a sessão começa.
+    state = { ...merged, tabs: merged.tabs.map((tab) => tab.id === id && agent ? { ...tab, agent } : tab) }
+  }
+  return { server, runtime, terminals, url, cookie, device, config, dir, desktop: () => desktop, sizes, addTab, claudeRoot, switched, statuses }
 }
 
 async function action(url: string, cookie: string, command: unknown): Promise<Response> {
@@ -748,6 +762,48 @@ describe('uso, conta e avisos do PC pelo celular', () => {
     expect(s.runtime.snapshot().alerts).toEqual({ sound: false, windowsNotification: true })
     await expect.poll(() => stream.text()).toContain('"alerts":{"sound":false,"windowsNotification":true}')
     expect((await action(s.url, s.cookie, { type: 'alerts', alerts: { sound: 'não' } })).status).toBe(400)
+  })
+})
+
+describe('métricas da sessão pelo celular', () => {
+  const jsonl = (lines: unknown[]): string => lines.map((l) => JSON.stringify(l)).join(String.fromCharCode(10)) + String.fromCharCode(10)
+  const at = (ms: number): string => new Date(Date.now() - 60_000 + ms).toISOString()
+  const answer = (ms: number, id: string, model: string, output: number, extra: Record<string, unknown> = {}) => [
+    { type: 'api-request', id: `req-${id}`, timestamp: at(ms - 500), ...extra },
+    { type: 'assistant', timestamp: at(ms), requestRef: `req-${id}`, message: { id, model, usage: { output_tokens: output }, content: [] }, ...extra }
+  ]
+
+  it('lê pela aba o transcript do Claude no projeto dela, com os subagentes, e o dia inteiro', async () => {
+    const s = await setup()
+    const sessionId = '6a1f3c2e-8b4d-4e5f-9a7b-1c2d3e4f5a6b'
+    const folder = claudeProjectDir(s.claudeRoot, s.dir)
+    mkdirSync(join(folder, sessionId, 'subagents'), { recursive: true })
+    writeFileSync(join(folder, `${sessionId}.jsonl`), jsonl([...answer(1000, 'a', 'claude-opus-5-5', 1000), ...answer(5000, 'b', 'claude-opus-5-5', 400)]))
+    writeFileSync(join(folder, sessionId, 'subagents', 'agent-x.jsonl'), jsonl(answer(3000, 's', 'claude-sonnet-5-5', 2000, { isSidechain: true })))
+    // Conversa de dois dias atrás: fica fora do "Hoje".
+    const old = join(folder, '0c0c0c0c-2222-4333-8444-555555555555.jsonl')
+    writeFileSync(old, jsonl(answer(-2 * 86_400_000, 'v', 'claude-haiku-5-5', 300)))
+    utimesSync(old, new Date(Date.now() - 2 * 86_400_000), new Date(Date.now() - 2 * 86_400_000))
+    s.addTab('com-agente', { kind: 'claude', sessionId })
+    s.addTab('terminal')
+
+    const read = (path: string, cookie = s.cookie): Promise<Response> => fetch(`${s.url}/api/metrics/${path}`, { headers: { cookie } })
+    expect((await read('session?tab=com-agente', '')).status).toBe(401)
+    const response = await read('session?tab=com-agente')
+    expect(response.status).toBe(200)
+    const metrics: SessionMetrics = await response.json()
+    expect(metrics.sessionId).toBe(sessionId)
+    expect(metrics.responses.map((r) => [r.model, r.outputTokens])).toEqual([['claude-opus-5-5', 1000], ['claude-opus-5-5', 400]])
+    expect(metrics.subagentResponses.map((r) => r.model)).toEqual(['claude-sonnet-5-5'])
+
+    const terminal = await read('session?tab=terminal')
+    expect(terminal.status).toBe(400)
+    expect((await terminal.json()).error).toBe('Esta aba é um terminal, sem métricas de IA.')
+    expect((await read('session?tab=nao-existe')).status).toBe(400)
+
+    const day: DayPoint[] = await (await read(`day?since=${Date.now() - 3_600_000}`)).json()
+    expect(day.filter((point) => point.agent === 'claude').map((point) => point.model).sort()).toEqual(['claude-opus-5-5', 'claude-opus-5-5', 'claude-sonnet-5-5'])
+    expect((await read('day?since=amanhã')).status).toBe(400)
   })
 })
 

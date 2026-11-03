@@ -20,10 +20,24 @@ import {
 import { ipcErrorMessage } from '@/lib/ipc-error'
 import { cn } from '@/lib/utils'
 
+// De onde vêm os números: o PC lê pelo IPC; o celular pede ao Kora do PC pela rede.
+// copy: no celular a página vem por HTTP, onde o navegador não oferece navigator.clipboard.
+export interface MetricsSource {
+  session(projectId: string, agent: AgentSession): Promise<SessionMetrics>
+  day(since: number): Promise<DayPoint[]>
+  copy(text: string): Promise<void>
+}
+const DESKTOP_SOURCE: MetricsSource = {
+  session: (projectId, agent) => window.kora.sessionMetrics(projectId, agent),
+  day: (since) => window.kora.dayMetrics(since),
+  copy: (text) => navigator.clipboard.writeText(text)
+}
+
 interface Props {
   projectId: string
   agent: AgentSession | null
   activity: AgentActivity | null
+  source?: MetricsSource
 }
 
 type Scope = 'session' | 'day'
@@ -425,7 +439,7 @@ function AgentName({ name }: { name: string }): React.JSX.Element {
   )
 }
 
-function CopyableName({ name, className }: { name: string; className?: string }): React.JSX.Element {
+function CopyableName({ name, className, copyText }: { name: string; className?: string; copyText(text: string): Promise<void> }): React.JSX.Element {
   const [copied, setCopied] = useState<'ok' | 'falhou' | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
@@ -435,7 +449,7 @@ function CopyableName({ name, className }: { name: string; className?: string })
     timer.current = setTimeout(() => setCopied(null), 1500)
   }
   const copy = (): void => {
-    navigator.clipboard.writeText(name).then(
+    copyText(name).then(
       () => show('ok'),
       () => show('falhou')
     )
@@ -459,7 +473,7 @@ function CopyableName({ name, className }: { name: string; className?: string })
   )
 }
 
-export function MetricsPanel({ projectId, agent, activity }: Props): React.JSX.Element {
+export function MetricsPanel({ projectId, agent, activity, source = DESKTOP_SOURCE }: Props): React.JSX.Element {
   const [scope, setScope] = useState<Scope>('session')
   const [metrics, setMetrics] = useState<SessionMetrics | null>(null)
   const [day, setDay] = useState<DayPoint[] | null>(null)
@@ -469,7 +483,7 @@ export function MetricsPanel({ projectId, agent, activity }: Props): React.JSX.E
 
   const loadSession = useCallback(() => {
     if (!kind || !sessionId) return
-    window.kora.sessionMetrics(projectId, { kind, sessionId }).then(
+    source.session(projectId, { kind, sessionId }).then(
       (m) => {
         // Resposta atrasada da sessão anterior (troca de aba no meio da leitura) não sobrescreve a atual.
         if (m.sessionId !== sessionId) return
@@ -478,7 +492,7 @@ export function MetricsPanel({ projectId, agent, activity }: Props): React.JSX.E
       },
       (err: unknown) => setError(ipcErrorMessage(err))
     )
-  }, [projectId, kind, sessionId])
+  }, [source, projectId, kind, sessionId])
 
   useEffect(() => {
     setMetrics(null)
@@ -495,7 +509,7 @@ export function MetricsPanel({ projectId, agent, activity }: Props): React.JSX.E
   useEffect(() => {
     if (scope !== 'day') return
     const load = (): void => {
-      window.kora.dayMetrics(startOfToday()).then(
+      source.day(startOfToday()).then(
         (points) => {
           setDay(points)
           setError(null)
@@ -506,7 +520,7 @@ export function MetricsPanel({ projectId, agent, activity }: Props): React.JSX.E
     load()
     const id = window.setInterval(load, DAY_REFRESH_MS)
     return () => window.clearInterval(id)
-  }, [scope])
+  }, [scope, source])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -518,12 +532,12 @@ export function MetricsPanel({ projectId, agent, activity }: Props): React.JSX.E
             </span>
             <span className="flex min-w-0 flex-col">
               {agent.name ? (
-                <CopyableName key={agent.name} name={agent.name} />
+                <CopyableName key={agent.name} name={agent.name} copyText={source.copy} />
               ) : (
                 <span className="truncate px-1">{agentLabel(agent.kind)}</span>
               )}
               {agent.derivedName && (
-                <CopyableName key={agent.derivedName} name={agent.derivedName} className="text-[11px] text-muted-foreground" />
+                <CopyableName key={agent.derivedName} name={agent.derivedName} className="text-[11px] text-muted-foreground" copyText={source.copy} />
               )}
             </span>
           </span>

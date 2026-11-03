@@ -14,6 +14,8 @@ export interface MobileRoute {
   files?: string
   file?: string
   fileOptions?: { path: string; name: string; isDir: boolean }
+  // Métricas do projeto: a sessão de tabId (a aba de onde veio) ou, sem ela, a primeira aba de agente do projeto.
+  metrics?: { tabId: string | null }
   // Arquivos abertos de dentro de uma conversa: a entrada dela no histórico, para voltar pulando as pastas.
   chat?: { tabId: string } & HistoryMark
 }

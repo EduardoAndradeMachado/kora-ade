@@ -10,7 +10,8 @@ import { gitStatus } from './git'
 import { resolveTerminalLink, type ResolvedLink } from './terminal-links'
 import { statSync } from 'node:fs'
 import { DESKTOP, TerminalSizes, type SizeChange, type TerminalSize } from './terminal-sizes'
-import type { AgentActivity } from '../shared/agent'
+import type { AgentActivity, AgentRef } from '../shared/agent'
+import type { DayPoint, SessionMetrics } from '../shared/metrics'
 import type { KoraState } from '../shared/state'
 import type { Launch, TabRef } from '../shared/ipc'
 import type { MobileCommand, MobileDirectory, MobileGit, MobileState, MobileUsage } from '../shared/mobile'
@@ -35,6 +36,8 @@ export class MobileRuntime {
     relocated?(projectId: string, path: string): Promise<void>
     icon?(projectId: string, path: string): Promise<string | null>
     usage?(): Promise<AgentUsage[]>
+    metrics?(agent: AgentRef, projectPath: string): Promise<SessionMetrics>
+    dayMetrics?(since: number): Promise<DayPoint[]>
     accounts?(): Promise<ClaudeAccountsView>
     switchAccount?(id: string): Promise<void>
     dictation?(): boolean
@@ -108,6 +111,20 @@ export class MobileRuntime {
   // Caminho tocado no terminal do celular: só vira link o arquivo que existe dentro do projeto, como no PC.
   resolveLink(projectId: string, text: string): Promise<ResolvedLink | null> {
     return resolveTerminalLink(this.projectRoot(projectId), text)
+  }
+
+  // A mesma leitura do painel de métricas do PC, pela aba: o celular não conhece o caminho do projeto.
+  tabMetrics(tabId: string): Promise<SessionMetrics> {
+    const tab = this.host.state().tabs.find((t) => t.id === tabId)
+    if (!tab) throw new Error('Aba desconhecida.')
+    if (!tab.agent) throw new Error('Esta aba é um terminal, sem métricas de IA.')
+    if (!this.host.metrics) throw new Error('Métricas indisponíveis neste PC.')
+    return this.host.metrics({ kind: tab.agent.kind, sessionId: tab.agent.sessionId }, this.projectRoot(tab.projectId))
+  }
+
+  dayMetrics(since: number): Promise<DayPoint[]> {
+    if (!this.host.dayMetrics) throw new Error('Métricas indisponíveis neste PC.')
+    return this.host.dayMetrics(since)
   }
 
   snapshotTerminal(id: string): ReturnType<Terminals['snapshot']> { return this.host.terminals.snapshot(id) }

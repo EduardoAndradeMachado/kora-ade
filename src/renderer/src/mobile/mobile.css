@@ -172,6 +172,7 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .action-sheet .sheet-header { padding-inline: 4px; }
 .action-row { width: 100%; justify-content: flex-start; border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: 14px 8px; min-height: 52px; }
 .action-row svg:last-child { margin-left: auto; width: 14px; height: 14px; }
+.metrics-page { display: flex; flex-direction: column; }
 .danger-button { color: var(--destructive); }
 .pc-sheet { height: min(760px, calc(var(--mobile-height) - 24px)); }
 .pc-body { overflow: auto; flex: 1; min-height: 0; padding: 0 4px 12px; display: flex; flex-direction: column; gap: 22px; }
@@ -284,6 +285,8 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .project-panels { display: flex; gap: 4px; padding: 3px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
 .project-panels button { flex: 1; min-height: 38px; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); font-size: 13px; }
 .project-panels button svg { width: 16px; height: 16px; }
+.project-panels .panel-icon { flex: 0 0 44px; }
+.project-panels .panel-icon svg { width: 18px; height: 18px; }
 .project-panels button[aria-selected="true"] { background: var(--secondary); color: var(--foreground); font-weight: 600; }
 .files-path { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin-bottom: 8px; color: var(--muted-foreground); font-size: 12px; }
 .files-path button { min-height: 32px; padding: 0 6px; border: 0; background: transparent; color: var(--foreground); font-size: 12px; }
@@ -441,3 +444,12 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 /* Teclado aberto encolhe a área: como na tela de verdade, as linhas que não cabem saem, sem espremer as que ficam. */
 .skeleton-list, .skeleton-code, .skeleton-terminal, .skeleton-pages { overflow: hidden; }
 .skeleton-list > *, .skeleton-code > *, .skeleton-terminal > *, .skeleton-pages > * { flex-shrink: 0; }
+/* O painel de métricas é o do PC, feito com Tailwind (em @layer). As regras soltas deste arquivo vencem qualquer camada,
+   então dentro dele botão e ícone voltam ao que as camadas dizem. */
+.metrics-page button, .metrics-page button:hover, .metrics-page button:active, .metrics-page button:disabled { all: revert-layer; }
+.metrics-page svg[data-icon] { width: revert-layer; height: revert-layer; }
+/* No PC o painel é uma coluna com rolagem e margem próprias; aqui ele segue a margem e a rolagem da página. */
+.metrics-page .px-3 { padding-inline: 0; }
+.metrics-page .overflow-y-auto { overflow: visible; }
+/* No PC o ícone de copiar o nome aparece no hover; no toque não há hover. */
+.metrics-page svg[data-icon="copiar"] { opacity: 1; }
