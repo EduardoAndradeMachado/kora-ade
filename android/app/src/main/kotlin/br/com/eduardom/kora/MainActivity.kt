@@ -192,6 +192,8 @@ class MainActivity : ComponentActivity() {
         val destino = resultado.data?.data
         val pendente = pedidoParaSalvar
         pedidoParaSalvar = null
+        // Pedido perdido: o Android encerrou o app com o seletor aberto. A página e a conexão com o PC recomeçam do zero
+        // e ainda não estão prontas para baixar, então o documento vazio que o seletor criou sai da pasta.
         if (pendente == null) {
             if (resultado.resultCode == RESULT_OK && destino != null) {
                 runCatching { contentResolver.delete(destino, null, null) }
@@ -284,11 +286,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        // O Android pode recriar a tela enquanto o seletor de pastas está aberto: o pedido volta daqui. O endereço é
-        // conferido de novo contra o Kora aberto antes de baixar.
-        val enderecoPendente = savedInstanceState?.getString("enderecoParaSalvar")
-        val nomePendente = savedInstanceState?.getString("nomeParaSalvar")
-        if (enderecoPendente != null && nomePendente != null) pedidoParaSalvar = enderecoPendente to nomePendente
         CookieManager.getInstance().setAcceptCookie(true)
         web = criarWebView()
         abertura = criarAbertura()
@@ -341,14 +338,6 @@ class MainActivity : ComponentActivity() {
                 }
             }.start()
         }
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        pedidoParaSalvar?.let { (endereco, nome) ->
-            outState.putString("enderecoParaSalvar", endereco)
-            outState.putString("nomeParaSalvar", nome)
-        }
-        super.onSaveInstanceState(outState)
     }
 
     override fun onPause() {
@@ -488,7 +477,7 @@ class MainActivity : ComponentActivity() {
         if (acao == "salvarComo" && destino == null) return escolherOndeSalvar(endereco, nome)
         val cookie = passagem?.takeIf { kora.host == "127.0.0.1" }?.cookie
         Thread {
-            var salvo: Uri? = null
+            var salvo: Uri? = destino
             val resultado = runCatching {
                 val conexao = origem.toURL().openConnection() as HttpURLConnection
                 cookie?.let { conexao.setRequestProperty("Cookie", it) }
@@ -506,7 +495,6 @@ class MainActivity : ComponentActivity() {
                     val extensao = nomeParaSalvar(nome).substringAfterLast('.', "").lowercase()
                     val tipo = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extensao) ?: tipoDoArquivo(conexao.contentType)
                     if (destino != null) {
-                        salvo = destino
                         conexao.inputStream.use { entrada -> checkNotNull(contentResolver.openOutputStream(destino, "wt")).use { copiarComProgresso(entrada, it, total) } }
                         val final = contentResolver.query(destino, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
                         return@runCatching Triple(destino, tipo, final ?: nomeParaSalvar(nome))
