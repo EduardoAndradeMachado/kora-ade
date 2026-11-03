@@ -29,6 +29,7 @@ export function FilesPanel({ projectId, dir, onFailed, onDir, onFile, selected, 
   const [notice, setNotice] = useState('')
   const longPress = useLongPress()
   useEffect(() => onDownloaded((event) => {
+    if (event.tipo === 'progresso') return
     setTransferring(false)
     if (event.tipo === 'erro') setError(event.mensagem)
     if (event.tipo === 'salvo') setNotice(event.destino === 'escolhido' ? `Salvo no local escolhido: ${event.nome}.` : `Salvo em Downloads/Kora: ${event.nome}.`)

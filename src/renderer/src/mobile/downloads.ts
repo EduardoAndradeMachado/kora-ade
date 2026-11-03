@@ -1,7 +1,9 @@
 import { api, koraApp } from './api'
 
 // O Android responde por window.koraBaixado para download, compartilhamento e escolha do destino.
+// progresso: o app até a 0.5.3 não manda; total -1 quando o PC não disse o tamanho.
 export type DownloadEvent = { tipo: 'salvo'; nome: string; destino?: 'escolhido' } | { tipo: 'compartilhado' } | { tipo: 'cancelado' } | { tipo: 'erro'; mensagem: string }
+  | { tipo: 'progresso'; recebidos: number; total: number }
 
 export const canDownload = (): boolean => {
   const app = koraApp()
@@ -16,7 +18,7 @@ const key = (): string => (window as unknown as { koraChaveAudio?: string }).kor
 let inFlight = false
 let listener: ((event: DownloadEvent) => void) | null = null
 ;(window as unknown as { koraBaixado(event: DownloadEvent): void }).koraBaixado = (event) => {
-  inFlight = false
+  if (event.tipo !== 'progresso') inFlight = false
   listener?.(event)
 }
 
@@ -47,6 +49,17 @@ export async function download(query: string, name: string, action: 'baixar' | '
   link.click()
   link.remove()
   return 'browser'
+}
+
+// Salvar como escolhe a pasta antes de baixar; sem a ponte dele (app antigo ou navegador), vai para Downloads.
+export const preferredDownload = (): 'salvarComo' | 'baixar' => (koraApp()?.salvarComo ? 'salvarComo' : 'baixar')
+
+const MB = 1024 * 1024
+export function progressText(event: { recebidos: number; total: number }): { text: string; percent: number | null } {
+  const mb = (bytes: number): string => (bytes / MB).toLocaleString('pt-BR', { maximumFractionDigits: 1, minimumFractionDigits: bytes < 10 * MB ? 1 : 0 })
+  if (event.total <= 0) return { text: `Baixando… ${mb(event.recebidos)} MB`, percent: null }
+  const percent = Math.min(100, Math.round((event.recebidos / event.total) * 100))
+  return { text: `Baixando… ${percent}% (${mb(event.recebidos)} de ${mb(event.total)} MB)`, percent }
 }
 
 export const openDownloaded = (): void => koraApp()?.abrirBaixado?.(key())

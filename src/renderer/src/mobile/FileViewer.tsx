@@ -7,11 +7,13 @@ import { api, offline } from './api'
 import { CodeEditor } from './CodeEditor'
 import { PdfPages } from './PdfPages'
 import { SkeletonCode } from './Skeleton'
-import { canDownload, download, onDownloaded, openDownloaded } from './downloads'
+import { canDownload, download, onDownloaded, openDownloaded, preferredDownload, progressText } from './downloads'
 import { FileActions } from './FileActions'
 
-type Kind = 'markdown' | 'html' | 'code' | 'pdf' | 'image' | 'external'
-const kindOf = (path: string): Kind => (/\.html?$/i.test(path) ? 'html' : viewerFor(path))
+type Kind = 'markdown' | 'html' | 'code' | 'pdf' | 'image' | 'audio' | 'external'
+// O que o WebView do Android toca; o PC continua tratando áudio como arquivo externo (file-kind).
+const AUDIO = /\.(mp3|wav|ogg|oga|opus|m4a|aac|flac|weba)$/i
+const kindOf = (path: string): Kind => (/\.html?$/i.test(path) ? 'html' : AUDIO.test(path) ? 'audio' : viewerFor(path))
 interface TextFile { content: string; mtimeMs: number; raw: string }
 // downloaded: o app acabou de salvar o arquivo no celular, e o aviso oferece abrir.
 type Notice = { tone: 'error' | 'conflict' | 'info'; text: string; downloaded?: boolean }
@@ -63,6 +65,9 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
   // Toque no PDF esconde a barra de página e zoom, a faixa do arquivo e o cabeçalho do Kora (os dois pelo CSS).
   const [immersive, setImmersive] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  // Salvar como abre o seletor de pastas do Android antes de baixar: até o primeiro progresso, o aviso diz isso.
+  const [choosing, setChoosing] = useState(false)
+  const [progress, setProgress] = useState<{ recebidos: number; total: number } | null>(null)
   const draftRef = useRef(draft)
   draftRef.current = draft
   const baseRef = useRef(base)
@@ -108,12 +113,16 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
   useEffect(() => { void load(true) }, [load])
   useEffect(() => { if (failed.current) void load(true) }, [connection, load])
   useEffect(() => onDownloaded((event) => {
+    if (event.tipo === 'progresso') return setProgress(event)
+    setProgress(null)
     setDownloading(false)
     if (event.tipo === 'cancelado' || event.tipo === 'compartilhado') return
     setNotice(event.tipo === 'salvo' ? { tone: 'info', text: event.destino === 'escolhido' ? `Salvo no local escolhido como ${event.nome}.` : `Salvo em Downloads/Kora como ${event.nome}.`, downloaded: true } : { tone: 'error', text: event.mensagem })
   }), [])
-  const fetchDownload = async (action: 'baixar' | 'salvarComo' | 'compartilhar' = 'baixar'): Promise<void> => {
+  const fetchDownload = async (action: 'baixar' | 'salvarComo' | 'compartilhar' = preferredDownload()): Promise<void> => {
     if (actions) onActions(false)
+    setProgress(null)
+    setChoosing(action === 'salvarComo')
     setDownloading(true)
     setNotice(null)
     try {
@@ -179,11 +188,18 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
         <button aria-pressed={mode === 'edit'} onClick={() => setMode('edit')}><Icon name="editar" />Editar</button>
       </div>}
       {!textual && raw && <button className="icon-button" aria-label="Recarregar do PC" onClick={() => void load(false)}><Icon name="atualizar" /></button>}
-      {canDownload() && !hidden && <button className="icon-button" aria-label="Baixar para o celular" aria-busy={downloading} disabled={downloading} onClick={() => void fetchDownload()}><Icon name="baixar" /></button>}
+      {canDownload() && !hidden && <button className="icon-button download-button" aria-label="Baixar para o celular" aria-busy={downloading} disabled={downloading} onClick={() => void fetchDownload()}>{downloading ? <span className="download-spinner" /> : <Icon name="baixar" />}</button>}
       {textual && draft !== null && <button className="primary save-button" disabled={saving} onClick={() => void save(base)}>{saving ? 'Salvando…' : 'Salvar'}</button>}
       {onChat && <button className="icon-button chat-return" aria-label="Voltar à conversa" onClick={onChat}><Icon name="conversa" active /></button>}
     </div>
     {actions && <FileActions name={name} path={path} busy={downloading} onClose={() => onActions(false)} onAction={(action) => void fetchDownload(action)} />}
+    {downloading && canDownload() && (() => {
+      const shown = progress ? progressText(progress) : { text: choosing ? 'Escolha onde salvar no celular…' : 'Baixando do PC…', percent: null }
+      return <div role="status" className="download-progress">
+        <span>{shown.text}</span>
+        <div className={`download-bar ${shown.percent === null ? 'indeterminate' : ''}`}><span style={shown.percent === null ? undefined : { width: `${shown.percent}%` }} /></div>
+      </div>
+    })()}
     {notice && <div role={notice.tone === 'info' ? 'status' : 'alert'} className={`file-notice ${notice.tone}`}>
       <span>{notice.text}</span>
       {notice.tone === 'conflict' && <span className="file-notice-actions">
@@ -222,6 +238,14 @@ export function FileViewer({ projectId, path, dark, connection, onBack, onChat, 
         setNotice({ tone: 'error', text: 'Não deu para trazer a imagem do PC. Ela abre de novo quando a conexão voltar.' })
       }} /></div>}
       {kind === 'pdf' && raw && <PdfPages url={raw} controls={!immersive} onTap={() => setImmersive((on) => !on)} onError={() => { failed.current = true }} />}
+      {kind === 'audio' && raw && <div className="audio-view">
+        <Icon name="microfone" />
+        <strong>{name}</strong>
+        <audio controls preload="metadata" src={raw} aria-label={`Tocar ${name}`} onError={() => {
+          failed.current = true
+          setNotice({ tone: 'error', text: 'Não deu para tocar este áudio aqui. Baixe para abrir com outro app do celular.' })
+        }} />
+      </div>}
       {kind === 'external' && <p className="empty-copy">{canDownload() ? 'Este tipo de arquivo não abre no Kora. Baixe para abrir com outro app do celular.' : 'Este tipo de arquivo não abre no celular. Abra pelo PC.'}</p>}
     </div>
   </main>

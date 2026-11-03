@@ -342,6 +342,18 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .markdown-view img { max-width: 100%; }
 .html-view { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
 .image-view { flex: 1; display: grid; place-items: center; padding: 12px; }
+/* Baixando, o botão segue nítido e gira; o 40% do botão desativado parecia quebrado. */
+.file-header .download-button:disabled { opacity: 1; }
+.download-spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--brand-amber); animation: spin .8s linear infinite; }
+.download-progress { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; flex-shrink: 0; background: var(--card); border-bottom: 1px solid var(--border); color: var(--foreground); font-size: 12px; }
+.download-bar { height: 4px; border-radius: 2px; background: var(--secondary); overflow: hidden; }
+.download-bar span { display: block; height: 100%; background: var(--brand-amber); transition: width .2s; }
+.download-bar.indeterminate span { width: 35%; animation: download-slide 1.1s ease-in-out infinite; }
+@keyframes download-slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.audio-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px; text-align: center; }
+.audio-view > svg { width: 40px; height: 40px; color: var(--brand-amber); }
+.audio-view strong { max-width: 100%; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
+.audio-view audio { width: 100%; max-width: 480px; }
 .image-view img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .pdf-view { position: relative; flex: 1; min-height: 0; }
 .pdf-scroller { position: absolute; inset: 0; overflow: auto; touch-action: pan-x pan-y; background: var(--secondary); }

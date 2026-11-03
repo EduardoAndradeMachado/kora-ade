@@ -15,7 +15,7 @@ export function FileActions({ name, path, directory = false, busy, onAction, onC
     {!directory && !name.startsWith('.') && <>
       {app?.compartilhar && <button className="action-row" disabled={busy} onClick={() => onAction('compartilhar')}>Compartilhar arquivo</button>}
       {app?.salvarComo && <button className="action-row" disabled={busy} onClick={() => onAction('salvarComo')}>Salvar como…</button>}
-      {(!app || app.baixar) && <button className="action-row" disabled={busy} onClick={() => onAction('baixar')}>Baixar para o celular</button>}
+      {(!app || app.baixar) && <button className="action-row" disabled={busy} onClick={() => onAction('baixar')}>{app?.salvarComo ? 'Salvar em Downloads/Kora' : 'Baixar para o celular'}</button>}
     </>}
     {notice && <p role="status">{notice}</p>}
   </section></div>
