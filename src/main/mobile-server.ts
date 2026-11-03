@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { DeviceNameSchema, FileSaveSchema, FolderCreateSchema, MobileCommandSchema, type MobilePairing, type MobileStatus, type TerminalSizeEvent } from '../shared/mobile'
 import { MobilePairingStore } from './mobile-pairing'
 import { MAX_PASTED_IMAGE_BYTES, savePastedImage } from './pasted-image'
+import { MAX_PASTED_FILE_BYTES, savePastedFile } from './pasted-file'
 import { ConflictError } from './files'
 import type { MobileRuntime } from './mobile-runtime'
 import type { TLSSocket } from 'node:tls'
@@ -112,6 +113,8 @@ export class MobileServer {
     androidDir?: string
     // Onde o print mandado pelo celular vira arquivo: a mesma pasta do Ctrl+V com imagem no PC.
     imageDir?: string
+    // Onde o arquivo qualquer (PDF, planilha, texto) mandado pelo celular vira arquivo, uma pasta por envio.
+    fileDir?: string
     // O áudio gravado no celular fica aqui só enquanto o Transcritor lê.
     audioDir?: string
     transcribe?: Transcribe
@@ -457,6 +460,39 @@ export class MobileServer {
     json(response, 200, { path: savePastedImage(this.options.imageDir, Buffer.concat(chunks), mime) })
   }
 
+  // Como a imagem, cru no corpo; o nome vem no cabeçalho, codificado, porque cabeçalho HTTP não leva acento.
+  private async attachment(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (!this.options.fileDir) return json(response, 404, { error: 'Este Kora não recebe arquivos.' })
+    let name: string
+    try {
+      name = decodeURIComponent(String(request.headers['x-kora-filename'] ?? ''))
+    } catch {
+      name = ''
+    }
+    const chunks: Buffer[] = []
+    let size = 0
+    for await (const chunk of request) {
+      size += (chunk as Buffer).length
+      if (size <= MAX_PASTED_FILE_BYTES) chunks.push(chunk as Buffer)
+    }
+    console.info(`[kora] arquivo do celular: ${size} bytes`)
+    if (size > MAX_PASTED_FILE_BYTES) return json(response, 413, { error: 'Arquivo grande demais: o limite é 20 MB.' })
+    if (size === 0) return json(response, 400, { error: 'O arquivo chegou vazio.' })
+    json(response, 200, { path: savePastedFile(this.options.fileDir, Buffer.concat(chunks), name) })
+  }
+
+  // O arquivo fica em <fileDir>/<id do envio>/<nome>: só vale o que está exatamente dois níveis abaixo.
+  private pastedFile(path: string): boolean {
+    if (!this.options.fileDir || !existsSync(path)) return false
+    try {
+      const folder = realpathSync.native(this.options.fileDir)
+      const file = realpathSync.native(path)
+      return dirname(dirname(file)) === folder && statSync(file).isFile()
+    } catch {
+      return false
+    }
+  }
+
   // O caminho que vai colado no prompt do agente precisa ser de uma imagem que o próprio PC gravou (/api/image), pelo
   // caminho real: sem isso, o pedido poderia anexar qualquer arquivo do PC à conversa com o provedor.
   private pastedImage(path: string): boolean {
@@ -590,6 +626,7 @@ export class MobileServer {
         if (url.pathname === '/api/project-icon' && request.method === 'GET') return json(response, 200, { icon: await this.options.runtime.projectIcon(url.searchParams.get('project') ?? '') })
         if (url.pathname === '/api/usage' && request.method === 'GET') return json(response, 200, await this.options.runtime.usage())
         if (url.pathname === '/api/image' && request.method === 'POST') return await this.image(request, response)
+        if (url.pathname === '/api/attachment' && request.method === 'POST') return await this.attachment(request, response)
         if (url.pathname === '/api/audio' && request.method === 'POST') return await this.audio(request, response)
         if (url.pathname === '/api/files' && request.method === 'GET') {
           return json(response, 200, this.options.runtime.files(url.searchParams.get('project') ?? '', url.searchParams.get('path') ?? ''))
@@ -643,6 +680,7 @@ export class MobileServer {
         if (url.pathname === '/api/action' && request.method === 'POST') {
           const command = MobileCommandSchema.parse(await this.body(request))
           if (command.type === 'send' && !command.images.every((path) => this.pastedImage(path))) return json(response, 400, { error: 'Imagem desconhecida: envie de novo pelo app.' })
+          if (command.type === 'send' && !command.files.every((path) => this.pastedFile(path))) return json(response, 400, { error: 'Arquivo desconhecido: anexe de novo pelo app.' })
           return json(response, 200, await this.options.runtime.execute(device, command))
         }
         if (url.pathname === '/api/events' && request.method === 'GET') {

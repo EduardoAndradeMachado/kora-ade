@@ -47,16 +47,36 @@ export async function uploadImage(file: File): Promise<{ path: string; preview: 
   } catch (error) {
     throw new Error(`Não deu para ler a imagem no celular (${detail(error)}). Escolha de novo.`)
   }
-  const post = (): Promise<Response> => fetch('/api/image', { method: 'POST', headers: { 'content-type': image.type }, body: image })
+  const path = await postToPc('/api/image', { 'content-type': image.type }, image, 'a imagem')
+  return { path, preview: await thumbnail(image) }
+}
+
+async function postToPc(url: string, headers: Record<string, string>, body: Blob, what: string): Promise<string> {
+  const post = (): Promise<Response> => fetch(url, { method: 'POST', headers, body })
   // Depois da tela apagada, o navegador ainda tenta a conexão antiga, que o Wi-Fi já derrubou: o envio falha na
-  // rede e a segunda tentativa abre uma conexão nova. Repetir no máximo salva o print duas vezes.
+  // rede e a segunda tentativa abre uma conexão nova. Repetir no máximo salva o arquivo duas vezes.
   const response = await post().catch(post).catch((error: unknown) => {
     // O fetch sem resposta nenhuma só diz "Failed to fetch".
-    throw new Error(`Não deu para enviar a imagem ao PC (${error instanceof TypeError ? 'sem conexão com o PC' : detail(error)}).`)
+    throw new Error(`Não deu para enviar ${what} ao PC (${error instanceof TypeError ? 'sem conexão com o PC' : detail(error)}).`)
   })
   const result = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(result.error ?? 'Não deu para enviar a imagem ao PC.')
-  return { path: result.path as string, preview: await thumbnail(image) }
+  if (!response.ok) throw new Error(result.error ?? `Não deu para enviar ${what} ao PC.`)
+  return result.path as string
+}
+
+const MAX_FILE_BYTES = 20 * 1024 * 1024
+
+// Arquivo que não é imagem (PDF, planilha, texto) vai como está, com o nome original: o agente lê pelo caminho.
+export async function uploadFile(file: File): Promise<{ path: string; name: string }> {
+  if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name} passa de 20 MB, o limite para anexar.`)
+  let bytes: Blob
+  try {
+    bytes = new Blob([await file.arrayBuffer()])
+  } catch (error) {
+    throw new Error(`Não deu para ler o arquivo no celular (${detail(error)}). Escolha de novo.`)
+  }
+  const path = await postToPc('/api/attachment', { 'content-type': 'application/octet-stream', 'x-kora-filename': encodeURIComponent(file.name) }, bytes, 'o arquivo')
+  return { path, name: file.name }
 }
 
 // Mesmo formato do arrastar arquivo no PC: caminho com espaço vai entre aspas.

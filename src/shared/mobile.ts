@@ -18,8 +18,12 @@ export const MobileCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('resize'), tabId: id, ...size }),
   z.object({ type: z.literal('keys'), tabId: id, data: z.string().min(1).max(64) }),
   // images: caminhos devolvidos por /api/image; cada um vai numa colagem só dele (Terminals.submit).
-  z.object({ type: z.literal('send'), tabId: id, text: z.string().max(32768), images: z.array(z.string().min(1).max(4096)).max(10).default([]) })
-    .refine((command) => command.text.trim() !== '' || command.images.length > 0, 'Escreva uma mensagem ou anexe uma imagem.'),
+  // files: caminhos devolvidos por /api/attachment; vão no fim do texto, para o agente ler pelo caminho.
+  z.object({
+    type: z.literal('send'), tabId: id, text: z.string().max(32768),
+    images: z.array(z.string().min(1).max(4096)).max(10).default([]),
+    files: z.array(z.string().min(1).max(4096)).max(10).default([])
+  }).refine((command) => command.text.trim() !== '' || command.images.length > 0 || command.files.length > 0, 'Escreva uma mensagem ou anexe um arquivo.'),
   z.object({ type: z.literal('resume'), tabId: id, ...size }),
   z.object({ type: z.literal('suspend'), tabId: id }),
   z.object({ type: z.literal('close'), tabId: id }),

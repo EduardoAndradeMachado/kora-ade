@@ -1114,6 +1114,7 @@ void app.whenReady().then(() => {
     devAssetRoots: [join(app.getAppPath(), 'node_modules'), join(app.getAppPath(), 'src/shared')],
     androidDir: join(app.getAppPath(), 'resources', 'android'),
     imageDir: join(app.getPath('temp'), 'kora-paste'),
+    fileDir: join(app.getPath('temp'), 'kora-anexos'),
     audioDir: join(app.getPath('temp'), 'kora-audio'),
     transcribe: createTranscriber(),
     pdfjsDir: is.dev ? join(app.getAppPath(), 'node_modules', 'pdfjs-dist') : join(app.getAppPath(), 'resources', 'pdfjs'),

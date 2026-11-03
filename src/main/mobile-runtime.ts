@@ -228,7 +228,7 @@ export class MobileRuntime {
       case 'send':
         this.live(tab.id)
         this.apply(tab.id, this.sizes.take(tab.id, device))
-        this.host.terminals.submit(tab.id, command.text, tab.agent?.kind, command.images)
+        this.host.terminals.submit(tab.id, command.text, tab.agent?.kind, command.images, command.files)
         return {}
       case 'resume':
         if (!this.host.terminals.pids().has(tab.id)) {

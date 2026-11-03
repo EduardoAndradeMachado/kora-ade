@@ -6,7 +6,7 @@ import { DESKTOP, type MobileCommand, type MobileTab, type TerminalSizeEvent, ty
 import { Icon } from '@/brand/icons'
 import { currentTerminalLook, onThemeChange } from '@/lib/terminal-theme'
 import { api } from './api'
-import { pathForPrompt, uploadImage } from './images'
+import { pathForPrompt, uploadFile, uploadImage } from './images'
 import { canRecord, discardAudio, onNativeAudio, recoverAudio, startRecording, stopRecording, transcribeAudio } from './voice'
 import { VoiceMeter } from './VoiceMeter'
 import { SkeletonTerminal } from './Skeleton'
@@ -45,7 +45,8 @@ const MORE_KEYS: [string, string][] = [
 const MIN_COLS = 20
 const MIN_ROWS = 5
 
-interface Attached { path: string; preview: string }
+// name só em arquivo que não é imagem: ele vai como caminho no texto, e não como anexo.
+interface Attached { path: string; preview: string; name?: string }
 // A tela da conversa desmonta ao abrir os arquivos ou outra aba; o que estava escrito em cada aba espera a volta.
 const drafts = new Map<string, { text: string; images: Attached[] }>()
 
@@ -364,8 +365,10 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     for (const file of files) {
       setUploading((count) => count + 1)
       try {
-        const image = await uploadImage(file)
-        setImages((list) => [...list, image])
+        // Foto vira anexo de imagem (HEIC é convertida no caminho); SVG é texto e vai como arquivo, como PDF e planilha.
+        const picture = file.type.startsWith('image/') && file.type !== 'image/svg+xml'
+        const attached = picture ? await uploadImage(file) : { ...await uploadFile(file), preview: '' }
+        setImages((list) => [...list, attached])
       } catch (error) {
         setComposerError(error instanceof Error ? error.message : String(error))
       } finally {
@@ -390,7 +393,9 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     setDraft('')
     setImages([])
     drafts.delete(tab.id)
-    void send({ type: 'send', tabId: tab.id, text, images: images.map((image) => pathForPrompt(image.path)) })
+    const files = images.filter((item) => item.name !== undefined).map((item) => item.path)
+    const pictures = images.filter((item) => item.name === undefined).map((item) => pathForPrompt(item.path))
+    void send({ type: 'send', tabId: tab.id, text, images: pictures, files })
       .catch((error: Error) => {
         if (!drafts.has(tab.id)) drafts.set(tab.id, sent)
         setDraft((current) => current || sent.text)
@@ -419,17 +424,23 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     </nav>
     {(() => {
       const ready = !sending && uploading === 0 && voice === 'idle' && connected && (draft.trim() !== '' || images.length > 0)
-      const thumbs = (images.length > 0 || uploading > 0) && <div className="composer-images" aria-label="Imagens anexadas">
-        {images.map((image) => <figure key={image.path}>
-          {image.preview ? <img src={image.preview} alt="Imagem anexada" /> : <Icon name="imagem" />}
-          <button type="button" className="remove-image" aria-label="Remover imagem" onClick={() => removeImage(image.path)}><Icon name="fechar" /></button>
-        </figure>)}
-        {uploading > 0 && <figure className="uploading" aria-label="Enviando imagem ao PC"><span /></figure>}
+      const thumbs = (images.length > 0 || uploading > 0) && <div className="composer-images" aria-label="Anexos">
+        {images.map((image) => image.name !== undefined
+          ? <figure key={image.path} className="attached-file" aria-label={`Arquivo anexado: ${image.name}`}>
+            <Icon name="arquivo" />
+            <figcaption>{image.name}</figcaption>
+            <button type="button" className="remove-image" aria-label={`Remover ${image.name}`} onClick={() => removeImage(image.path)}><Icon name="fechar" /></button>
+          </figure>
+          : <figure key={image.path}>
+            {image.preview ? <img src={image.preview} alt="Imagem anexada" /> : <Icon name="imagem" />}
+            <button type="button" className="remove-image" aria-label="Remover imagem" onClick={() => removeImage(image.path)}><Icon name="fechar" /></button>
+          </figure>)}
+        {uploading > 0 && <figure className="uploading" aria-label="Enviando anexo ao PC"><span /></figure>}
       </div>
       // Caixa única, como no app do Claude e do ChatGPT: miniaturas e texto dentro, imagem e enviar embaixo.
       // O rascunho de áudio vale enquanto este chat está aberto, inclusive com o app em segundo plano.
       return <form className="composer" data-no-swipe data-swipe-lock={voice === 'idle' ? undefined : ''} onSubmit={(event) => { event.preventDefault(); submit() }}>
-        <input ref={picker} type="file" accept="image/*" multiple hidden aria-label="Escolher imagem" onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void attach(files) }} />
+        <input ref={picker} type="file" multiple hidden aria-label="Escolher arquivo" onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void attach(files) }} />
         <div className="composer-box">
           {composerError && <p role="alert" className="composer-error"><Icon name="alerta" /><span>{composerError}</span><button type="button" aria-label="Dispensar aviso" onClick={() => setComposerError(null)}><Icon name="fechar" /></button></p>}
           {thumbs}
@@ -437,7 +448,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
           {/* Ditando, a linha vira descartar, ondas e transcrever: anexar e enviar saem para não mandar a mensagem no meio. */}
           {voice === 'idle' ? <div className="composer-actions">
             <div className="composer-tools">
-              <button type="button" className="attach-button" aria-label="Anexar imagem" disabled={!connected} onClick={() => picker.current?.click()}><Icon name="novaAba" /></button>
+              <button type="button" className="attach-button" aria-label="Anexar arquivo" disabled={!connected} onClick={() => picker.current?.click()}><Icon name="novaAba" /></button>
               {(draft !== '' || images.length > 0) && <button type="button" className="clear-draft" aria-label="Limpar mensagem" onClick={clear}><Icon name="excluir" /></button>}
             </div>
             <div className="composer-send">

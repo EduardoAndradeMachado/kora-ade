@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, statSync, utimesSync, writeFileSync, readFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { createServer, request, type Server } from 'node:http'
 import { execFileSync } from 'node:child_process'
 import { brotliDecompressSync, gunzipSync } from 'node:zlib'
@@ -81,7 +81,7 @@ async function setup(transcribe?: Transcribe): Promise<Setup> {
     accounts: async () => ({ activeUnknown: false, login: null, accounts: ['a1', 'a2'].map((id) => ({ id, email: `${id}@exemplo.com`, organizationName: null, subscriptionType: 'max', refreshTokenExpiresAt: null, weekly: null, active: id === active })) }),
     switchAccount: async (id) => { switched.push(id); active = id }
   })
-  server = new MobileServer({ configFile: config, rendererDir: dir, androidDir: join(dir, 'android'), imageDir: join(dir, 'imagens'), audioDir: join(dir, 'audio'), transcribe, pdfjsDir: resolve('node_modules', 'pdfjs-dist'), runtime, changed: () => {}, statusChanged: (status) => statuses.push(status), port: 0 })
+  server = new MobileServer({ configFile: config, rendererDir: dir, androidDir: join(dir, 'android'), imageDir: join(dir, 'imagens'), fileDir: join(dir, 'anexos'), audioDir: join(dir, 'audio'), transcribe, pdfjsDir: resolve('node_modules', 'pdfjs-dist'), runtime, changed: () => {}, statusChanged: (status) => statuses.push(status), port: 0 })
   servers.push(server)
   await server.start()
   const url = `http://127.0.0.1:${(server as unknown as { port: number }).port}`
@@ -388,6 +388,34 @@ describe('acesso ao servidor do celular', () => {
     }
     const accepted = await action(s.url, s.cookie, { type: 'send', tabId: 't', text: 'veja', images: [path] })
     expect((await accepted.json()).error ?? '').not.toContain('Imagem desconhecida')
+  })
+
+  it('recebe arquivo qualquer do celular com o nome original e só anexa o que ele mesmo gravou', async () => {
+    const s = await setup()
+    const pdf = Buffer.from('%PDF-1.4 conteúdo')
+    const post = (headers: Record<string, string>, body: Buffer): Promise<Response> => fetch(`${s.url}/api/attachment`, { method: 'POST', headers, body: new Uint8Array(body) })
+    const named = { 'content-type': 'application/octet-stream', 'x-kora-filename': encodeURIComponent('Relatório final.pdf') }
+    expect((await post(named, pdf)).status).toBe(401)
+    const sent = await post({ cookie: s.cookie, ...named }, pdf)
+    expect(sent.status).toBe(200)
+    const { path } = await sent.json()
+    expect(basename(path)).toBe('Relatório final.pdf')
+    expect(dirname(dirname(path))).toBe(join(s.dir, 'anexos'))
+    expect(readFileSync(path)).toEqual(pdf)
+    // Nome com caminho não escapa da pasta do envio.
+    const escaped = await (await post({ cookie: s.cookie, 'x-kora-filename': encodeURIComponent('..\\..\\fora.txt') }, pdf)).json()
+    expect(dirname(dirname(escaped.path))).toBe(join(s.dir, 'anexos'))
+    expect((await post({ cookie: s.cookie, ...named }, Buffer.alloc(0))).status).toBe(400)
+    expect((await post({ cookie: s.cookie, ...named }, Buffer.alloc(21 * 1024 * 1024))).status).toBe(413)
+    writeFileSync(join(s.dir, 'segredo.txt'), 'CHAVE')
+    writeFileSync(join(s.dir, 'anexos', 'raso.txt'), 'raso')
+    for (const files of [[join(s.dir, 'segredo.txt')], [join(s.dir, 'anexos', 'raso.txt')], [join(dirname(path), '..', '..', 'segredo.txt')], [join(s.dir, 'anexos', 'x', 'nao-existe.pdf')]]) {
+      const refused = await action(s.url, s.cookie, { type: 'send', tabId: 't', text: '', files })
+      expect(refused.status).toBe(400)
+      expect((await refused.json()).error).toContain('Arquivo desconhecido')
+    }
+    const accepted = await action(s.url, s.cookie, { type: 'send', tabId: 't', text: '', files: [path] })
+    expect((await accepted.json()).error ?? '').not.toMatch(/Arquivo desconhecido|Escreva uma mensagem/)
   })
 
   it('transcreve o áudio do celular pelo Transcritor do PC e não deixa o arquivo para trás', async () => {

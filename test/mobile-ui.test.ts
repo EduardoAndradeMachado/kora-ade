@@ -40,9 +40,9 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
   terminals.setMirroring(true)
   const write = terminals.write.bind(terminals)
   terminals.write = (id, data) => { written.push({ id, data }); write(id, data) }
-  const submitted: { text: string; images: string[] }[] = []
+  const submitted: { text: string; images: string[]; files: string[] }[] = []
   const submit = terminals.submit.bind(terminals)
-  terminals.submit = (id, text, agent, images = []) => { submitted.push({ text, images }); submit(id, text, agent, images) }
+  terminals.submit = (id, text, agent, images = [], files = []) => { submitted.push({ text, images, files }); submit(id, text, agent, images, files) }
   let transcriberInstalled = false
   const runtime: MobileRuntime = new MobileRuntime({
     state: () => state, commit: (next) => { state = next }, terminals, activities: new Map(),
@@ -69,7 +69,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     }
     return 'os testes do servidor do celular'
   }
-  const mobile: MobileServer = new MobileServer({ configFile: join(dir, 'mobile.json'), rendererDir: resolve('src/renderer'), imageDir: join(dir, 'imagens'), audioDir: join(dir, 'audio'), transcribe, devUrl, devAssetRoots: [resolve('node_modules'), resolve('src/shared'), join(dir, 'vite-cache')], runtime, changed: () => {}, port: 0 })
+  const mobile: MobileServer = new MobileServer({ configFile: join(dir, 'mobile.json'), rendererDir: resolve('src/renderer'), imageDir: join(dir, 'imagens'), fileDir: join(dir, 'anexos'), audioDir: join(dir, 'audio'), transcribe, devUrl, devAssetRoots: [resolve('node_modules'), resolve('src/shared'), join(dir, 'vite-cache')], runtime, changed: () => {}, port: 0 })
   const browser = await chromium.launch({ headless: true })
   try {
     await mobile.start()
@@ -128,14 +128,14 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
     // Sem rede nenhuma, o aviso aparece no campo de mensagem, onde a pessoa agiu, e não no topo do app.
     await page.route('**/api/image', (route) => route.abort('connectionreset'))
-    await page.getByLabel('Escolher imagem').setInputFiles({ name: 'print.png', mimeType: 'image/png', buffer: png })
+    await page.getByLabel('Escolher arquivo').setInputFiles({ name: 'print.png', mimeType: 'image/png', buffer: png })
     await browserExpect(page.locator('.composer').getByRole('alert')).toContainText('Não deu para enviar a imagem ao PC (sem conexão com o PC).')
     await browserExpect(page.locator('.error-banner')).toHaveCount(0)
     await page.unroute('**/api/image')
     // A primeira tentativa cai na rede, como a conexão velha depois da tela apagada: o envio tenta de novo sozinho.
     let dropped = 0
     await page.route('**/api/image', (route) => (dropped++ === 0 ? route.abort('connectionreset') : route.continue()))
-    await page.getByLabel('Escolher imagem').setInputFiles({ name: 'print.png', mimeType: 'image/png', buffer: png })
+    await page.getByLabel('Escolher arquivo').setInputFiles({ name: 'print.png', mimeType: 'image/png', buffer: png })
     await browserExpect(page.getByRole('img', { name: 'Imagem anexada' })).toBeVisible()
     expect(dropped).toBe(2)
     await page.unroute('**/api/image')
@@ -164,6 +164,20 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     expect(readFileSync(attached!)).toEqual(png)
     await browserExpect(page.getByRole('img', { name: 'Imagem anexada' })).toHaveCount(0)
     await page.screenshot({ path: join(resolve('e2e/.results/mobile-validation'), 'imagem-350.png') })
+
+    // Arquivo que não é imagem vai com o nome original e o caminho segue no texto, para o agente ler.
+    const pdf = Buffer.from('%PDF-1.4 relatório')
+    await page.getByLabel('Escolher arquivo').setInputFiles({ name: 'Relatório final.pdf', mimeType: 'application/pdf', buffer: pdf })
+    await browserExpect(page.getByLabel('Arquivo anexado: Relatório final.pdf')).toBeVisible()
+    await page.screenshot({ path: join(resolve('e2e/.results/mobile-validation'), 'arquivo-350.png') })
+    await page.getByRole('button', { name: 'Enviar', exact: true }).click()
+    await browserExpect(page.getByLabel('Arquivo anexado: Relatório final.pdf')).toHaveCount(0)
+    await expect.poll(() => submitted.at(-1)?.files.length ?? 0, { timeout: 10000 }).toBe(1)
+    const [sentFile] = submitted.at(-1)!.files
+    expect(sentFile).toMatch(/\\anexos\\[^\\]+\\Relatório final\.pdf$/)
+    expect(readFileSync(sentFile!)).toEqual(pdf)
+    expect(submitted.at(-1)!.images).toEqual([])
+    const sentBeforeDictation = submitted.length
 
     // O microfone só existe dentro do app Android: o navegador não abre o microfone em HTTP.
     await browserExpect(page.getByRole('button', { name: 'Gravar áudio' })).toHaveCount(0)
@@ -201,7 +215,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.getByRole('button', { name: 'Gravar áudio' }).click()
     // Ditando, anexar e enviar saem da linha: a mensagem não vai pela metade.
     await browserExpect(page.getByRole('button', { name: 'Enviar', exact: true })).toHaveCount(0)
-    await browserExpect(page.getByRole('button', { name: 'Anexar imagem' })).toHaveCount(0)
+    await browserExpect(page.getByRole('button', { name: 'Anexar arquivo' })).toHaveCount(0)
     // O app manda o nível do microfone enquanto grava; a barra mais nova, à direita, mostra a última leitura.
     const meter = page.getByRole('meter', { name: 'Nível do microfone' })
     await page.evaluate(() => { for (const valor of [0.2, 0.5, 0.9, 0.4, 0.75]) (window as unknown as { koraAudio(event: unknown): void }).koraAudio({ tipo: 'nivel', gravacao: 1, valor }) })
@@ -215,7 +229,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await browserExpect(field).toHaveValue('Rode os testes do servidor do celular')
     expect(heard).toEqual(['OggS-fala'])
     expect(readdirSync(join(dir, 'audio'))).toEqual([])
-    expect(submitted.at(-1)?.text).toBe("Write-Output 'OLHA_O_PRINT'")
+    expect(submitted).toHaveLength(sentBeforeDictation)
     await page.getByRole('button', { name: 'Gravar áudio' }).click()
     await page.getByRole('button', { name: 'Parar e transcrever' }).click()
     await browserExpect(page.locator('.composer').getByRole('alert')).toContainText('não está aberto no PC')

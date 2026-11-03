@@ -152,11 +152,13 @@ export class Terminals {
   // Texto digitado no celular: vai como colagem quando o programa aceita, para quebras de linha não enviarem antes.
   // O Claude e o Codex só anexam uma imagem quando o caminho chega sozinho numa colagem, como no Ctrl+V do PC;
   // junto com o texto ele fica como texto. Então cada imagem é uma colagem, com pausa para virar anexo.
-  submit(id: string, text: string, agent?: AgentKind, images: string[] = []): void {
+  // Arquivo que não é imagem não vira anexo: o caminho vai no fim do texto e o agente lê o arquivo por ele.
+  submit(id: string, text: string, agent?: AgentKind, images: string[] = [], files: string[] = []): void {
     const proc = this.sessions.get(id)
     if (!proc) throw new Error('A sessão está suspensa.')
     const bracketed = this.mirrors.get(id)?.terminal.modes.bracketedPasteMode ?? false
-    const message = text.trim() === '' ? '' : text
+    const typed = text.trim() === '' ? '' : text
+    const message = [typed, ...files.map((file) => (file.includes(' ') ? `"${file}"` : file))].filter(Boolean).join(' ')
     // O texto vem primeiro, como quem digita e depois dá Ctrl+V no print: a linha nunca começa pelo caminho, que o
     // shell executaria (o PowerShell abria o app de Fotos). No agente, cada caminho numa colagem vira anexo.
     const pastes = bracketed && agent
@@ -165,8 +167,8 @@ export class Terminals {
     pastes.forEach((paste, index) => setTimeout(() => {
       if (this.sessions.get(id) === proc) proc.write(paste)
     }, index * IMAGE_PASTE_GAP_MS))
-    // Só imagem num terminal comum: cola o caminho e não aperta Enter, para não executar o arquivo.
-    if (!agent && message === '') return
+    // Só anexo num terminal comum: cola o caminho e não aperta Enter, para não executar o arquivo.
+    if (!agent && typed === '') return
     setTimeout(() => {
       if (this.sessions.get(id) === proc) proc.write('\r')
     }, (pastes.length - 1) * IMAGE_PASTE_GAP_MS + (agent === 'codex' ? CODEX_SUBMIT_DELAY_MS : SUBMIT_DELAY_MS))

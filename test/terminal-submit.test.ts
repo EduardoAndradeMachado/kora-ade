@@ -82,6 +82,23 @@ it('só imagem num terminal comum cola o caminho sem apertar Enter, para não ex
   }
 })
 
+async function filePastes(agent: 'claude' | undefined, text: string, files: string[]): Promise<{ pastes: string[]; enter: boolean }> {
+  const { terminals, id, output } = await open(PASTES_PROGRAM, 200)
+  terminals.submit(id, text, agent, [], files)
+  setTimeout(() => terminals.write(id, END), 3000)
+  await expect.poll(() => output().includes('COLAGENS='), { timeout: 30_000, interval: 50 }).toBe(true)
+  return JSON.parse(/COLAGENS=(\{.*?\});/.exec(output())![1]!)
+}
+
+it('arquivo que não é imagem vai no fim do texto, entre aspas se tiver espaço, para o agente ler pelo caminho', async () => {
+  expect(await filePastes('claude', 'resuma', ['C:\\temp\\a\\Relatório final.pdf', 'C:\\temp\\b\\dados.csv']))
+    .toEqual({ pastes: ['resuma "C:\\temp\\a\\Relatório final.pdf" C:\\temp\\b\\dados.csv'], enter: true })
+})
+
+it('só arquivo num terminal comum cola o caminho sem apertar Enter', async () => {
+  expect(await filePastes(undefined, '', ['C:\\temp\\a\\dados.csv'])).toEqual({ pastes: ['C:\\temp\\a\\dados.csv'], enter: false })
+})
+
 it('no Codex o Enter espera o bastante para não virar quebra de linha da colagem', async () => {
   expect(await enterDelay('codex')).toBeGreaterThanOrEqual(400)
 })
