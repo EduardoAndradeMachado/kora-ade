@@ -59,8 +59,18 @@ const contentTypes: Record<string, string> = {
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.png': 'image/png',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif', '.bmp': 'image/bmp', '.ico': 'image/x-icon',
   '.pdf': 'application/pdf', '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8',
-  '.md': 'text/plain; charset=utf-8', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wasm': 'application/wasm'
+  '.md': 'text/plain; charset=utf-8', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg',
+  '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.weba': 'audio/webm', '.wasm': 'application/wasm'
 }
+// Um intervalo só ("bytes=0-", "bytes=100-199", "bytes=-500"), que é o que o player do navegador pede.
+export function byteRange(header: string | undefined, size: number): { start: number; end: number } | 'invalid' | null {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header?.trim() ?? '')
+  if (!match || (match[1] === '' && match[2] === '')) return null
+  const start = match[1] === '' ? Math.max(0, size - Number(match[2])) : Number(match[1])
+  const end = match[1] === '' || match[2] === '' ? size - 1 : Math.min(Number(match[2]), size - 1)
+  return start > end || start >= size ? 'invalid' : { start, end }
+}
+
 const PDFJS_DIRS = new Set(['wasm', 'cmaps', 'standard_fonts', 'iccs'])
 // Texto comprime bem (o JavaScript da página cai para menos de um terço); imagem e fonte já vêm comprimidas.
 const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.svg', '.json', '.webmanifest'])
@@ -401,7 +411,7 @@ export class MobileServer {
     return `/raw/${token}/${parts.map(encodeURIComponent).join('/')}`
   }
 
-  private raw(pathname: string, response: ServerResponse): void {
+  private raw(pathname: string, request: IncomingMessage, response: ServerResponse): void {
     const [, , token = '', ...encoded] = pathname.split('/')
     const link = this.rawLinks.get(token)
     if (!link || link.until < Date.now()) return json(response, 403, { error: 'Link vencido. Abra o arquivo de novo.' })
@@ -427,8 +437,18 @@ export class MobileServer {
     // Isolada, a página não tem origem: módulo de script, fonte e fetch dos arquivos dela só carregam com CORS aberto.
     // O link já é a chave; o CORS não dá acesso a mais nada.
     response.setHeader('access-control-allow-origin', '*')
-    response.writeHead(200, { 'content-type': contentTypes[extname(file).toLowerCase()] ?? 'application/octet-stream' })
-    createReadStream(file).on('error', () => response.destroy()).pipe(response)
+    const type = contentTypes[extname(file).toLowerCase()] ?? 'application/octet-stream'
+    const size = statSync(file).size
+    // O player de áudio pede pedaços (Range) para avançar sem baixar tudo; o tamanho dá a porcentagem do download.
+    const range = byteRange(request.headers.range, size)
+    if (range === 'invalid') {
+      response.writeHead(416, { 'content-range': `bytes */${size}` })
+      return void response.end()
+    }
+    const headers = { 'content-type': type, 'accept-ranges': 'bytes' }
+    if (range) response.writeHead(206, { ...headers, 'content-length': range.end - range.start + 1, 'content-range': `bytes ${range.start}-${range.end}/${size}` })
+    else response.writeHead(200, { ...headers, 'content-length': size })
+    createReadStream(file, range ?? {}).on('error', () => response.destroy()).pipe(response)
   }
 
   // Arquivos da própria biblioteca, iguais para todos: sem pareamento, mas só um nome de arquivo dentro das pastas dela.
@@ -581,7 +601,7 @@ export class MobileServer {
       const url = new URL(request.url ?? '/', `http://${host}`)
       // Antes da checagem de origem: o HTML do projeto roda isolado (sandbox), sem origem, e pede o CSS e as imagens
       // dele daqui. O link só lê arquivos e é a chave dele que autoriza, não o cookie do celular.
-      if (url.pathname.startsWith('/raw/') && request.method === 'GET') return this.raw(url.pathname, response)
+      if (url.pathname.startsWith('/raw/') && request.method === 'GET') return this.raw(url.pathname, request, response)
       const origin = request.headers.origin
       // Pelo relay a tela do app roda numa origem https; pela rede local, na http do próprio PC.
       const sameOrigin = origin === `http://${host}` || (certificate !== undefined && origin === `https://${host}`)

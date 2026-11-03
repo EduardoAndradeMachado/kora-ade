@@ -680,6 +680,17 @@ describe('arquivos do projeto pelo celular', () => {
     expect(page.headers.get('content-type')).toContain('text/html')
     expect(page.headers.get('content-security-policy')).toMatch(/^sandbox /)
     expect(await page.text()).toContain('<h1>Oi</h1>')
+    // O tamanho vai junto (é a porcentagem do download no app) e o player pede pedaços para avançar no áudio.
+    const size = statSync(join(s.dir, 'site', 'index.html')).size
+    expect(page.headers.get('content-length')).toBe(String(size))
+    const part = await fetch(`${s.url}${raw}`, { headers: { range: 'bytes=6-9' } })
+    expect(part.status).toBe(206)
+    expect(part.headers.get('content-range')).toBe(`bytes 6-9/${size}`)
+    expect(await part.text()).toBe('rel=')
+    const tail = await fetch(`${s.url}${raw}`, { headers: { range: 'bytes=-6' } })
+    expect([tail.status, await tail.text()]).toEqual([206, '>Oi</h1>'.slice(-6)])
+    const past = await fetch(`${s.url}${raw}`, { headers: { range: `bytes=${size}-` } })
+    expect([past.status, past.headers.get('content-range')]).toEqual([416, `bytes */${size}`])
     // O CSS da página vem pelo mesmo link, por caminho relativo, sem o cookie e de origem isolada (sandbox).
     const css = await fetch(`${s.url}${raw.replace(/index\.html$/, 'estilo.css')}`, { headers: { 'sec-fetch-site': 'cross-site' } })
     expect(css.status).toBe(200)
