@@ -186,11 +186,12 @@ class MainActivity : ComponentActivity() {
     private var chaveDoAudio = UUID.randomUUID().toString()
     // O último arquivo salvo em Downloads, para o Abrir do aviso na tela.
     private var ultimoBaixado: Pair<Uri, String>? = null
-    private var arquivoParaSalvar: Pair<File, String>? = null
+    // Salvar como: a pasta é escolhida antes de baixar, e o arquivo vem do PC direto para ela, com progresso.
+    private var pedidoParaSalvar: Pair<String, String>? = null
     private val salvarDocumento = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultado ->
         val destino = resultado.data?.data
-        val pendente = arquivoParaSalvar
-        arquivoParaSalvar = null
+        val pendente = pedidoParaSalvar
+        pedidoParaSalvar = null
         if (pendente == null) {
             if (resultado.resultCode == RESULT_OK && destino != null) {
                 runCatching { contentResolver.delete(destino, null, null) }
@@ -199,29 +200,42 @@ class MainActivity : ComponentActivity() {
             return@registerForActivityResult
         }
         if (resultado.resultCode != RESULT_OK || destino == null) {
-            pendente.first.delete()
             avisarBaixado(JSONObject().put("tipo", "cancelado"))
             return@registerForActivityResult
         }
-        Thread {
-            val salvo = runCatching {
-                pendente.first.inputStream().use { entrada ->
-                    checkNotNull(contentResolver.openOutputStream(destino, "wt")).use { entrada.copyTo(it) }
-                }
+        baixarArquivo(pendente.first, pendente.second, "salvarComo", destino)
+    }
+
+    private fun escolherOndeSalvar(endereco: String, nome: String) {
+        if (pedidoParaSalvar != null) return avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Espere a escolha do local anterior."))
+        val final = nomeParaSalvar(nome)
+        val tipo = MimeTypeMap.getSingleton().getMimeTypeFromExtension(final.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
+        pedidoParaSalvar = endereco to nome
+        runCatching {
+            salvarDocumento.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(tipo).putExtra(Intent.EXTRA_TITLE, final))
+        }.onFailure {
+            pedidoParaSalvar = null
+            avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Não deu para abrir o seletor de pastas do Android."))
+        }
+    }
+
+    // A página mostra quanto já veio; no máximo umas 5 vezes por segundo, para não ocupar a ponte com o JavaScript.
+    private fun copiarComProgresso(entrada: java.io.InputStream, saida: java.io.OutputStream, total: Long) {
+        val buffer = ByteArray(64 * 1024)
+        var recebidos = 0L
+        var ultimoAviso = 0L
+        while (true) {
+            val lidos = entrada.read(buffer)
+            if (lidos < 0) break
+            saida.write(buffer, 0, lidos)
+            recebidos += lidos
+            val agora = SystemClock.elapsedRealtime()
+            if (agora - ultimoAviso >= 200) {
+                ultimoAviso = agora
+                val evento = JSONObject().put("tipo", "progresso").put("recebidos", recebidos).put("total", total)
+                principal.post { avisarBaixado(evento) }
             }
-            pendente.first.delete()
-            principal.post {
-                salvo.onSuccess {
-                    ultimoBaixado = destino to pendente.second
-                    Toast.makeText(this, "Arquivo salvo no local escolhido.", Toast.LENGTH_SHORT).show()
-                    avisarBaixado(JSONObject().put("tipo", "salvo").put("nome", pendente.first.name).put("destino", "escolhido"))
-                }.onFailure {
-                    runCatching { contentResolver.delete(destino, null, null) }
-                    avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Não deu para salvar o arquivo no local escolhido."))
-                    Toast.makeText(this, "Não deu para salvar o arquivo no local escolhido.", Toast.LENGTH_LONG).show()
-                }
-            }
-        }.start()
+        }
     }
     // Nível do microfone para as barras do campo: quem fala vê que o áudio está chegando.
     private val medirNivel = object : Runnable {
@@ -270,13 +284,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        val caminhoPendente = savedInstanceState?.getString("arquivoParaSalvar")
-        val tipoPendente = savedInstanceState?.getString("tipoParaSalvar")
-        if (caminhoPendente != null && tipoPendente != null) {
-            val arquivo = File(caminhoPendente)
-            val raizDoCache = File(cacheDir, "compartilhar").canonicalPath + File.separator
-            if (arquivo.canonicalPath.startsWith(raizDoCache) && arquivo.isFile) arquivoParaSalvar = arquivo to tipoPendente
-        }
+        // O Android pode recriar a tela enquanto o seletor de pastas está aberto: o pedido volta daqui. O endereço é
+        // conferido de novo contra o Kora aberto antes de baixar.
+        val enderecoPendente = savedInstanceState?.getString("enderecoParaSalvar")
+        val nomePendente = savedInstanceState?.getString("nomeParaSalvar")
+        if (enderecoPendente != null && nomePendente != null) pedidoParaSalvar = enderecoPendente to nomePendente
         CookieManager.getInstance().setAcceptCookie(true)
         web = criarWebView()
         abertura = criarAbertura()
@@ -332,9 +344,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        arquivoParaSalvar?.let { (arquivo, tipo) ->
-            outState.putString("arquivoParaSalvar", arquivo.absolutePath)
-            outState.putString("tipoParaSalvar", tipo)
+        pedidoParaSalvar?.let { (endereco, nome) ->
+            outState.putString("enderecoParaSalvar", endereco)
+            outState.putString("nomeParaSalvar", nome)
         }
         super.onSaveInstanceState(outState)
     }
@@ -465,10 +477,15 @@ class MainActivity : ComponentActivity() {
 
     private fun avisarBaixado(evento: JSONObject) = web.evaluateJavascript("window.koraBaixado && window.koraBaixado($evento)", null)
 
-    private fun baixarArquivo(endereco: String, nome: String, acao: String = "baixar") {
+    // destino: a pasta que a pessoa escolheu no Salvar como; sem ele, Downloads/Kora ou compartilhar.
+    private fun baixarArquivo(endereco: String, nome: String, acao: String = "baixar", destino: Uri? = null) {
         val kora = atual
         val origem = kora?.let { enderecoParaBaixar(endereco, it.host, it.porta) }
-        if (origem == null) return avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Esse arquivo não é do Kora aberto."))
+        if (origem == null) {
+            destino?.let { runCatching { contentResolver.delete(it, null, null) } }
+            return avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Esse arquivo não é do Kora aberto."))
+        }
+        if (acao == "salvarComo" && destino == null) return escolherOndeSalvar(endereco, nome)
         val cookie = passagem?.takeIf { kora.host == "127.0.0.1" }?.cookie
         Thread {
             var salvo: Uri? = null
@@ -483,11 +500,18 @@ class MainActivity : ComponentActivity() {
                         conexao.getHeaderField("X-Kora-Erro")?.let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrNull() }?.trimEnd('.')
                             ?: "o PC respondeu ${conexao.responseCode}"
                     }
+                    val total = conexao.contentLengthLong
                     // O tipo segue a extensão quando o Android a conhece: com outro tipo, o MediaStore acrescentaria a
                     // extensão dele ao nome (README.md viraria README.md.txt).
                     val extensao = nomeParaSalvar(nome).substringAfterLast('.', "").lowercase()
                     val tipo = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extensao) ?: tipoDoArquivo(conexao.contentType)
-                    if (acao != "baixar") {
+                    if (destino != null) {
+                        salvo = destino
+                        conexao.inputStream.use { entrada -> checkNotNull(contentResolver.openOutputStream(destino, "wt")).use { copiarComProgresso(entrada, it, total) } }
+                        val final = contentResolver.query(destino, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+                        return@runCatching Triple(destino, tipo, final ?: nomeParaSalvar(nome))
+                    }
+                    if (acao == "compartilhar") {
                         val pasta = File(cacheDir, "compartilhar").apply { mkdirs() }
                         pasta.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 86_400_000 }?.forEach { antiga ->
                             antiga.listFiles()?.forEach { if (it.isFile) it.delete() }
@@ -495,7 +519,7 @@ class MainActivity : ComponentActivity() {
                         }
                         val temporario = File(File(pasta, UUID.randomUUID().toString()).apply { mkdirs() }, nomeParaSalvar(nome))
                         try {
-                            conexao.inputStream.use { entrada -> temporario.outputStream().use { entrada.copyTo(it) } }
+                            conexao.inputStream.use { entrada -> temporario.outputStream().use { copiarComProgresso(entrada, it, total) } }
                         } catch (erro: Exception) {
                             temporario.delete()
                             throw erro
@@ -510,7 +534,7 @@ class MainActivity : ComponentActivity() {
                     }
                     val uri = checkNotNull(contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, dados)) { "o Android não criou o arquivo" }
                     salvo = uri
-                    conexao.inputStream.use { entrada -> checkNotNull(contentResolver.openOutputStream(uri)).use { entrada.copyTo(it) } }
+                    conexao.inputStream.use { entrada -> checkNotNull(contentResolver.openOutputStream(uri)).use { copiarComProgresso(entrada, it, total) } }
                     check(contentResolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null) == 1) { "o Android não liberou o arquivo" }
                     // O Android acrescenta " (1)" quando o nome já existe: o aviso mostra o nome de verdade.
                     val final = contentResolver.query(uri, arrayOf(MediaStore.Downloads.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
@@ -526,34 +550,28 @@ class MainActivity : ComponentActivity() {
             principal.post {
                 if (isFinishing) return@post
                 resultado.onSuccess { (uri, tipo, final) ->
-                    if (acao != "baixar") {
+                    if (acao == "compartilhar") {
                         val arquivo = File(final)
-                        val abriu = runCatching {
-                            if (acao == "compartilhar") {
-                                val pedido = Intent(Intent.ACTION_SEND).setType(tipo)
-                                    .putExtra(Intent.EXTRA_STREAM, uri)
-                                    .apply { clipData = ClipData.newRawUri(arquivo.name, uri) }
-                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                startActivity(Intent.createChooser(pedido, "Compartilhar arquivo"))
-                                avisarBaixado(JSONObject().put("tipo", "compartilhado"))
-                            } else {
-                                check(arquivoParaSalvar == null) { "Espere a escolha do local anterior." }
-                                arquivoParaSalvar = arquivo to tipo
-                                salvarDocumento.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-                                    .setType(tipo).putExtra(Intent.EXTRA_TITLE, arquivo.name))
-                            }
-                        }
-                        abriu.onFailure {
-                            if (arquivoParaSalvar?.first == arquivo) arquivoParaSalvar = null
+                        runCatching {
+                            val pedido = Intent(Intent.ACTION_SEND).setType(tipo)
+                                .putExtra(Intent.EXTRA_STREAM, uri)
+                                .apply { clipData = ClipData.newRawUri(arquivo.name, uri) }
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            startActivity(Intent.createChooser(pedido, "Compartilhar arquivo"))
+                            avisarBaixado(JSONObject().put("tipo", "compartilhado"))
+                        }.onFailure {
                             arquivo.delete()
-                            avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Não deu para abrir o seletor de arquivos do Android."))
+                            avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Não deu para abrir o compartilhamento do Android."))
                         }
                         return@onSuccess
                     }
                     ultimoBaixado = uri to tipo
-                    avisarBaixado(JSONObject().put("tipo", "salvo").put("nome", final))
+                    val evento = JSONObject().put("tipo", "salvo").put("nome", final)
+                    if (destino != null) evento.put("destino", "escolhido")
+                    avisarBaixado(evento)
                 }.onFailure { erro ->
-                    avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Não deu para baixar o arquivo: ${erro.message.orEmpty().trimEnd('.')}."))
+                    val onde = if (destino != null) "salvar o arquivo no local escolhido" else "baixar o arquivo"
+                    avisarBaixado(JSONObject().put("tipo", "erro").put("mensagem", "Não deu para $onde: ${erro.message.orEmpty().trimEnd('.')}."))
                 }
             }
         }.start()
