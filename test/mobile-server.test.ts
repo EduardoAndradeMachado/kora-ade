@@ -691,6 +691,11 @@ describe('arquivos do projeto pelo celular', () => {
     expect([tail.status, await tail.text()]).toEqual([206, '>Oi</h1>'.slice(-6)])
     const past = await fetch(`${s.url}${raw}`, { headers: { range: `bytes=${size}-` } })
     expect([past.status, past.headers.get('content-range')]).toEqual([416, `bytes */${size}`])
+    const inverted = await fetch(`${s.url}${raw}`, { headers: { range: 'bytes=9-6' } })
+    expect([inverted.status, (await inverted.text()).length]).toEqual([200, size])
+    writeFileSync(join(s.dir, 'site', 'vazio.txt'), '')
+    const empty = await fetch(`${s.url}${raw.replace(/index\.html$/, 'vazio.txt')}`)
+    expect([empty.status, empty.headers.get('content-length'), await empty.text()]).toEqual([200, '0', ''])
     // O CSS da página vem pelo mesmo link, por caminho relativo, sem o cookie e de origem isolada (sandbox).
     const css = await fetch(`${s.url}${raw.replace(/index\.html$/, 'estilo.css')}`, { headers: { 'sec-fetch-site': 'cross-site' } })
     expect(css.status).toBe(200)

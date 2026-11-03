@@ -62,10 +62,12 @@ const contentTypes: Record<string, string> = {
   '.md': 'text/plain; charset=utf-8', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg',
   '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.weba': 'audio/webm', '.wasm': 'application/wasm'
 }
-// Um intervalo só ("bytes=0-", "bytes=100-199", "bytes=-500"), que é o que o player do navegador pede.
+// Um intervalo só ("bytes=0-", "bytes=100-199", "bytes=-500"), que é o que o player do navegador pede. Pedido que
+// não se entende (vários intervalos, "bytes=9-6") recebe o arquivo inteiro, como manda a RFC 9110.
 export function byteRange(header: string | undefined, size: number): { start: number; end: number } | 'invalid' | null {
   const match = /^bytes=(\d*)-(\d*)$/.exec(header?.trim() ?? '')
   if (!match || (match[1] === '' && match[2] === '')) return null
+  if (match[1] !== '' && match[2] !== '' && Number(match[1]) > Number(match[2])) return null
   const start = match[1] === '' ? Math.max(0, size - Number(match[2])) : Number(match[1])
   const end = match[1] === '' || match[2] === '' ? size - 1 : Math.min(Number(match[2]), size - 1)
   return start > end || start >= size ? 'invalid' : { start, end }
@@ -448,7 +450,10 @@ export class MobileServer {
     const headers = { 'content-type': type, 'accept-ranges': 'bytes' }
     if (range) response.writeHead(206, { ...headers, 'content-length': range.end - range.start + 1, 'content-range': `bytes ${range.start}-${range.end}/${size}` })
     else response.writeHead(200, { ...headers, 'content-length': size })
-    createReadStream(file, range ?? {}).on('error', () => response.destroy()).pipe(response)
+    if (size === 0) return void response.end()
+    // Sem Range o fim também é fixo: o arquivo pode crescer depois do stat (um log que o agente escreve), e byte além do
+    // content-length estraga a conexão.
+    createReadStream(file, range ?? { start: 0, end: size - 1 }).on('error', () => response.destroy()).pipe(response)
   }
 
   // Arquivos da própria biblioteca, iguais para todos: sem pareamento, mas só um nome de arquivo dentro das pastas dela.
