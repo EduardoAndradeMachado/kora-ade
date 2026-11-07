@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { z } from 'zod'
+import { replaceDurable } from './durable-file'
 import { createIdentity, fingerprintOf, type Identity } from './remote/identity'
 
 const FINGERPRINT = /^[0-9a-f]{64}$/
@@ -133,5 +134,5 @@ export class MobilePairingStore {
     this.save()
   }
 
-  private save(): void { writeFileSync(this.file, JSON.stringify(this.config, null, 2), 'utf8') }
+  private save(): void { replaceDurable(this.file, JSON.stringify(this.config, null, 2)) }
 }

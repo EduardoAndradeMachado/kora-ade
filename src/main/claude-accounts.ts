@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs'
-import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, readFile, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import * as pty from 'node-pty'
 import lockfile from 'proper-lockfile'
@@ -184,9 +184,18 @@ async function readCredentials(file: string): Promise<{ raw: Record<string, unkn
 }
 
 // O Claude Code segura o arquivo aberto por instantes ao ler; o rename do Windows falha com EPERM nesse meio-tempo.
-async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+export async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
   const tmp = `${file}.kora-${process.pid}.tmp`
-  await writeFile(tmp, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 })
+  const handle = await open(tmp, 'w', 0o600)
+  try {
+    await handle.writeFile(JSON.stringify(value, null, 2), 'utf8')
+    await handle.sync()
+  } catch (err) {
+    await handle.close()
+    await rm(tmp, { force: true })
+    throw err
+  }
+  await handle.close()
   for (let attempt = 0; ; attempt++) {
     try {
       await rename(tmp, file)
