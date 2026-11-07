@@ -78,10 +78,31 @@ function readHiddenOpen(): boolean {
   }
 }
 
+type ListFilter = 'projetos' | 'sessoes' | 'abertas'
+const FILTERS: { id: ListFilter; label: string; tip: string }[] = [
+  { id: 'projetos', label: 'Projetos', tip: 'Todos os projetos e categorias' },
+  { id: 'sessoes', label: 'Sessões', tip: 'Só os projetos com sessão, ativa ou inativa' },
+  { id: 'abertas', label: 'Abertas', tip: 'Só as sessões abertas agora, sem categorias' }
+]
+
+const FILTER_KEY = 'kora.sidebar.filtro'
+function readFilter(): ListFilter {
+  try {
+    const saved = localStorage.getItem(FILTER_KEY)
+    return FILTERS.find((f) => f.id === saved)?.id ?? 'projetos'
+  } catch {
+    return 'projetos'
+  }
+}
+
+const isSession = (tab: Tab): boolean => tab.kind === 'terminal'
+const isOpenSession = (tab: Tab): boolean => isSession(tab) && !isDormant(tab)
+
 export function Sidebar(props: Props): React.JSX.Element {
   const [menu, setMenu] = useState<{ x: number; y: number; project: Project } | null>(null)
   const [iconVersion, setIconVersion] = useState<Record<string, number>>({})
   const [hiddenOpen, setHiddenOpen] = useState(readHiddenOpen)
+  const [filter, setFilter] = useState(readFilter)
   const projectDrag = useReorderDrag('projects', 'y', (dragged, target, place) =>
     props.onArrangeProject(dragged, { kind: 'project', id: target, place })
   )
@@ -122,6 +143,21 @@ export function Sidebar(props: Props): React.JSX.Element {
     }
   }
 
+  const chooseFilter = (next: ListFilter): void => {
+    setFilter(next)
+    try {
+      localStorage.setItem(FILTER_KEY, next)
+    } catch {
+      // Sem armazenamento o filtro só não é lembrado na próxima abertura.
+    }
+  }
+
+  // Categoria e projeto novos nascem sem sessão: com filtro ligado sumiriam da lista assim que criados.
+  const startCreating = (parentId: string | null): void => {
+    chooseFilter('projetos')
+    setCreatingIn({ parentId })
+  }
+
   // Uma entrada por categoria, na ordem da lateral, recuada pelo nível; a categoria atual do projeto fica de fora.
   const moveTargets = (project: Project): MenuItem[] => {
     const { visible, hidden } = drawOrder(props.groups)
@@ -145,7 +181,7 @@ export function Sidebar(props: Props): React.JSX.Element {
   const groupMenuItems = (group: ProjectGroup): MenuItem[] => {
     const nested = Boolean(group.parentId && props.groups.some((g) => g.id === group.parentId))
     return [
-      { label: 'Nova subcategoria', icon: <Icon name="novaCategoria" />, onSelect: () => setCreatingIn({ parentId: group.id }) },
+      { label: 'Nova subcategoria', icon: <Icon name="novaCategoria" />, onSelect: () => startCreating(group.id) },
       { label: 'Renomear', icon: <Icon name="editar" />, onSelect: () => setRenameGroup((r) => ({ id: group.id, n: (r?.n ?? 0) + 1 })) },
       'separator',
       { label: 'Mover para cima', icon: <Icon name="setaCima" />, onSelect: () => props.onGroupAction({ kind: 'move', id: group.id, delta: -1 }) },
@@ -240,19 +276,21 @@ export function Sidebar(props: Props): React.JSX.Element {
 
   const renderProject = (project: Project, depth = 0): React.JSX.Element => {
     const selected = project.id === props.selectedId
-    const tabs = props.tabs[project.id] ?? []
-    const open = !project.collapsed
+    const onlyOpen = filter === 'abertas'
+    const tabs = (props.tabs[project.id] ?? []).filter((t) => !onlyOpen || isOpenSession(t))
+    const open = onlyOpen || !project.collapsed
     const lost = props.missing.has(project.id)
     return (
       <div key={project.id} className="mb-0.5" style={depth ? { marginLeft: depth * 12 } : undefined}>
         <div
           data-tip={project.path}
           data-project-row
-          {...projectDrag.itemProps(project.id)}
+          // Sem categorias na tela, soltar sobre um projeto mudaria o outro de categoria sem ninguém ver.
+          {...(onlyOpen ? undefined : projectDrag.itemProps(project.id))}
           // Com abas, o nome faz o mesmo que a setinha; sem abas, selecionar já mostra a tela para abrir Claude, Codex ou Terminal.
           onClick={() => {
             props.onSelectProject(project.id)
-            if (tabs.length > 0) toggle(project)
+            if (tabs.length > 0 && !onlyOpen) toggle(project)
           }}
           onContextMenu={(e) => {
             e.preventDefault()
@@ -273,7 +311,7 @@ export function Sidebar(props: Props): React.JSX.Element {
               e.stopPropagation()
               toggle(project)
             }}
-            className={cn(iconButton, tabs.length === 0 && 'invisible')}
+            className={cn(iconButton, (tabs.length === 0 || onlyOpen) && 'invisible')}
           >
             <Icon name="expandir" className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
           </button>
@@ -333,12 +371,19 @@ export function Sidebar(props: Props): React.JSX.Element {
     )
   }
 
+  const listed = filter === 'projetos' ? props.projects : props.projects.filter((p) => (props.tabs[p.id] ?? []).some(isSession))
+  const withOpenSession = props.projects.filter((p) => (props.tabs[p.id] ?? []).some(isOpenSession))
   const groupIds = new Set(props.groups.map((g) => g.id))
-  const ungrouped = props.projects.filter((p) => !p.hidden && !(p.groupId && groupIds.has(p.groupId)))
-  const hiddenSolo = props.projects.filter((p) => p.hidden)
-  const roots = childrenOf(props.groups, null)
+  const ungrouped = listed.filter((p) => !p.hidden && !(p.groupId && groupIds.has(p.groupId)))
+  const hiddenSolo = listed.filter((p) => p.hidden)
+  const showGroup = (group: ProjectGroup): boolean => {
+    if (filter === 'projetos') return true
+    const inside = descendantIds(props.groups, group.id)
+    return listed.some((p) => !p.hidden && p.groupId && (p.groupId === group.id || inside.has(p.groupId)))
+  }
+  const roots = childrenOf(props.groups, null).filter(showGroup)
   const hiddenRoots = roots.filter((g) => g.hidden)
-  const hiddenGroupProjects = props.projects.filter(
+  const hiddenGroupProjects = listed.filter(
     (p) => !p.hidden && p.groupId && hiddenRoots.some((r) => r.id === p.groupId || descendantIds(props.groups, r.id).has(p.groupId!))
   )
   const hiddenCount = hiddenSolo.length + hiddenGroupProjects.length
@@ -348,7 +393,9 @@ export function Sidebar(props: Props): React.JSX.Element {
       key={group.id}
       group={group}
       groups={props.groups}
-      projects={props.projects}
+      projects={listed}
+      showGroup={showGroup}
+      forceOpen={filter === 'sessoes'}
       depth={depth}
       renderProject={renderProject}
       renderSection={section}
@@ -387,18 +434,43 @@ export function Sidebar(props: Props): React.JSX.Element {
             {dragging === 'groups' ? 'Solte aqui para virar categoria principal' : 'Solte aqui para tirar da categoria'}
           </div>
         )}
-        <span className="text-xs font-medium text-muted-foreground">Projetos</span>
+        <div role="group" aria-label="Filtrar a lista" className="-ml-1 flex items-center gap-0.5">
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              data-tip={f.tip}
+              aria-pressed={filter === f.id}
+              onClick={() => chooseFilter(f.id)}
+              className={cn(
+                'rounded px-1 py-0.5 text-xs font-medium',
+                filter === f.id ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center gap-0.5">
           <button
             type="button"
             data-tip="Nova categoria"
             aria-label="Nova categoria"
-            onClick={() => setCreatingIn({ parentId: null })}
+            onClick={() => startCreating(null)}
             className={cn(iconButton, accentOnHover)}
           >
             <Icon name="novaCategoria" />
           </button>
-          <button type="button" data-tip="Adicionar projeto" aria-label="Adicionar projeto" onClick={props.onAdd} className={cn(iconButton, accentOnHover)}>
+          <button
+            type="button"
+            data-tip="Adicionar projeto"
+            aria-label="Adicionar projeto"
+            onClick={() => {
+              chooseFilter('projetos')
+              props.onAdd()
+            }}
+            className={cn(iconButton, accentOnHover)}
+          >
             <Icon name="novoProjeto" />
           </button>
         </div>
@@ -411,11 +483,17 @@ export function Sidebar(props: Props): React.JSX.Element {
           </p>
         )}
 
-        {ungrouped.map((p) => renderProject(p))}
-        {roots.filter((g) => !g.hidden).map((g) => section(g, 0))}
+        {filter === 'abertas' ? withOpenSession.map((p) => renderProject(p)) : ungrouped.map((p) => renderProject(p))}
+        {filter !== 'abertas' && roots.filter((g) => !g.hidden).map((g) => section(g, 0))}
         {creator(null, 0)}
 
-        {props.projects.length > 0 && (
+        {props.projects.length > 0 && filter !== 'projetos' && (filter === 'abertas' ? withOpenSession : listed).length === 0 && (
+          <p className="px-2 py-3 text-xs text-muted-foreground">
+            {filter === 'abertas' ? 'Nenhuma sessão aberta.' : 'Nenhum projeto com sessão.'}
+          </p>
+        )}
+
+        {(filter === 'projetos' ? props.projects.length > 0 : filter === 'sessoes' && hiddenCount > 0) && (
           <div
             {...mergeDragHandlers(
               projectDrag.zoneProps((id) => props.onArrangeProject(id, { kind: 'section', section: { hidden: true } })),
@@ -439,6 +517,7 @@ export function Sidebar(props: Props): React.JSX.Element {
           </div>
         )}
         {hiddenOpen &&
+          (filter === 'projetos' || (filter === 'sessoes' && hiddenCount > 0)) &&
           (hiddenSolo.length > 0 || hiddenRoots.length > 0 ? (
             <>
               {hiddenSolo.map((p) => renderProject(p))}
@@ -551,6 +630,9 @@ interface GroupSectionProps {
   group: ProjectGroup
   groups: ProjectGroup[]
   projects: Project[]
+  showGroup(group: ProjectGroup): boolean
+  // Categoria recolhida esconderia justamente os projetos que o filtro veio mostrar.
+  forceOpen: boolean
   depth: number
   renderProject(project: Project, depth: number): React.JSX.Element
   renderSection(group: ProjectGroup, depth: number): React.JSX.Element
@@ -600,8 +682,8 @@ function GroupSection(props: GroupSectionProps): React.JSX.Element {
   const inside = descendantIds(props.groups, group.id)
   const own = props.projects.filter((p) => !p.hidden && p.groupId === group.id)
   const total = props.projects.filter((p) => !p.hidden && p.groupId && (p.groupId === group.id || inside.has(p.groupId))).length
-  const children = childrenOf(props.groups, group.id)
-  const open = !group.collapsed
+  const children = childrenOf(props.groups, group.id).filter(props.showGroup)
+  const open = props.forceOpen || !group.collapsed
   const creating = props.creator(group.id, depth + 1)
 
   return (
@@ -609,7 +691,7 @@ function GroupSection(props: GroupSectionProps): React.JSX.Element {
       <div
         role="button"
         data-group-row
-        data-tip={open ? `Recolher ${group.name}` : `Expandir ${group.name}`}
+        data-tip={props.forceOpen ? undefined : open ? `Recolher ${group.name}` : `Expandir ${group.name}`}
         draggable
         onDragStart={(e) => {
           e.dataTransfer.setData(mimeFor('groups'), group.id)
@@ -619,7 +701,9 @@ function GroupSection(props: GroupSectionProps): React.JSX.Element {
           projectZone.zoneProps((id) => props.onArrangeProject(id, { kind: 'section', section: { hidden: false, groupId: group.id } })),
           groupHandlers
         )}
-        onClick={() => props.onAction({ kind: 'toggle', id: group.id })}
+        onClick={() => {
+          if (!props.forceOpen) props.onAction({ kind: 'toggle', id: group.id })
+        }}
         onContextMenu={(e) => {
           e.preventDefault()
           e.stopPropagation()
@@ -633,7 +717,7 @@ function GroupSection(props: GroupSectionProps): React.JSX.Element {
           groupHint === 'after' && 'shadow-[inset_0_-3px_0_var(--brand-amber)]'
         )}
       >
-        <span className="p-0.5">
+        <span className={cn('p-0.5', props.forceOpen && 'invisible')}>
           <Icon name="expandir" className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
         </span>
         <EditableTitle
