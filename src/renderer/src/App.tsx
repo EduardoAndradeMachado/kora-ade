@@ -105,6 +105,7 @@ export function App(): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<Record<string, string | undefined>>({})
   const [rightPanelOpen, setRightPanelOpen] = useState(initialRightPanel)
   const [error, setError] = useState<string | null>(null)
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null)
   const [tabMenu, setTabMenu] = useState<{ projectId: string; tabId: string; where: TabPlace; x: number; y: number } | null>(null)
   const [renameRequest, setRenameRequest] = useState<RenameRequest | null>(null)
   const [commitDrafts, setCommitDrafts] = useState<Record<string, string>>({})
@@ -213,7 +214,8 @@ export function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    void Promise.all([window.kora.getState(), window.kora.takeResumeAfterUpdate()]).then(([s, resume]) => {
+    void Promise.all([window.kora.getState(), window.kora.takeResumeAfterUpdate(), window.kora.takeRecoveryNotice()]).then(([s, resume, notice]) => {
+      setRecoveryNotice(notice)
       const restored = restoreTabs(s)
       // Quem rodava antes da atualização volta a rodar, como no "Continuar chat", sem trocar a aba aberta.
       for (const [projectId, list] of Object.entries(restored)) {
@@ -964,6 +966,12 @@ export function App(): React.JSX.Element {
         />
         {error && (
           <div className="border-b bg-destructive/10 px-3 py-1.5 text-xs text-destructive">{error}</div>
+        )}
+        {recoveryNotice && (
+          <div className="flex items-start justify-between gap-3 border-b bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+            <span className="min-w-0 break-words">{recoveryNotice}</span>
+            <button type="button" className="shrink-0 underline" onClick={() => setRecoveryNotice(null)}>Entendi</button>
+          </div>
         )}
 
         <div className="relative flex-1 bg-canvas">

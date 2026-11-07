@@ -51,11 +51,11 @@ describe('Scrollbacks', () => {
     expect(saved).not.toContain('linha-0-')
   })
 
-  it('apaga o histórico da aba que não existe mais e preserva o das outras', () => {
+  it('apaga o histórico da aba fechada e preserva o das outras, mesmo as que o estado não conhece', () => {
     const { dir, scrollbacks } = store()
     scrollbacks.save('viva', 'conteúdo')
     scrollbacks.save('fechada', 'conteúdo')
-    scrollbacks.prune(['viva'])
+    scrollbacks.prune(['fechada'])
     expect(scrollbacks.load('viva')).toBe('conteúdo')
     expect(scrollbacks.load('fechada')).toBeNull()
     expect(readFileSync(join(dir, 'viva.txt'), 'utf8')).toBe('conteúdo')
@@ -66,7 +66,7 @@ describe('Scrollbacks', () => {
     scrollbacks.save('viva', 'conteúdo')
     writeFileSync(join(dir, 'viva.txt.tmp'), 'meio', 'utf8')
     writeFileSync(join(dir, 'outra.txt.tmp'), 'meio', 'utf8')
-    scrollbacks.prune(['viva'])
+    scrollbacks.prune([])
     expect(() => readFileSync(join(dir, 'viva.txt.tmp'))).toThrow()
     expect(() => readFileSync(join(dir, 'outra.txt.tmp'))).toThrow()
   })

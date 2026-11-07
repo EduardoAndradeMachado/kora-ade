@@ -71,6 +71,7 @@ export interface KoraApi {
   windowsBuild: number
 
   getState(): Promise<KoraState>
+  takeRecoveryNotice(): Promise<string | null>
   // Abas que rodavam quando a atualização fechou o app; só a primeira chamada recebe a lista.
   takeResumeAfterUpdate(): Promise<string[]>
   setTheme(theme: ThemePreference): Promise<KoraState>

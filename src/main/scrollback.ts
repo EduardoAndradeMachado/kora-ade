@@ -40,10 +40,10 @@ export class Scrollbacks {
     }
   }
 
-  // Fecha o ciclo: só fica o histórico de aba que ainda existe. Vale para aba fechada, projeto removido,
-  // arquivo de versão anterior e sobra de gravação interrompida.
-  prune(keep: Iterable<string>): void {
-    const alive = new Set(keep)
+  // Apaga o histórico das abas fechadas e a sobra de gravação interrompida. Quem não está na lista fica: arquivo sem
+  // aba no estado pode ser de uma aba que o estado perdeu.
+  prune(closed: Iterable<string>): void {
+    const gone = new Set(closed)
     let names: string[]
     try {
       names = readdirSync(this.dir)
@@ -52,17 +52,17 @@ export class Scrollbacks {
     }
     for (const name of names) {
       const id = FILE.exec(name)?.[1]
-      if (id && !alive.has(id)) {
+      if (id && gone.has(id)) {
         try {
           rmSync(join(this.dir, name), { force: true })
         } catch {
-          // Arquivo em uso por outro processo: a próxima abertura tenta de novo.
+          // Arquivo em uso por outro processo: fica órfão, limitado ao tamanho de um histórico.
         }
       } else if (name.endsWith('.txt.tmp')) {
         try {
           rmSync(join(this.dir, name), { force: true })
         } catch {
-          // Idem.
+          // Sobra de gravação em uso: a próxima abertura tenta de novo.
         }
       }
     }

@@ -322,6 +322,15 @@ export class KoraRun {
   }
 }
 
+// Segunda abertura com o Kora já aberto, como o duplo clique no atalho: precisa sair sem tocar em nada.
+export async function launchSecondInstance(env: KoraEnv): Promise<void> {
+  const second = spawn(appExe, appArgs, { cwd: ROOT, env: appEnv(env), stdio: 'ignore' })
+  await new Promise<void>((done, failed) => {
+    second.once('exit', () => done())
+    second.once('error', failed)
+  })
+}
+
 export async function launch(env: KoraEnv): Promise<KoraRun> {
   const app = await _electron.launch({
     executablePath: appExe,

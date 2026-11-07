@@ -14,6 +14,7 @@ const api: KoraApi = {
   windowsBuild: ipcRenderer.sendSync('runtime:windows-build') as number,
 
   getState: () => ipcRenderer.invoke('state:get'),
+  takeRecoveryNotice: () => ipcRenderer.invoke('state:recovery-notice'),
   takeResumeAfterUpdate: () => ipcRenderer.invoke('tabs:resume-after-update'),
   setTheme: (theme) => ipcRenderer.invoke('settings:theme', theme),
   setSizes: (sizes) => ipcRenderer.invoke('settings:sizes', sizes),

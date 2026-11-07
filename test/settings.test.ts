@@ -28,13 +28,13 @@ describe('zoom da interface, texto do terminal e texto dos arquivos', () => {
   it('valores escolhidos sobrevivem ao reabrir; valor fora do limite no arquivo vira o padrão', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'kora-settings-')), 'kora-state.json')
     saveState(file, { ...emptyState(), settings: { ...emptyState().settings, zoom: 1.3, terminalFontSize: 18, fileFontSize: 16 } })
-    expect(loadState(file).settings).toMatchObject({ zoom: 1.3, terminalFontSize: 18, fileFontSize: 16 })
+    expect(loadState(file).state.settings).toMatchObject({ zoom: 1.3, terminalFontSize: 18, fileFontSize: 16 })
 
     writeFileSync(
       file,
       JSON.stringify({ version: 2, projects: [], tabs: [], settings: { theme: 'dark', zoom: 9, terminalFontSize: 3, fileFontSize: 99 } })
     )
-    expect(loadState(file).settings).toEqual({
+    expect(loadState(file).state.settings).toEqual({
       theme: 'dark',
       zoom: 1,
       terminalFontSize: 14,
@@ -47,7 +47,7 @@ describe('zoom da interface, texto do terminal e texto dos arquivos', () => {
   it('estado salvo antes do texto dos arquivos existir abre com o padrão dele, sem perder os outros tamanhos', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'kora-settings-')), 'kora-state.json')
     writeFileSync(file, JSON.stringify({ version: 2, projects: [], tabs: [], settings: { theme: 'light', zoom: 1.2, terminalFontSize: 16 } }))
-    expect(loadState(file).settings).toEqual({
+    expect(loadState(file).state.settings).toEqual({
       theme: 'light',
       zoom: 1.2,
       terminalFontSize: 16,
@@ -60,16 +60,16 @@ describe('zoom da interface, texto do terminal e texto dos arquivos', () => {
   it('chaves dos avisos ficam salvas; valor estragado no arquivo volta a ligado', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'kora-settings-')), 'kora-state.json')
     saveState(file, { ...emptyState(), settings: { ...emptyState().settings, alerts: { sound: false, windowsNotification: true } } })
-    expect(loadState(file).settings.alerts).toEqual({ sound: false, windowsNotification: true })
+    expect(loadState(file).state.settings.alerts).toEqual({ sound: false, windowsNotification: true })
     writeFileSync(file, JSON.stringify({ version: 2, projects: [], tabs: [], settings: { alerts: { sound: 'sim' } } }))
-    expect(loadState(file).settings.alerts).toEqual({ sound: true, windowsNotification: true })
+    expect(loadState(file).state.settings.alerts).toEqual({ sound: true, windowsNotification: true })
   })
 
   it('quebra de linha dos arquivos fica salva; estado sem ela ou valor estragado abre desligada', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'kora-settings-')), 'kora-state.json')
     saveState(file, { ...emptyState(), settings: { ...emptyState().settings, fileWordWrap: true } })
-    expect(loadState(file).settings.fileWordWrap).toBe(true)
+    expect(loadState(file).state.settings.fileWordWrap).toBe(true)
     writeFileSync(file, JSON.stringify({ version: 2, projects: [], tabs: [], settings: { fileWordWrap: 'sim' } }))
-    expect(loadState(file).settings.fileWordWrap).toBe(false)
+    expect(loadState(file).state.settings.fileWordWrap).toBe(false)
   })
 })

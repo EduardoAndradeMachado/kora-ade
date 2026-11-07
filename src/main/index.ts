@@ -4,7 +4,7 @@ import { homedir, hostname, release } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray } from 'electron'
 import { is } from '@electron-toolkit/utils'
-import { loadState, saveState } from './store'
+import { isReadOnly, loadState, recoveryMessage, saveState } from './store'
 import { addProject, applyLayout, forgetSessionName, mergeTabs, missingProjectIds, namedSessions, relocateProject, removeProject, renameProject, setProjectCollapsed, setTabAgent } from './projects'
 import { Terminals } from './terminals'
 import { MobileServer } from './mobile-server'
@@ -88,6 +88,7 @@ const CLAUDE_ACCOUNTS_SYNC_MS = 60_000
 let mainWindow: BrowserWindow | null = null
 let state: KoraState
 let stateFile: string
+let recoveryNotice: string | null = null
 let scrollbacks: Scrollbacks | undefined
 
 // Job Object: se o Kora morrer à força, o Windows encerra os shells (e o Claude/Codex dentro deles).
@@ -189,16 +190,21 @@ const agentFolders = new FolderWatch(
 )
 
 function commit(next: KoraState): KoraState {
+  const before = state.tabs
   saveState(stateFile, next)
   state = next
+  // Sessão que não grava devolve a aba na próxima abertura: o histórico dela precisa continuar lá.
+  if (!isReadOnly(stateFile)) forgetScrollbacks(before)
   mobileServer?.publishState()
   return state
 }
 
-// Histórico de terminal é um arquivo por aba: quando a aba sai do estado (fechou de verdade, projeto
-// removido), o arquivo sai junto. Roda depois de gravar as abas, nunca antes.
-function pruneScrollbacks(): void {
-  scrollbacks?.prune(state.tabs.map((t) => t.id))
+// Histórico de terminal é um arquivo por aba: sai junto com a aba que acabou de deixar o estado (fechou de
+// verdade, projeto removido, celular). Comparar com a pasta inteira apagaria o histórico de aba que um estado
+// recuperado não conhece. Roda depois de gravar as abas, nunca antes.
+function forgetScrollbacks(before: KoraState['tabs']): void {
+  const kept = new Set(state.tabs.map((t) => t.id))
+  scrollbacks?.prune(before.filter((t) => !kept.has(t.id)).map((t) => t.id))
 }
 
 const sameAgent = (a: AgentSession | null, b: AgentSession | null): boolean =>
@@ -565,6 +571,11 @@ function registerIpc(): void {
     event.returnValue = Number(release().split('.')[2]) || 0
   })
   ipcMain.handle('state:get', () => state)
+  ipcMain.handle('state:recovery-notice', () => {
+    const notice = recoveryNotice
+    recoveryNotice = null
+    return notice
+  })
   ipcMain.handle('tabs:resume-after-update', () => {
     const ids = resumeAfterUpdate
     resumeAfterUpdate = []
@@ -615,9 +626,7 @@ function registerIpc(): void {
   ipcMain.handle('project:remove', (_e, id: string) => {
     for (const tab of state.tabs.filter((t) => t.projectId === id)) terminals.kill(tab.id)
     watchers.unwatch(id)
-    const next = commit(removeProject(state, id))
-    pruneScrollbacks()
-    return next
+    return commit(removeProject(state, id))
   })
 
   ipcMain.handle('project:missing', () => missingProjectIds(state, isDirectory))
@@ -895,13 +904,17 @@ function registerIpc(): void {
   })
 
   ipcMain.on('tabs:save-sync', (event, tabs: TabRef[], baseline?: TabRef[]) => {
-    commit(mergeTabs(state, tabs, baseline))
-    pruneScrollbacks()
-    event.returnValue = true
+    try {
+      commit(mergeTabs(state, tabs, baseline))
+    } catch (err) {
+      console.error('[kora] falha ao salvar as abas ao fechar', err)
+    } finally {
+      // sendSync espera esta resposta: sem ela a janela trava ao fechar.
+      event.returnValue = true
+    }
   })
   ipcMain.handle('tabs:save', (_e, tabs: TabRef[], baseline?: TabRef[]) => {
     commit(mergeTabs(state, tabs, baseline))
-    pruneScrollbacks()
   })
 
   ipcMain.handle('tab:set-agent', (_e, tab: TabRef, agent: unknown) => {
@@ -1040,7 +1053,9 @@ nativeTheme.on('updated', () => mainWindow?.setTitleBarOverlay(titleBarOverlay()
 void app.whenReady().then(() => {
   if (!primaryInstance) return
   stateFile = join(app.getPath('userData'), 'kora-state.json')
-  state = loadState(stateFile)
+  const loaded = loadState(stateFile)
+  state = loaded.state
+  recoveryNotice = loaded.recovery && recoveryMessage(loaded.recovery)
   // Aba de projeto cuja pasta sumiu fica suspensa, para a tela de localizar a pasta aparecer em vez de um erro.
   resumeAfterUpdate = takeLiveTabs(resumeFile()).filter((id) => {
     const tab = state.tabs.find((t) => t.id === id)
@@ -1049,7 +1064,7 @@ void app.whenReady().then(() => {
   })
   if (resumeAfterUpdate.length) updaterLog(`reabrindo ${resumeAfterUpdate.length} aba(s) que rodavam antes da atualização`)
   scrollbacks = new Scrollbacks(join(app.getPath('userData'), 'scrollback'))
-  pruneScrollbacks()
+  scrollbacks.prune([])
   job = new KillOnCloseJob()
   registry = new ProcessRegistry(join(app.getPath('userData'), 'processes.json'))
   survivors = new Map(registry.findSurvivors().map((s) => [s.key, s]))

@@ -20,20 +20,20 @@ describe('persistência de projetos', () => {
     state = addProject(state, join(dir, 'beta'))
     saveState(file, state)
 
-    const reopened = loadState(file)
+    const reopened = loadState(file).state
 
     expect(reopened.projects.map((p) => p.name)).toEqual(['alpha', 'beta'])
     expect(reopened.projects.map((p) => p.path)).toEqual([join(dir, 'alpha'), join(dir, 'beta')])
   })
 
   it('primeira execução sem arquivo começa vazia', () => {
-    expect(loadState(file).projects).toEqual([])
+    expect(loadState(file).state.projects).toEqual([])
   })
 
   it('arquivo corrompido é preservado em backup, não apagado pelo próximo save', () => {
     writeFileSync(file, '{"version":1,"projects":[{"id":"x"', 'utf8')
 
-    const state = loadState(file)
+    const state = loadState(file).state
     saveState(file, state)
 
     const backup = readdirSync(dir).find((f) => f.includes('.corrupt-'))
@@ -50,7 +50,7 @@ describe('persistência de projetos', () => {
     const v1 = { version: 1, projects: [{ id: 'p1', name: 'meu-app', path: 'C:\\x\\meu-app' }] }
     writeFileSync(file, JSON.stringify(v1), 'utf8')
 
-    const state = loadState(file)
+    const state = loadState(file).state
 
     expect(state.projects).toEqual(v1.projects)
     expect(state.tabs).toEqual([])
@@ -65,7 +65,7 @@ describe('persistência de projetos', () => {
     state = setTabAgent(state, 't1', { kind: 'codex', sessionId })
     saveState(file, state)
 
-    expect(loadState(file).tabs).toEqual([
+    expect(loadState(file).state.tabs).toEqual([
       { id: 't1', projectId, title: 'Claude', titleLocked: false, agent: { kind: 'codex', sessionId } }
     ])
   })
@@ -78,7 +78,7 @@ describe('persistência de projetos', () => {
     state = setTabAgent(state, 't1', { kind: 'claude', sessionId, name: 'Hierarquia de pastas', derivedName: 'alpha-d6' })
     saveState(file, state)
 
-    expect(loadState(file).tabs[0]!.agent).toEqual({ kind: 'claude', sessionId, name: 'Hierarquia de pastas' })
+    expect(loadState(file).state.tabs[0]!.agent).toEqual({ kind: 'claude', sessionId, name: 'Hierarquia de pastas' })
   })
 
   it('save do renderer (título/ordem) não apaga a sessão detectada pelo main', () => {
@@ -97,29 +97,29 @@ describe('persistência de projetos', () => {
     const projectId = state.projects[0]!.id
     state = mergeTabs(state, [{ id: 't1', projectId, title: 'Refatorar login', titleLocked: true }])
     saveState(file, state)
-    expect(loadState(file).tabs[0]).toMatchObject({ title: 'Refatorar login', titleLocked: true })
+    expect(loadState(file).state.tabs[0]).toMatchObject({ title: 'Refatorar login', titleLocked: true })
   })
 
   it('aba salva antes de existir renomeação abre como não travada', () => {
     const saved = { version: 2, projects: [{ id: 'p1', name: 'a', path: 'C:\\a' }], tabs: [{ id: 't1', projectId: 'p1', title: 'x', agent: null }] }
     writeFileSync(file, JSON.stringify(saved), 'utf8')
-    expect(loadState(file).tabs[0]?.titleLocked).toBe(false)
+    expect(loadState(file).state.tabs[0]?.titleLocked).toBe(false)
     expect(readdirSync(dir).some((f) => f.includes('.corrupt-'))).toBe(false)
   })
 
   it('tema escolhido sobrevive ao reabrir; estado antigo sem preferência abre seguindo o sistema', () => {
     saveState(file, { ...emptyState(), settings: { ...emptyState().settings, theme: 'light' } })
-    expect(loadState(file).settings.theme).toBe('light')
+    expect(loadState(file).state.settings.theme).toBe('light')
 
     writeFileSync(file, JSON.stringify({ version: 2, projects: [], tabs: [] }), 'utf8')
-    expect(loadState(file).settings.theme).toBe('system')
+    expect(loadState(file).state.settings.theme).toBe('system')
     expect(readdirSync(dir).some((f) => f.includes('.corrupt-'))).toBe(false)
 
     writeFileSync(file, JSON.stringify({ version: 1, projects: [] }), 'utf8')
-    expect(loadState(file).settings.theme).toBe('system')
+    expect(loadState(file).state.settings.theme).toBe('system')
 
     writeFileSync(file, JSON.stringify({ version: 2, projects: [], tabs: [], settings: {} }), 'utf8')
-    expect(loadState(file).settings.theme).toBe('system')
+    expect(loadState(file).state.settings.theme).toBe('system')
   })
 
   it('remover projeto leva junto as abas dele', () => {
