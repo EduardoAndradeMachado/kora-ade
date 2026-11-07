@@ -417,7 +417,7 @@ test('R76 quebra de linha no editor: botão e Alt+Z ligam e desligam, a escolha 
   const run = await kora.launch(env)
   const page = run.page
   const visibleLines = () => page.locator('.monaco-editor').filter({ visible: true }).locator('.view-lines .view-line')
-  const wrapButton = page.locator('button[aria-pressed]').filter({ visible: true })
+  const wrapButton = page.locator('button[aria-pressed][data-tip-shortcut="Alt+Z"]').filter({ visible: true })
 
   await row(run, 'longo.txt').click()
   await expect(visibleLines()).toHaveCount(1)
