@@ -981,8 +981,10 @@ app.on('child-process-gone', (_e, details) => {
   errorLog.record('processo', `${details.type} caiu: ${details.reason} (código ${details.exitCode})`)
 })
 
-// Duas instâncias gravariam o mesmo kora-state.json e uma apagaria os projetos da outra.
-if (!app.requestSingleInstanceLock()) app.quit()
+// Duas instâncias gravariam o mesmo kora-state.json e uma apagaria os projetos da outra. app.quit() não interrompe
+// quem chega depois: sem o desvio no whenReady, a segunda ainda abriria o estado e a conexão do celular.
+const primaryInstance = app.requestSingleInstanceLock()
+if (!primaryInstance) app.quit()
 
 let quitting = false
 let flushedOnQuit = false
@@ -1036,6 +1038,7 @@ app.on('second-instance', showWindow)
 nativeTheme.on('updated', () => mainWindow?.setTitleBarOverlay(titleBarOverlay()))
 
 void app.whenReady().then(() => {
+  if (!primaryInstance) return
   stateFile = join(app.getPath('userData'), 'kora-state.json')
   state = loadState(stateFile)
   // Aba de projeto cuja pasta sumiu fica suspensa, para a tela de localizar a pasta aparecer em vez de um erro.
