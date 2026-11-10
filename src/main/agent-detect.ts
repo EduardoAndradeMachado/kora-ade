@@ -125,7 +125,9 @@ export class AgentDetector {
 
   // UNREADABLE para a aba cujo agente não deu para ler nesta volta: quem chama mantém o que sabia dela.
   // A aba é do agente mais de fora: um Codex que o Claude roda como ferramenta (o code review dele, por exemplo) é filho
-  // do Claude e não troca a aba, e vice-versa. Entre agentes lado a lado no terminal, vale o mais novo.
+  // do Claude e não troca a aba, e vice-versa. O OpenCode conta como agente de fora, mesmo sem ser detectado aqui (a aba
+  // dele já nasce vinculada): Claude ou Codex que ele roda como subagente não tomam a aba. Entre agentes lado a lado no
+  // terminal, vale o mais novo.
   detect(shellPids: Map<string, number>): Map<string, Detected | typeof UNREADABLE> {
     const all = this.sources.listProcesses()
     // O Windows reaproveita pid: o nome de um Claude que já saiu não pode ir parar no próximo processo com o mesmo número.
@@ -140,8 +142,13 @@ export class AgentDetector {
 
     for (const [tabId, shellPid] of shellPids) {
       const agents = new Map<number, { detected: Detected; proc: ProcInfo }>()
+      const opencode = new Set<number>()
       let unreadable = false
       for (const proc of descendants(shellPid, all)) {
+        if (isOpencode(proc)) {
+          opencode.add(proc.pid)
+          continue
+        }
         const lock = codex.get(proc.pid)
         const detected = lock
           ? { agent: { kind: 'codex' as const, sessionId: lock.threadId }, activity: this.codexActivityOf(lock.threadId) }
@@ -152,7 +159,7 @@ export class AgentDetector {
       }
       let latest: { detected: Detected; createdMs: number } | null = null
       for (const { detected, proc } of agents.values()) {
-        if (insideAnother(proc.pid, shellPid, parentOf, agents)) continue
+        if (insideAnother(proc.pid, shellPid, parentOf, (pid) => agents.has(pid) || opencode.has(pid))) continue
         const createdMs = this.sources.creationTime(proc) ?? 0
         if (!latest || createdMs >= latest.createdMs) latest = { detected, createdMs }
       }
@@ -189,10 +196,12 @@ export class AgentDetector {
   }
 }
 
-function insideAnother(pid: number, shellPid: number, parentOf: Map<number, number>, agents: Map<number, unknown>): boolean {
+const isOpencode = (proc: ProcInfo): boolean => proc.name.toLowerCase() === 'opencode.exe'
+
+function insideAnother(pid: number, shellPid: number, parentOf: Map<number, number>, isAgent: (pid: number) => boolean): boolean {
   const seen = new Set<number>([pid])
   for (let parent = parentOf.get(pid); parent !== undefined && parent !== shellPid && !seen.has(parent); parent = parentOf.get(parent)) {
-    if (agents.has(parent)) return true
+    if (isAgent(parent)) return true
     seen.add(parent)
   }
   return false

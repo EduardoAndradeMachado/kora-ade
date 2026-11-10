@@ -189,6 +189,55 @@ describe('AgentDetector: nome derivado entre uma leitura e outra', () => {
   })
 })
 
+describe('AgentDetector: subagente do OpenCode', () => {
+  const tab = 'aba-opencode'
+  const shellPid = 100
+  // Árvore real de uma aba do OpenCode 2.1 no Windows: a CLI e o servidor dela, os dois opencode.exe.
+  const opencodeCli: ProcInfo = { pid: 300, ppid: shellPid, name: 'opencode.exe', createdMs: null }
+  const opencodeServer: ProcInfo = { pid: 301, ppid: 300, name: 'opencode.exe', createdMs: null }
+  const shell: ProcInfo = { pid: shellPid, ppid: 1, name: 'powershell.exe', createdMs: null }
+
+  function detector(): { detect: (procs: ProcInfo[]) => Detected | typeof UNREADABLE | undefined; codexThread: string; claudeSession: string } {
+    const sessionsDir = mkdtempSync(join(tmpdir(), 'kora-sessions-'))
+    const locksDir = mkdtempSync(join(tmpdir(), 'kora-locks-'))
+    const codexThread = randomUUID()
+    const claudeSession = randomUUID()
+    writeFileSync(join(locksDir, `${codexThread}.lock`), '')
+    writeFileSync(join(sessionsDir, '500.json'), claudePidFile(500, claudeSession), 'utf8')
+    let procs: ProcInfo[] = []
+    const agentDetector = new AgentDetector({
+      claudeSessionsDir: sessionsDir,
+      codexLocksDir: locksDir,
+      listProcesses: () => procs,
+      creationTime: () => 0,
+      lockHolders: () => [400],
+      codexRollout: () => null
+    })
+    return {
+      codexThread,
+      claudeSession,
+      detect: (list) => {
+        procs = list
+        return agentDetector.detect(new Map([[tab, shellPid]])).get(tab)
+      }
+    }
+  }
+
+  it('Codex ou Claude que o OpenCode roda como subagente não tomam a aba do OpenCode', () => {
+    const { detect } = detector()
+    const codex: ProcInfo = { pid: 400, ppid: opencodeServer.pid, name: 'codex.exe', createdMs: null }
+    const claude: ProcInfo = { pid: 500, ppid: opencodeServer.pid, name: 'claude.exe', createdMs: null }
+    expect(detect([shell, opencodeCli, opencodeServer, codex])).toBeUndefined()
+    expect(detect([shell, opencodeCli, opencodeServer, claude])).toBeUndefined()
+  })
+
+  it('OpenCode encerrado e Codex aberto à mão no PowerShell da aba: a aba passa a ser do Codex', () => {
+    const { detect, codexThread } = detector()
+    const codex: ProcInfo = { pid: 400, ppid: shellPid, name: 'codex.exe', createdMs: null }
+    expect(detect([shell, codex])).toMatchObject({ agent: { kind: 'codex', sessionId: codexThread } })
+  })
+})
+
 describe('AgentDetector de ponta a ponta (pty real + árvore de processos real + Restart Manager real)', () => {
   const terminals = new Terminals({ onData: () => {}, onExit: () => {} })
   afterEach(() => terminals.killAll())
