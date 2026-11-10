@@ -23,10 +23,10 @@ const CLAUDE: Record<string, ClaudeRate> = {
   'claude-fable-5': { input: 10, output: 50, cacheRead: 1, context: M },
   'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, context: M, fastMultiplier: 2 },
   'claude-opus-5': { input: 5, output: 25, cacheRead: 0.5, context: M, fastMultiplier: 2 },
-  'claude-opus-4-8': { input: 5, output: 25, cacheRead: 0.5, context: M },
+  'claude-opus-4-8': { input: 5, output: 25, cacheRead: 0.5, context: M, fastMultiplier: 2 },
   'claude-opus-4-7': { input: 5, output: 25, cacheRead: 0.5, context: M },
   'claude-opus-4-6': { input: 5, output: 25, cacheRead: 0.5, context: M },
-  'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.2, context: M },
+  'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.1, context: M },
   'claude-sonnet-5': { input: 2, output: 10, cacheRead: 0.2, context: M },
   'claude-sonnet-4-6': { input: 3, output: 15, cacheRead: 0.3, context: M },
   'claude-haiku-5-5': {

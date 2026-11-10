@@ -9,7 +9,8 @@ const only = (field: keyof Omit<ClaudeUsage, 'fast'>, fast = false): ClaudeUsage
 // entrada, gravação de cache de 5 min e de 1 h, leitura de cache e saída.
 const PUBLISHED: Record<string, [number, number, number, number, number]> = {
   'claude-fable-5-2': [8, 10, 16, 0.2, 40],
-  'claude-mythos-5-2': [8, 10, 16, 0.2, 40]
+  'claude-mythos-5-2': [8, 10, 16, 0.2, 40],
+  'claude-sonnet-5-5': [2, 2.5, 4, 0.1, 10]
 }
 
 describe('preço de API do Claude', () => {
