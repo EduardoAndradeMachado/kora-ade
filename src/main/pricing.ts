@@ -1,5 +1,5 @@
 // Preços de API em US$ por milhão de tokens, para estimar quanto a conversa custaria fora da assinatura.
-// Fonte: tabela de modelos da Anthropic (out/2026) e tabela pública da OpenAI (out/2026). Modelo fora da tabela
+// Fonte: tabela de preços da Anthropic (nov/2026) e tabela pública da OpenAI (out/2026). Modelo fora da tabela
 // fica sem estimativa em vez de herdar o preço de outro.
 
 interface ClaudeRate {
@@ -16,6 +16,8 @@ interface ClaudeRate {
 const M = 1_000_000
 
 const CLAUDE: Record<string, ClaudeRate> = {
+  'claude-fable-5-2': { input: 8, output: 40, cacheRead: 0.2, context: M, fastMultiplier: 2 },
+  'claude-mythos-5-2': { input: 8, output: 40, cacheRead: 0.2, context: M, fastMultiplier: 2 },
   'claude-fable-5-1': { input: 10, output: 50, cacheRead: 0.25, context: M },
   'claude-mythos-5-1': { input: 10, output: 50, cacheRead: 0.25, context: M },
   'claude-fable-5': { input: 10, output: 50, cacheRead: 1, context: M },
