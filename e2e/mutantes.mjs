@@ -1031,6 +1031,10 @@ for (const m of MUTANTS.filter((x) => wanted.length === 0 || wanted.includes(x.i
   rmSync(dir, { recursive: true, force: true })
   mkdirSync(dir, { recursive: true })
   cpSync(join(ROOT, 'src'), join(dir, 'src'), { recursive: true })
+  // src/main/remote importa relay/auth.ts, e o main acha o ícone da bandeja por app.getAppPath(): sem o ícone não
+  // há bandeja e o X encerra o app, o que reprovaria os testes de bandeja pelo motivo errado.
+  cpSync(join(ROOT, 'relay', 'auth.ts'), join(dir, 'relay', 'auth.ts'))
+  cpSync(join(ROOT, 'resources'), join(dir, 'resources'), { recursive: true })
   for (const f of ['electron.vite.config.ts', 'tsconfig.json', 'tsconfig.node.json', 'tsconfig.web.json']) {
     if (existsSync(join(ROOT, f))) cpSync(join(ROOT, f), join(dir, f))
   }
