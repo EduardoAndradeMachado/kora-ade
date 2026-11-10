@@ -979,6 +979,31 @@ const MUTANTS = [
     bug: '+ numa pasta recolhida não abre a pasta para mostrar a aba nova',
     find: '    if (project.collapsed) props.onSetProjectCollapsed(project.id, false)\n',
     replace: ''
+  },
+  {
+    id: 'M25',
+    grep: '(R25|R-celular-bandeja) ',
+    file: 'src/main/index.ts',
+    bug: 'X para a bandeja encerra os terminais das abas',
+    find: '  requestScrollbackFlush(() => {})\n  mainWindow?.hide()',
+    replace: '  requestScrollbackFlush(() => terminals.killAll())\n  mainWindow?.hide()',
+    expect: { 'R25 ': 'failed', 'R-celular-bandeja ': 'failed' }
+  },
+  {
+    id: 'M84',
+    grep: 'R84 histórico',
+    file: 'src/main/index.ts',
+    bug: 'Sair não pede à interface o histórico das abas vivas',
+    find: '  if (!flushedOnQuit && !quitting && mainWindow && !mainWindow.isDestroyed()) {',
+    replace: '  if (false) {'
+  },
+  {
+    id: 'M84b',
+    grep: 'R84 histórico',
+    file: 'src/main/index.ts',
+    bug: 'esconder na bandeja não grava a cópia do histórico das abas vivas',
+    find: '  requestScrollbackFlush(() => {})\n  mainWindow?.hide()',
+    replace: '  mainWindow?.hide()'
   }
 ]
 

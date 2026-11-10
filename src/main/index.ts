@@ -357,9 +357,9 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => mainWindow?.show())
   // O zoom do Chromium é por origem e se perde no reload; reaplica o salvo a cada carregamento.
   mainWindow.webContents.on('did-finish-load', () => mainWindow?.webContents.setZoomFactor(state.settings.zoom))
-  // X da janela vai para a bandeja: os processos das abas são encerrados (libera a memória, como "Suspender")
-  // e as abas ficam com "Continuar chat". Sair de verdade só pelo menu da bandeja. Sem bandeja o X encerra,
-  // e aí quem pergunta pelos arquivos não salvos é este handler (o before-quit só vem depois da janela fechar).
+  // X da janela vai para a bandeja com as abas rodando: quem encerra os processos é o Sair do menu da bandeja.
+  // Sem bandeja o X encerra, e aí quem pergunta pelos arquivos não salvos é este handler (o before-quit só vem
+  // depois da janela fechar).
   mainWindow.on('close', (event) => {
     detectAgents()
     if (quitting) return
@@ -399,7 +399,7 @@ function createWindow(): void {
   }
 }
 
-// Antes de encerrar os processos (esconder, sair, instalar), a interface grava o buffer das abas vivas.
+// Antes de sair, e ao esconder na bandeja, a interface grava o buffer das abas vivas.
 // Interface travada não segura o fechamento para sempre: depois do prazo o caminho segue sem o histórico.
 const FLUSH_TIMEOUT_MS = 1500
 let flushScrollbackDone: (() => void) | null = null
@@ -427,11 +427,11 @@ function requestScrollbackFlush(next: () => void): void {
 }
 
 function hideToTray(): void {
-  requestScrollbackFlush(() => {
-    terminals.killAll()
-    mainWindow?.hide()
-    mainWindow?.webContents.send('app:hidden')
-  })
+  // As abas seguem rodando, mas o histórico só existe na interface: a cópia em disco é o que sobra se ela cair
+  // ou a energia acabar com o Kora na bandeja.
+  requestScrollbackFlush(() => {})
+  mainWindow?.hide()
+  mainWindow?.webContents.send('app:hidden')
 }
 
 // Arquivo com alteração não salva: o fechamento espera a interface perguntar (salvar, descartar ou cancelar).
@@ -965,6 +965,11 @@ function registerIpc(): void {
 }
 
 protocol.registerSchemesAsPrivileged(KORA_FILE_PRIVILEGED_SCHEMES)
+
+// Na bandeja as abas seguem rodando, e o xterm consome a saída por timers. Janela oculta roda timers poucas vezes
+// por segundo no padrão do Chromium: a saída de um agente se acumularia na interface e, acima de 50 MB, o xterm
+// descarta. A página continua oculta para o resto (nada é desenhado, o Git não consulta).
+app.commandLine.appendSwitch('disable-background-timer-throttling')
 
 // Testes de ponta a ponta sobem uma instância isolada: estado, ícones e trava de instância única
 // ficam na pasta indicada, sem encostar no Kora que o usuário está usando.

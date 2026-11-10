@@ -90,8 +90,8 @@ PC conectado.
 O código do app Android fica em `android/`. Para gerar o APK com o Android Studio instalado: `pnpm android` (precisa
 da chave de assinatura).
 
-Os dois caminhos vêm desligados. O Kora precisa estar aberto no PC: fechar a janela para a bandeja encerra os
-terminais, como sempre. Com **Fora de casa** ligado, o PC não suspende sozinho enquanto o Kora está aberto; para ele
+Os dois caminhos vêm desligados. O Kora precisa estar aberto no PC: fechar a janela para a bandeja mantém os
+terminais rodando, e o **Sair** da bandeja encerra tudo. Com **Fora de casa** ligado, o PC não suspende sozinho enquanto o Kora está aberto; para ele
 voltar sozinho depois de reiniciar, ligue **Abrir o Kora com o Windows** nas Configurações.
 
 ### Segurança da conexão com o celular

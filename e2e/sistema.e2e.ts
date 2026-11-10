@@ -81,23 +81,32 @@ test('R23 instância única: segunda instância com o mesmo KORA_USER_DATA fecha
   expect(JSON.stringify(readState(env))).toBe(before)
 })
 
-test('R25 X da janela vai para a bandeja: app segue vivo, shells das abas encerrados, aba vira Continuar e a janela volta', async ({ kora }) => {
+test('R25 X da janela vai para a bandeja: app segue vivo, o shell da aba continua rodando e a janela volta com a aba em uso', async ({ kora }) => {
   const env = kora.env()
   const run = await kora.launch(env)
   await newTab(run.page, 'Claude')
   await waitFor(() => starts(env, 'claude')[0], 'claude falso subiu')
   await expect.poll(() => shells(run).length, { timeout: 30_000 }).toBe(1)
+  const shell = shells(run)[0]!.pid
 
   await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
-  await expect.poll(() => shells(run).length, { timeout: 15_000 }).toBe(0)
+  await expect.poll(() => run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false)
   expect(isAlive(run.pid), 'o X não pode encerrar o app').toBe(true)
-  expect(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false)
+  // Mais que o prazo que o Kora dá para um shell encerrado sair: quem o X tivesse matado já teria sumido.
+  await run.page.waitForTimeout(4000)
+  expect(shells(run).map((p) => p.pid), 'o X não pode encerrar o shell da aba').toEqual([shell])
   expect(readState(env).tabs).toHaveLength(1)
 
   const second = await spawnSecondInstance(env)
   expect(second.code).toBe(0)
   await expect.poll(() => run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(true)
-  await expect(ui.visibleButton(run.page, 'Continuar chat')).toBeVisible()
+  await expect(ui.visibleButton(run.page, 'Continuar chat')).toHaveCount(0)
+  await typeLine(run.page, 'DEPOIS_DA_BANDEJA')
+  await waitFor(
+    () => readLog(env).find((e) => e.event === 'input' && e.line?.includes('DEPOIS_DA_BANDEJA')),
+    'o agente que já rodava recebe o que é digitado depois de a janela voltar'
+  )
+  expect(starts(env, 'claude'), 'nenhum agente novo: é a mesma sessão').toHaveLength(1)
 })
 
 test('R27 link OSC 8 no terminal (o que o Claude imprime) abre no navegador sem diálogo nativo; esquema que não é http é ignorado', async ({ kora }) => {
@@ -618,7 +627,7 @@ test('R83 limites de uso: o Codex aparece pelo último uso gravado e o painel di
   await expect(panel.locator('[data-next-check]')).toContainText(/próxima consulta (hoje|amanhã) às \d{2}:\d{2}/)
 })
 
-test('R84 histórico do terminal vira arquivo ao esconder na bandeja e é apagado quando a aba fecha de verdade', async ({ kora }) => {
+test('R84 histórico do terminal vira arquivo ao esconder na bandeja e ao sair, e é apagado quando a aba fecha de verdade', async ({ kora }) => {
   const env = kora.env()
   const run = await kora.launch(env)
   const page = run.page
@@ -639,17 +648,26 @@ test('R84 histórico do terminal vira arquivo ao esconder na bandeja e é apagad
   expect(saved(), 'terminal vivo ainda não tem arquivo de histórico').toBeNull()
 
   await closeX(run)
-  await expect.poll(() => shells(run).length, { timeout: 15_000 }).toBe(0)
-  await waitFor(() => saved()?.includes(marker), 'histórico gravado ao esconder na bandeja')
+  await expect.poll(() => windowVisible(run)).toBe(false)
+  await waitFor(() => saved()?.includes(marker), 'cópia do histórico gravada ao esconder na bandeja')
+  expect(shells(run), 'a cópia não encerra o terminal').toHaveLength(1)
 
   await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.show())
-  await expect(ui.visibleButton(page, 'Abrir terminal')).toBeVisible()
-  await ui.visibleButton(page, 'Abrir terminal').click()
-  await expect(ui.terminal(page)).toBeVisible()
+  const later = `KORA_DEPOIS_${tab.id.slice(0, 8)}`
+  await typeLine(page, `Write-Output '${later}'`)
+  await page.waitForTimeout(1000)
+  await run.closeWindow()
+  await waitFor(() => saved()?.includes(later), 'histórico do que rodou depois gravado ao sair')
 
-  await ui.terminal(page).click()
-  await page.keyboard.press('Control+W')
-  await page.keyboard.press('Enter')
+  const again = await kora.launch(env)
+  const reopened = again.page
+  await expect(ui.visibleButton(reopened, 'Abrir terminal')).toBeVisible()
+  await ui.visibleButton(reopened, 'Abrir terminal').click()
+  await expect(ui.terminal(reopened)).toBeVisible()
+
+  await ui.terminal(reopened).click()
+  await reopened.keyboard.press('Control+W')
+  await reopened.keyboard.press('Enter')
   await waitFor(() => readState(env).tabs.length === 0, 'aba fechada')
   await waitFor(() => saved() === null, 'arquivo do histórico apagado junto com a aba')
 })

@@ -395,7 +395,7 @@ test('R-celular-rolagem campo da mensagem focado: arrastar no terminal larga o c
   await expect(field).toHaveValue('rascunho mais')
 })
 
-test('R-celular-bandeja Kora na bandeja segue no ar: o celular vê a aba suspensa, retoma e usa o shell com a janela escondida', async ({ kora }) => {
+test('R-celular-bandeja Kora na bandeja segue no ar: a aba continua viva para o celular, que usa o mesmo shell com a janela escondida', async ({ kora }) => {
   const env = kora.env()
   const run = await kora.launch(env)
   await newTab(run.page, 'Terminal')
@@ -403,15 +403,14 @@ test('R-celular-bandeja Kora na bandeja segue no ar: o celular vê a aba suspens
   const { cookie } = await pairPhone(run)
   const tab = await until(async () => (await phoneTabs(cookie)).find((t) => t.live), 'aba viva para o celular')
 
-  // O X da janela vai para a bandeja: os processos das abas acabam, mas o Kora (e o servidor do celular) continua.
   await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
-  await until(async () => (await phoneTabs(cookie)).find((t) => t.id === tab.id && !t.live), 'aba suspensa vista pelo celular')
-  expect(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false)
+  await expect.poll(() => run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false)
   expect((await fetch(`${BASE}/health`)).status).toBe(200)
+  // Mais que o prazo que o Kora dá para um shell encerrado sair: quem o X tivesse matado já teria sumido.
+  await run.page.waitForTimeout(4000)
+  expect((await phoneTabs(cookie)).find((t) => t.id === tab.id)?.live, 'o X não suspende a aba').toBe(true)
 
-  await phone(cookie, { type: 'resume', tabId: tab.id, cols: 60, rows: 24 })
-  await until(async () => (await phoneTabs(cookie)).find((t) => t.id === tab.id && t.live), 'aba retomada pelo celular')
   await phone(cookie, { type: 'send', tabId: tab.id, text: "Write-Output ('NA_' + 'BANDEJA')" })
-  await until(async () => (await screen(cookie, tab.id)).includes('NA_BANDEJA'), 'saída do shell retomado com a janela escondida')
+  await until(async () => (await screen(cookie, tab.id)).includes('NA_BANDEJA'), 'saída do shell com a janela escondida')
   expect(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false)
 })

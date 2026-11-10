@@ -234,7 +234,7 @@ export function App(): React.JSX.Element {
       setSelectedId(s.projects[0]?.id ?? null)
     })
     const offExit = window.kora.onTerminalExit((id) => {
-      // O processo saiu (inclusive quando o Kora encerra ao esconder): guarda a tela antes de adormecer a aba.
+      // O processo saiu: guarda a tela antes de adormecer a aba.
       saveScrollbackNow(id)
       terminalBus.forget(id)
       patchTerminal(id, { live: false, activity: null, alert: false })
