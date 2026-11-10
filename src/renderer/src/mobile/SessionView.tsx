@@ -513,7 +513,12 @@ export function SessionView({ tab, device, connected, connection, feed, command,
         <div className="composer-box">
           {composerError && <p role="alert" className="composer-error"><Icon name="alerta" /><span>{composerError}</span><button type="button" aria-label="Dispensar aviso" onClick={() => setComposerError(null)}><Icon name="fechar" /></button></p>}
           {thumbs}
-          <textarea ref={field} aria-label="Mensagem para a sessão" placeholder="Mensagem para a sessão" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} />
+          <textarea ref={field} aria-label="Mensagem para a sessão" placeholder="Mensagem para a sessão" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
+            // Teclado físico ou com Ctrl: Ctrl+Enter envia, Enter sozinho segue quebrando a linha.
+            if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || event.nativeEvent.isComposing) return
+            event.preventDefault()
+            if (voice === 'idle') submit()
+          }} />
           {/* Ditando, a linha vira descartar, ondas e transcrever: anexar e enviar saem para não mandar a mensagem no meio. */}
           {voice === 'idle' ? <div className="composer-actions">
             <div className="composer-tools">

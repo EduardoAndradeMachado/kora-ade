@@ -122,6 +122,18 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     terminals.write(tab.id, "Write-Output ('DEPOIS_' + 'DO_CTRLC')\r")
     await expect.poll(() => desktop, { timeout: 15000 }).toContain('DEPOIS_DO_CTRLC')
     expect(desktop).not.toContain('NAO_TERMINOU')
+
+    // Teclado com Ctrl: Enter sozinho só quebra a linha no campo; Ctrl+Enter envia.
+    const message = page.getByRole('textbox', { name: 'Mensagem para a sessão' })
+    await message.fill("Write-Output ('CTRL_' + 'ENTER')")
+    await message.press('End')
+    await message.press('Enter')
+    await page.waitForTimeout(800)
+    await browserExpect(message).toHaveValue("Write-Output ('CTRL_' + 'ENTER')\n")
+    expect(desktop).not.toContain('CTRL_ENTER')
+    await message.press('Control+Enter')
+    await expect.poll(() => desktop, { timeout: 15000 }).toContain('CTRL_ENTER')
+    await browserExpect(message).toHaveValue('')
     expect(terminals.pids().get(tab.id)).toBe(pid)
 
     // Print do celular: vira arquivo no PC e o caminho vai junto com a mensagem, como o Ctrl+V com imagem no PC.
