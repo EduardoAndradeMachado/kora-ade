@@ -686,25 +686,65 @@ const nativeClick = (run: KoraRun, x: number, y: number) =>
     [Math.round(x), Math.round(y)] as const
   )
 
-// Arrasto que começa e nunca recebe o fim, como o que sobra quando o aviso de fim se perde com a máquina engasgada:
-// com a interceptação ligada o Chromium não abre o arrasto do sistema e a página fica esperando para sempre.
-async function startEndlessDrag(page: Page, from: Locator): Promise<CDPSession> {
+// Arrasto que começa e nunca recebe o fim: com a interceptação ligada o Chromium não abre o arrasto do sistema e a
+// página fica esperando para sempre. Sem eventos depois do dragstart é o arrasto que nunca andou (o da lateral no
+// Windows); com moved, ele passa sobre a página antes de o fim se perder (a máquina engasgada).
+async function startEndlessDrag(page: Page, from: Locator, moved = false): Promise<CDPSession> {
   const cdp = await page.context().newCDPSession(page)
   const box = (await from.boundingBox())!
   const x = box.x + box.width / 2
   const y = box.y + box.height / 2
   await cdp.send('Input.setInterceptDrags', { enabled: true })
-  const intercepted = new Promise<void>((resolve) => cdp.once('Input.dragIntercepted', () => resolve()))
+  const intercepted = new Promise<Record<string, unknown>>((resolve) =>
+    cdp.once('Input.dragIntercepted', (event: { data: Record<string, unknown> }) => resolve(event.data))
+  )
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
   await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 })
   for (const dx of [6, 14, 30]) {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x + dx, y, button: 'left', buttons: 1 })
   }
-  await Promise.race([
+  const data = await Promise.race([
     intercepted,
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error('o arrasto da aba não começou')), 10_000))
   ])
+  if (moved) {
+    await cdp.send('Input.dispatchDragEvent', { type: 'dragEnter', x: x + 30, y, data })
+    await cdp.send('Input.dispatchDragEvent', { type: 'dragOver', x: x + 40, y, data })
+  }
   return cdp
+}
+
+// O menu "Nova aba" aberto por um clique nativo é a prova de que a interface aceita clique.
+function clickProbe(run: KoraRun) {
+  const page = run.page
+  const menu = page.locator('body > div.fixed button').filter({ hasText: 'Sessão existente' })
+  const clickNewTab = async (): Promise<void> => {
+    const box = (await ui.tabBar(page).locator(tip('Nova aba')).boundingBox())!
+    await nativeClick(run, box.x + box.width / 2, box.y + box.height / 2)
+  }
+  return {
+    expectIgnored: async (): Promise<void> => {
+      await clickNewTab()
+      await page.waitForTimeout(800)
+      await expect(menu, 'com o arrasto preso a interface ignora o clique').toHaveCount(0)
+    },
+    // Prazo curto: o vigia de arrasto também destrava, só que bem depois; quem destravou tem de ser o caminho testado.
+    expectWorking: async (message: string, timeout = 4000): Promise<void> => {
+      await clickNewTab()
+      await expect(menu, message).toBeVisible({ timeout })
+      await page.keyboard.press('Escape')
+      await expect(menu).toHaveCount(0)
+    },
+    // Clica de novo até o menu abrir: quem destrava age sozinho, sem aviso de quando.
+    expectWorkingWithin: async (message: string, timeout: number): Promise<void> => {
+      await expect(async () => {
+        await clickNewTab()
+        await expect(menu).toBeVisible({ timeout: 700 })
+      }, message).toPass({ timeout, intervals: [300] })
+      await page.keyboard.press('Escape')
+      await expect(menu).toHaveCount(0)
+    }
+  }
 }
 
 test('R86 interface que parou de aceitar clique por um arrasto sem fim volta a funcionar no X e ao reabrir a janela', async ({ kora }) => {
@@ -713,25 +753,10 @@ test('R86 interface que parou de aceitar clique por um arrasto sem fim volta a f
   const page = run.page
   await newTab(page, 'Terminal')
   await expect(ui.terminal(page)).toBeVisible()
-  const menu = page.locator('body > div.fixed button').filter({ hasText: 'Sessão existente' })
-  const clickNewTab = async (): Promise<void> => {
-    const box = (await ui.tabBar(page).locator(tip('Nova aba')).boundingBox())!
-    await nativeClick(run, box.x + box.width / 2, box.y + box.height / 2)
-  }
-  const expectIgnored = async (): Promise<void> => {
-    await clickNewTab()
-    await page.waitForTimeout(800)
-    await expect(menu, 'com o arrasto preso a interface ignora o clique').toHaveCount(0)
-  }
-  const expectWorking = async (message: string): Promise<void> => {
-    await clickNewTab()
-    await expect(menu, message).toBeVisible()
-    await page.keyboard.press('Escape')
-    await expect(menu).toHaveCount(0)
-  }
+  const { expectIgnored, expectWorking } = clickProbe(run)
   await expectWorking('interface saudável abre o menu com o clique nativo')
 
-  let drag = await startEndlessDrag(page, ui.barTab(page, 'Terminal'))
+  let drag = await startEndlessDrag(page, ui.barTab(page, 'Terminal'), true)
   await expectIgnored()
   await closeX(run)
   await expect.poll(() => windowVisible(run)).toBe(false)
@@ -740,11 +765,28 @@ test('R86 interface que parou de aceitar clique por um arrasto sem fim volta a f
   await expectWorking('o X destrava a interface')
   await drag.detach()
 
-  drag = await startEndlessDrag(page, ui.barTab(page, 'Terminal'))
+  drag = await startEndlessDrag(page, ui.barTab(page, 'Terminal'), true)
   await expectIgnored()
   // A segunda abertura chama a janela de volta pelo mesmo caminho do clique no ícone da bandeja.
   expect((await spawnSecondInstance(env)).code).toBe(0)
   await page.waitForTimeout(500)
   await expectWorking('reabrir a janela destrava a interface')
+  await drag.detach()
+})
+
+test('R87 arrasto que nunca anda depois do dragstart destrava sozinho, sem o X', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const page = run.page
+  await newTab(page, 'Terminal')
+  await expect(ui.terminal(page)).toBeVisible()
+  const { expectIgnored, expectWorking, expectWorkingWithin } = clickProbe(run)
+  await expectWorking('interface saudável abre o menu com o clique nativo')
+
+  const drag = await startEndlessDrag(page, ui.barTab(page, 'Terminal'))
+  await expectIgnored()
+  await expectWorkingWithin('o vigia de arrasto destrava a interface sozinho', 10_000)
+  expect(readFileSync(join(env.userData, 'lag.log'), 'utf8')).toContain('arrasto preso na interface: cancelado sozinho')
+  expect(await windowVisible(run), 'sem esconder a janela').toBe(true)
   await drag.detach()
 })

@@ -1022,6 +1022,22 @@ const MUTANTS = [
     replace: '    if (!tray) {'
   },
   {
+    id: 'M87',
+    grep: 'R87 ',
+    file: 'src/renderer/src/main.tsx',
+    bug: 'o vigia de arrasto não é ligado na interface',
+    find: 'watchStuckDrags(() => window.kora.releaseStuckDrag())\n',
+    replace: ''
+  },
+  {
+    id: 'M87b',
+    grep: 'R87 ',
+    file: 'src/main/index.ts',
+    bug: 'o main registra o pedido do vigia mas não cancela o arrasto',
+    find: "    lagLog(`${new Date().toISOString()} arrasto preso na interface: cancelado sozinho`)\n    releaseInput()\n",
+    replace: "    lagLog(`${new Date().toISOString()} arrasto preso na interface: cancelado sozinho`)\n"
+  },
+  {
     id: 'M86c',
     grep: 'R86 ',
     file: 'src/main/index.ts',

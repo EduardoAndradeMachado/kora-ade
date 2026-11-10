@@ -126,6 +126,8 @@ export interface KoraApi {
   // Caminho no disco de um arquivo solto de fora do app (Explorer do Windows); '' se ele não vier do disco.
   pathForFile(file: File): string
   reportLongTask(ms: number): void
+  // A interface parou de aceitar clique por um arrasto que não terminou: o main cancela o arrasto nela.
+  releaseStuckDrag(): void
   updateStatus(): Promise<UpdateStatus>
   onUpdateStatus(listener: (status: UpdateStatus) => void): () => void
   checkUpdate(): Promise<void>

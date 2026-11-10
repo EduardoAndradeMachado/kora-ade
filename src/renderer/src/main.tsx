@@ -5,6 +5,7 @@ import { App } from './App'
 import { ConfirmProvider } from './components/ConfirmDialog'
 import { TipLayer } from './components/Tip'
 import { TextContextMenu } from './components/TextContextMenu'
+import { watchStuckDrags } from './lib/drag-watchdog'
 
 // Vitrine de desenvolvimento: fora do build de produção (import.meta.env.DEV some no empacotamento).
 const vitrine = import.meta.env.DEV && location.hash === '#vitrine'
@@ -42,6 +43,8 @@ try {
 } catch {
   // Sem suporte a longtask o diagnóstico da interface só não existe.
 }
+
+watchStuckDrags(() => window.kora.releaseStuckDrag())
 
 // Sem StrictMode: o double-mount dele abriria e mataria o xterm de cada aba, perdendo a saída inicial do shell.
 if (!vitrine) {

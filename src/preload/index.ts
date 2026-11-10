@@ -50,6 +50,7 @@ const api: KoraApi = {
   resolveTerminalLink: (projectId, text) => ipcRenderer.invoke('terminal:resolve-link', projectId, text),
   pathForFile: (file) => webUtils.getPathForFile(file),
   reportLongTask: (ms) => ipcRenderer.send('diag:long-task', ms),
+  releaseStuckDrag: () => ipcRenderer.send('window:release-stuck-drag'),
   updateStatus: () => ipcRenderer.invoke('update:status'),
   onUpdateStatus: (listener) => subscribe<[UpdateStatus]>('update:status', listener),
   checkUpdate: () => ipcRenderer.invoke('update:check'),

@@ -772,6 +772,10 @@ function registerIpc(): void {
   ipcMain.handle('app:open-at-login', (_e, enabled: unknown) => openAtLogin(z.boolean().optional().parse(enabled ?? undefined)))
   ipcMain.handle('terminal:resolve-link', (_e, id: string, text: string) => resolveTerminalLink(projectRoot(id), String(text)))
   ipcMain.on('diag:long-task', (_e, ms: number) => lagLog(`${new Date().toISOString()} interface travada ${Math.round(Number(ms))} ms`))
+  ipcMain.on('window:release-stuck-drag', () => {
+    lagLog(`${new Date().toISOString()} arrasto preso na interface: cancelado sozinho`)
+    releaseInput()
+  })
   ipcMain.handle('fs:move', (_e, id: string, fromRel: string, toDirRel: string) =>
     moveEntry(projectRoot(id), String(fromRel), String(toDirRel))
   )
