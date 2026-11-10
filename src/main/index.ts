@@ -31,6 +31,7 @@ import { autoUpdater } from 'electron-updater'
 import { createErrorLog, errorText } from './error-log'
 import { startUpdates, type Updates } from './updater'
 import { rememberLiveTabs, takeLiveTabs } from './resume-after-update'
+import { releaseStuckDrag } from './stuck-drag'
 import type { UpdateStatus } from '../shared/update'
 import { AccountActionSchema, AdminRequestSchema, type AccountAction, type MobileStatus } from '../shared/mobile'
 import { accountClient } from './remote/account'
@@ -363,6 +364,9 @@ function createWindow(): void {
   mainWindow.on('close', (event) => {
     detectAgents()
     if (quitting) return
+    // O X é o que sobra para quem ficou com a interface sem aceitar clique: a pergunta dos arquivos não salvos
+    // precisa voltar a ser clicável, e a janela reaberta pela bandeja também.
+    releaseInput()
     if (!tray) {
       if (!unsaved || quitConfirmed) return
       event.preventDefault()
@@ -432,6 +436,15 @@ function hideToTray(): void {
   requestScrollbackFlush(() => {})
   mainWindow?.hide()
   mainWindow?.webContents.send('app:hidden')
+}
+
+function releaseInput(): void {
+  const contents = mainWindow?.webContents
+  if (!contents || contents.isDestroyed()) return
+  releaseStuckDrag(contents).catch((err) => {
+    // Janela fechando no meio do comando não é erro: o X sem bandeja e o Sair passam por aqui.
+    if (!contents.isDestroyed()) console.error('[kora] destravar a interface', err)
+  })
 }
 
 // Arquivo com alteração não salva: o fechamento espera a interface perguntar (salvar, descartar ou cancelar).
@@ -1031,6 +1044,7 @@ function showWindow(): void {
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
+  releaseInput()
 }
 
 // Sem bandeja o X volta a encerrar o app: pior, mas nada mais depende dela.
@@ -1045,6 +1059,7 @@ function createTray(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'Abrir Kora', click: showWindow },
+      { label: 'Destravar interface', click: releaseInput },
       { type: 'separator' },
       { label: 'Sair', click: () => app.quit() }
     ])

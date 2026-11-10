@@ -1004,6 +1004,30 @@ const MUTANTS = [
     bug: 'esconder na bandeja não grava a cópia do histórico das abas vivas',
     find: '  requestScrollbackFlush(() => {})\n  mainWindow?.hide()',
     replace: '  mainWindow?.hide()'
+  },
+  {
+    id: 'M86',
+    grep: 'R86 ',
+    file: 'src/main/stuck-drag.ts',
+    bug: 'o destravamento manda um evento de arrasto que não encerra o arrasto preso',
+    find: "type: 'dragCancel'",
+    replace: "type: 'dragOver'"
+  },
+  {
+    id: 'M86b',
+    grep: 'R86 ',
+    file: 'src/main/index.ts',
+    bug: 'o X esconde a janela sem destravar a interface',
+    find: '    releaseInput()\n    if (!tray) {',
+    replace: '    if (!tray) {'
+  },
+  {
+    id: 'M86c',
+    grep: 'R86 ',
+    file: 'src/main/index.ts',
+    bug: 'reabrir a janela não destrava a interface',
+    find: '  mainWindow.focus()\n  releaseInput()',
+    replace: '  mainWindow.focus()'
   }
 ]
 
