@@ -40,6 +40,7 @@ import { useChoose, useConfirm } from '@/components/ConfirmDialog'
 import { ContextMenu, type MenuItem } from '@/components/ContextMenu'
 import { Icon } from '@/brand/icons'
 import type { RenameRequest, TabPlace } from '@/components/TabBar'
+import { LinkedRenameContext, type LinkedRename } from '@/components/EditableTitle'
 import type { NewTabChoice } from '@/components/NewTabMenu'
 import { terminalBus } from '@/lib/terminal-bus'
 import { reconcileTabRefs } from '@shared/tab-sync'
@@ -108,6 +109,7 @@ export function App(): React.JSX.Element {
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null)
   const [tabMenu, setTabMenu] = useState<{ projectId: string; tabId: string; where: TabPlace; x: number; y: number } | null>(null)
   const [renameRequest, setRenameRequest] = useState<RenameRequest | null>(null)
+  const [linkedRename, setLinkedRename] = useState<{ tabId: string; title: string; draft: string } | null>(null)
   const [commitDrafts, setCommitDrafts] = useState<Record<string, string>>({})
   const confirm = useConfirm()
   const choose = useChoose()
@@ -685,11 +687,17 @@ export function App(): React.JSX.Element {
     await closeTab(projectId, tab.id)
   })
 
-  // Abre a edição do nome na barra de cima, onde a aba atual está sempre visível.
+  // Abre a edição do nome na barra de cima e na lateral, com o mesmo rascunho nos dois campos.
   useRenameTabShortcut(() => {
     const tab = selectedId ? (tabs[selectedId] ?? []).find((t) => t.id === activeTab[selectedId]) : undefined
-    if (tab?.kind === 'terminal') setRenameRequest((r) => ({ tabId: tab.id, where: 'bar', n: (r?.n ?? 0) + 1 }))
+    if (tab?.kind === 'terminal') setLinkedRename({ tabId: tab.id, title: tab.title, draft: tab.title })
   })
+
+  // Trocar de aba sem tirar o foco do campo (ex.: pelo celular) não dispara o blur; a edição some como a de um campo só.
+  const currentTabId = selectedId ? activeTab[selectedId] : undefined
+  useEffect(() => {
+    setLinkedRename((r) => (r && r.tabId !== currentTabId ? null : r))
+  }, [currentTabId])
 
   const closeTab = async (projectId: string, tabId: string): Promise<void> => {
     const list = tabs[projectId] ?? []
@@ -912,310 +920,323 @@ export function App(): React.JSX.Element {
   const shownTab = selected ? projectTabs.find((t) => t.id === activeTab[selected.id]) : undefined
   const activeTerminal = shownTab?.kind === 'terminal' ? shownTab : undefined
 
+  const linkedRenameValue: LinkedRename | null = linkedRename && {
+    tabId: linkedRename.tabId,
+    draft: linkedRename.draft,
+    onChange: (draft) => setLinkedRename((r) => r && { ...r, draft }),
+    onFinish: (commit) => {
+      const name = linkedRename.draft.trim()
+      if (commit && name !== linkedRename.title) renameTab(linkedRename.tabId, name)
+      setLinkedRename(null)
+    }
+  }
+
   return (
-    <div className="flex h-full">
-      <Sidebar
-        projects={state.projects}
-        groups={state.groups}
-        onGroupAction={(action) => void groupAction(action)}
-        tabs={tabs}
-        selectedId={selectedId}
-        activeTab={activeTab}
-        onSelectProject={setSelectedId}
-        onSelectTab={selectTab}
-        onCloseTab={(projectId, tabId) => void closeTab(projectId, tabId)}
-        onRenameTab={(_projectId, tabId, title) => renameTab(tabId, title)}
-        onTabContextMenu={(projectId, tabId, x, y) => openTabMenu(projectId, tabId, 'side', x, y)}
-        renameRequest={renameRequest?.where === 'side' ? renameRequest : null}
-        onNewTab={newTab}
-        onAdd={() => void addProject()}
-        onRemove={(p) => void removeProject(p)}
-        onRenameProject={renameProject}
-        onSetProjectCollapsed={setProjectCollapsed}
-        missing={missing}
-        onRelocate={relocateProject}
-        onArrangeProject={arrangeProject}
-        zoom={state.settings.zoom}
-        terminalFontSize={state.settings.terminalFontSize}
-        fileFontSize={state.settings.fileFontSize}
-        onZoom={onZoom}
-        onTerminalFont={onTerminalFont}
-        onFileFont={onFileFont}
-        onReorderTab={reorderTab}
-        update={update}
-        onInstallUpdate={installUpdate}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenMobile={() => setMobileOpen(true)}
-      />
-
-      <main className="flex min-w-0 flex-1 flex-col">
-        <TabBar
-          tabs={projectTabs}
-          activeId={selected ? activeTab[selected.id] : undefined}
-          rightPanelOpen={rightPanelOpen}
-          onSelect={(id) => selected && selectTab(selected.id, id)}
-          onClose={(id) => selected && closeTab(selected.id, id)}
-          onRename={renameTab}
-          onContextMenu={(tabId, x, y) => selected && openTabMenu(selected.id, tabId, 'bar', x, y)}
-          renameRequest={renameRequest?.where === 'bar' ? renameRequest : null}
-          onNew={(choice) => selected && newTab(selected, choice)}
-          onToggleRightPanel={toggleRightPanel}
-          projectId={selected?.id ?? ''}
-          onReorder={(fromId, toId, place) => selected && reorderTab(selected.id, fromId, toId, place)}
-          atWindowEdge={!(rightPanelOpen && selected)}
+    <LinkedRenameContext.Provider value={linkedRenameValue}>
+      <div className="flex h-full">
+        <Sidebar
+          projects={state.projects}
+          groups={state.groups}
+          onGroupAction={(action) => void groupAction(action)}
+          tabs={tabs}
+          selectedId={selectedId}
+          activeTab={activeTab}
+          onSelectProject={setSelectedId}
+          onSelectTab={selectTab}
+          onCloseTab={(projectId, tabId) => void closeTab(projectId, tabId)}
+          onRenameTab={(_projectId, tabId, title) => renameTab(tabId, title)}
+          onTabContextMenu={(projectId, tabId, x, y) => openTabMenu(projectId, tabId, 'side', x, y)}
+          renameRequest={renameRequest?.where === 'side' ? renameRequest : null}
+          onNewTab={newTab}
+          onAdd={() => void addProject()}
+          onRemove={(p) => void removeProject(p)}
+          onRenameProject={renameProject}
+          onSetProjectCollapsed={setProjectCollapsed}
+          missing={missing}
+          onRelocate={relocateProject}
+          onArrangeProject={arrangeProject}
+          zoom={state.settings.zoom}
+          terminalFontSize={state.settings.terminalFontSize}
+          fileFontSize={state.settings.fileFontSize}
+          onZoom={onZoom}
+          onTerminalFont={onTerminalFont}
+          onFileFont={onFileFont}
+          onReorderTab={reorderTab}
+          update={update}
+          onInstallUpdate={installUpdate}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenMobile={() => setMobileOpen(true)}
         />
-        {error && (
-          <div className="border-b bg-destructive/10 px-3 py-1.5 text-xs text-destructive">{error}</div>
-        )}
-        {recoveryNotice && (
-          <div className="flex items-start justify-between gap-3 border-b bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
-            <span className="min-w-0 break-words">{recoveryNotice}</span>
-            <button type="button" className="shrink-0 underline" onClick={() => setRecoveryNotice(null)}>Entendi</button>
-          </div>
-        )}
 
-        <div className="relative flex-1 bg-canvas">
-          {Object.entries(tabs).flatMap(([projectId, list]) =>
-            list.map((tab) => {
-              const visible = projectId === selectedId && activeTab[projectId] === tab.id && !missing.has(projectId)
-              if (tab.kind === 'file') {
-                const projectPath = state.projects.find((p) => p.id === projectId)?.path ?? ''
-                if (tab.diff) {
-                  return (
-                    <Suspense key={`${tab.id}:diff`} fallback={<div className="absolute inset-0 bg-canvas" />}>
-                      <DiffView
+        <main className="flex min-w-0 flex-1 flex-col">
+          <TabBar
+            tabs={projectTabs}
+            activeId={selected ? activeTab[selected.id] : undefined}
+            rightPanelOpen={rightPanelOpen}
+            onSelect={(id) => selected && selectTab(selected.id, id)}
+            onClose={(id) => selected && closeTab(selected.id, id)}
+            onRename={renameTab}
+            onContextMenu={(tabId, x, y) => selected && openTabMenu(selected.id, tabId, 'bar', x, y)}
+            renameRequest={renameRequest?.where === 'bar' ? renameRequest : null}
+            onNew={(choice) => selected && newTab(selected, choice)}
+            onToggleRightPanel={toggleRightPanel}
+            projectId={selected?.id ?? ''}
+            onReorder={(fromId, toId, place) => selected && reorderTab(selected.id, fromId, toId, place)}
+            atWindowEdge={!(rightPanelOpen && selected)}
+          />
+          {error && (
+            <div className="border-b bg-destructive/10 px-3 py-1.5 text-xs text-destructive">{error}</div>
+          )}
+          {recoveryNotice && (
+            <div className="flex items-start justify-between gap-3 border-b bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+              <span className="min-w-0 break-words">{recoveryNotice}</span>
+              <button type="button" className="shrink-0 underline" onClick={() => setRecoveryNotice(null)}>Entendi</button>
+            </div>
+          )}
+
+          <div className="relative flex-1 bg-canvas">
+            {Object.entries(tabs).flatMap(([projectId, list]) =>
+              list.map((tab) => {
+                const visible = projectId === selectedId && activeTab[projectId] === tab.id && !missing.has(projectId)
+                if (tab.kind === 'file') {
+                  const projectPath = state.projects.find((p) => p.id === projectId)?.path ?? ''
+                  if (tab.diff) {
+                    return (
+                      <Suspense key={`${tab.id}:diff`} fallback={<div className="absolute inset-0 bg-canvas" />}>
+                        <DiffView
+                          projectId={projectId}
+                          projectPath={projectPath}
+                          path={tab.path}
+                          staged={tab.diff.staged}
+                          visible={visible}
+                          fontSize={state.settings.fileFontSize}
+                          wordWrap={state.settings.fileWordWrap}
+                          onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                        />
+                      </Suspense>
+                    )
+                  }
+                  if (tab.viewer === 'pdf') {
+                    return (
+                      <PdfView
+                        key={tab.id}
                         projectId={projectId}
                         projectPath={projectPath}
                         path={tab.path}
-                        staged={tab.diff.staged}
+                        visible={visible}
+                        onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                      />
+                    )
+                  }
+                  if (tab.viewer === 'image') {
+                    return (
+                      <ImageView
+                        key={tab.id}
+                        projectId={projectId}
+                        projectPath={projectPath}
+                        path={tab.path}
+                        visible={visible}
+                        onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                      />
+                    )
+                  }
+                  if (tab.viewer === 'markdown' && !tab.editing) {
+                    return (
+                      <MarkdownView
+                        key={`${tab.id}:preview`}
+                        projectId={projectId}
+                        projectPath={projectPath}
+                        path={tab.path}
+                        visible={visible}
+                        fontSize={state.settings.fileFontSize}
+                        onEdit={() => patchFile(tab.id, { editing: true })}
+                        onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                      />
+                    )
+                  }
+                  return (
+                    <Suspense key={`${tab.id}:edit`} fallback={<div className="absolute inset-0 bg-canvas" />}>
+                      <CodeView
+                        projectId={projectId}
+                        projectPath={projectPath}
+                        path={tab.path}
                         visible={visible}
                         fontSize={state.settings.fileFontSize}
                         wordWrap={state.settings.fileWordWrap}
+                        onWordWrapChange={(on) => void window.kora.setFileWordWrap(on).then(setState)}
+                        onDirtyChange={(dirty) => markDirty(tab.id, dirty)}
+                        onSaveHandle={(save) => (save ? fileSavers.current.set(tab.id, save) : fileSavers.current.delete(tab.id))}
+                        jump={tab.jump}
                         onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                        headerExtra={
+                          tab.viewer === 'markdown' && (
+                            <ModeToggle
+                              editing
+                              previewDisabledReason={tab.dirty ? 'Salve com Ctrl+S antes de visualizar' : undefined}
+                              onChange={(editing) => !editing && patchFile(tab.id, { editing: false })}
+                            />
+                          )
+                        }
                       />
                     </Suspense>
                   )
                 }
-                if (tab.viewer === 'pdf') {
+                if (!tab.live) {
                   return (
-                    <PdfView
-                      key={tab.id}
-                      projectId={projectId}
-                      projectPath={projectPath}
-                      path={tab.path}
+                    <DormantView
+                      key={`${tab.id}:dormant`}
+                      agent={tab.agent}
                       visible={visible}
-                      onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
-                    />
-                  )
-                }
-                if (tab.viewer === 'image') {
-                  return (
-                    <ImageView
-                      key={tab.id}
-                      projectId={projectId}
-                      projectPath={projectPath}
-                      path={tab.path}
-                      visible={visible}
-                      onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
-                    />
-                  )
-                }
-                if (tab.viewer === 'markdown' && !tab.editing) {
-                  return (
-                    <MarkdownView
-                      key={`${tab.id}:preview`}
-                      projectId={projectId}
-                      projectPath={projectPath}
-                      path={tab.path}
-                      visible={visible}
-                      fontSize={state.settings.fileFontSize}
-                      onEdit={() => patchFile(tab.id, { editing: true })}
-                      onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                      startEditing={editOnOpen.current.has(tab.id)}
+                      onResume={() => resumeTab(projectId, tab, false)}
+                      onShell={() => resumeTab(projectId, tab, true)}
+                      onSetAgent={(agent) => {
+                        editOnOpen.current.delete(tab.id)
+                        setTabAgent({ id: tab.id, projectId, title: tab.title }, agent)
+                      }}
                     />
                   )
                 }
                 return (
-                  <Suspense key={`${tab.id}:edit`} fallback={<div className="absolute inset-0 bg-canvas" />}>
-                    <CodeView
-                      projectId={projectId}
-                      projectPath={projectPath}
-                      path={tab.path}
-                      visible={visible}
-                      fontSize={state.settings.fileFontSize}
-                      wordWrap={state.settings.fileWordWrap}
-                      onWordWrapChange={(on) => void window.kora.setFileWordWrap(on).then(setState)}
-                      onDirtyChange={(dirty) => markDirty(tab.id, dirty)}
-                      onSaveHandle={(save) => (save ? fileSavers.current.set(tab.id, save) : fileSavers.current.delete(tab.id))}
-                      jump={tab.jump}
-                      onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
-                      headerExtra={
-                        tab.viewer === 'markdown' && (
-                          <ModeToggle
-                            editing
-                            previewDisabledReason={tab.dirty ? 'Salve com Ctrl+S antes de visualizar' : undefined}
-                            onChange={(editing) => !editing && patchFile(tab.id, { editing: false })}
-                          />
-                        )
-                      }
-                    />
-                  </Suspense>
-                )
-              }
-              if (!tab.live) {
-                return (
-                  <DormantView
-                    key={`${tab.id}:dormant`}
-                    agent={tab.agent}
+                  <TerminalView
+                    key={tab.id}
+                    id={tab.id}
                     visible={visible}
-                    startEditing={editOnOpen.current.has(tab.id)}
-                    onResume={() => resumeTab(projectId, tab, false)}
-                    onShell={() => resumeTab(projectId, tab, true)}
-                    onSetAgent={(agent) => {
-                      editOnOpen.current.delete(tab.id)
-                      setTabAgent({ id: tab.id, projectId, title: tab.title }, agent)
-                    }}
+                    onTitle={(title) => autoTitle(tab.id, title)}
+                    onReady={(cols, rows) => void spawnWhenReady(tab.id, cols, rows)}
+                    fontSize={state.settings.terminalFontSize}
+                    projectId={projectId}
+                    onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
                   />
                 )
-              }
-              return (
-                <TerminalView
-                  key={tab.id}
-                  id={tab.id}
-                  visible={visible}
-                  onTitle={(title) => autoTitle(tab.id, title)}
-                  onReady={(cols, rows) => void spawnWhenReady(tab.id, cols, rows)}
-                  fontSize={state.settings.terminalFontSize}
-                  projectId={projectId}
-                  onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
-                />
+              })
+            )}
+
+            {selected && missing.has(selected.id) && (
+              <EmptyState
+                ring={rings}
+                title={`A pasta de "${selected.name}" não foi encontrada`}
+                detail={selected.path}
+                note="Ela foi movida, renomeada ou apagada fora do Kora. Se ela mudou de lugar, localize a pasta nova: abas, categoria e nome continuam."
+                actions={[
+                  { label: 'Localizar pasta…', onClick: () => relocateProject(selected) },
+                  { label: 'Remover da lista', onClick: () => void removeProject(selected) }
+                ]}
+              />
+            )}
+            {selected && !missing.has(selected.id) && projectTabs.length === 0 && (
+              <EmptyState
+                ring={rings}
+                title={selected.name}
+                detail={selected.path}
+                actions={[
+                  { label: 'Claude', onClick: () => newTab(selected, 'claude') },
+                  { label: 'Codex', onClick: () => newTab(selected, 'codex') },
+                  { label: 'OpenCode', onClick: () => newTab(selected, 'opencode') },
+                  { label: 'Terminal', onClick: () => newTab(selected, 'shell') }
+                ]}
+              />
+            )}
+            {!selected && (
+              <EmptyState
+                ring={rings}
+                title="Nenhum projeto selecionado"
+                detail="Adicione uma pasta na barra lateral para começar."
+                actions={[{ label: 'Adicionar projeto', onClick: () => void addProject() }]}
+              />
+            )}
+          </div>
+        </main>
+
+        {rightPanelOpen && selected && (
+          <RightPanel
+            key={`${selected.id}:${selected.path}`}
+            project={selected}
+            missing={missing.has(selected.id)}
+            openSessions={
+              new Map(
+                projectTabs.flatMap((t) =>
+                  t.kind === 'terminal' && t.agent ? [[t.agent.sessionId, t.titleLocked ? t.title : null] as const] : []
+                )
               )
-            })
-          )}
+            }
+            onOpenFile={(path) => openFile(selected, path)}
+            onOpenDiff={(path, staged) => openDiff(selected, path, staged)}
+            commitDraft={commitDrafts[selected.id] ?? ''}
+            onCommitDraftChange={(update) =>
+              setCommitDrafts((drafts) => ({ ...drafts, [selected.id]: update(drafts[selected.id] ?? '') }))
+            }
+            onOpenSession={(session) => openSession(selected, session, true)}
+            onPinSession={(session) => openSession(selected, session, false)}
+            onOpenWorktree={(path) => void openWorktree(path)}
+            onPathMoved={(from, to) => movePathInTabs(selected.id, from, to)}
+            hasUnsavedUnder={(rel) => hasUnsavedUnder(selected.id, rel)}
+            reveal={reveal}
+            activeAgent={activeTerminal?.agent ?? null}
+            activeActivity={activeTerminal?.live ? (activeTerminal.activity ?? null) : null}
+          />
+        )}
 
-          {selected && missing.has(selected.id) && (
-            <EmptyState
-              ring={rings}
-              title={`A pasta de "${selected.name}" não foi encontrada`}
-              detail={selected.path}
-              note="Ela foi movida, renomeada ou apagada fora do Kora. Se ela mudou de lugar, localize a pasta nova: abas, categoria e nome continuam."
-              actions={[
-                { label: 'Localizar pasta…', onClick: () => relocateProject(selected) },
-                { label: 'Remover da lista', onClick: () => void removeProject(selected) }
-              ]}
-            />
-          )}
-          {selected && !missing.has(selected.id) && projectTabs.length === 0 && (
-            <EmptyState
-              ring={rings}
-              title={selected.name}
-              detail={selected.path}
-              actions={[
-                { label: 'Claude', onClick: () => newTab(selected, 'claude') },
-                { label: 'Codex', onClick: () => newTab(selected, 'codex') },
-                { label: 'OpenCode', onClick: () => newTab(selected, 'opencode') },
-                { label: 'Terminal', onClick: () => newTab(selected, 'shell') }
-              ]}
-            />
-          )}
-          {!selected && (
-            <EmptyState
-              ring={rings}
-              title="Nenhum projeto selecionado"
-              detail="Adicione uma pasta na barra lateral para começar."
-              actions={[{ label: 'Adicionar projeto', onClick: () => void addProject() }]}
-            />
-          )}
-        </div>
-      </main>
-
-      {rightPanelOpen && selected && (
-        <RightPanel
-          key={`${selected.id}:${selected.path}`}
-          project={selected}
-          missing={missing.has(selected.id)}
-          openSessions={
-            new Map(
-              projectTabs.flatMap((t) =>
-                t.kind === 'terminal' && t.agent ? [[t.agent.sessionId, t.titleLocked ? t.title : null] as const] : []
-              )
-            )
-          }
-          onOpenFile={(path) => openFile(selected, path)}
-          onOpenDiff={(path, staged) => openDiff(selected, path, staged)}
-          commitDraft={commitDrafts[selected.id] ?? ''}
-          onCommitDraftChange={(update) =>
-            setCommitDrafts((drafts) => ({ ...drafts, [selected.id]: update(drafts[selected.id] ?? '') }))
-          }
-          onOpenSession={(session) => openSession(selected, session, true)}
-          onPinSession={(session) => openSession(selected, session, false)}
-          onOpenWorktree={(path) => void openWorktree(path)}
-          onPathMoved={(from, to) => movePathInTabs(selected.id, from, to)}
-          hasUnsavedUnder={(rel) => hasUnsavedUnder(selected.id, rel)}
-          reveal={reveal}
-          activeAgent={activeTerminal?.agent ?? null}
-          activeActivity={activeTerminal?.live ? (activeTerminal.activity ?? null) : null}
-        />
-      )}
-
-      <OrphanDialog
-        survivors={orphans}
-        onKill={(key) => {
-          setOrphans((list) => list.filter((o) => o.key !== key))
-          void window.kora.killOrphan(key)
-        }}
-        onKillAll={() => {
-          setOrphans([])
-          void window.kora.killAllOrphans()
-        }}
-        onKeep={() => {
-          setOrphans([])
-          void window.kora.keepOrphans()
-        }}
-      />
-
-      {mobileOpen && <MobileDialog onClose={closeMobile} />}
-      {settingsOpen && (
-        <SettingsDialog
-          onOpenMobile={() => {
-            setSettingsOpen(false)
-            setMobileOpen(true)
+        <OrphanDialog
+          survivors={orphans}
+          onKill={(key) => {
+            setOrphans((list) => list.filter((o) => o.key !== key))
+            void window.kora.killOrphan(key)
           }}
-          version={appVersion}
-          update={update}
-          installing={installing}
-          onCheck={() => void window.kora.checkUpdate()}
-          onInstall={() => void installUpdate()}
-          onClose={closeSettings}
-          theme={state.settings.theme}
-          onSetTheme={(theme) => void window.kora.setTheme(theme).then(setState)}
-          alerts={state.settings.alerts}
-          onAlertsChange={(alerts) => void window.kora.setAlerts(alerts).then(setState)}
-          onPreviewSound={playChime}
-          support={{
-            errors: errorSummary,
-            copyRecent: async () => navigator.clipboard.writeText(await window.kora.recentErrors()),
-            saveFile: () => window.kora.saveDiagnostic(),
-            openFolder: () => window.kora.openLogsFolder(),
-            clear: async () => setErrorSummary(await window.kora.clearErrors())
+          onKillAll={() => {
+            setOrphans([])
+            void window.kora.killAllOrphans()
+          }}
+          onKeep={() => {
+            setOrphans([])
+            void window.kora.keepOrphans()
           }}
         />
-      )}
 
-      {toast && (
-        <div className="pointer-events-none fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-md border bg-card px-3 py-1.5 text-xs font-medium shadow-lg">
-          {toast}
-        </div>
-      )}
+        {mobileOpen && <MobileDialog onClose={closeMobile} />}
+        {settingsOpen && (
+          <SettingsDialog
+            onOpenMobile={() => {
+              setSettingsOpen(false)
+              setMobileOpen(true)
+            }}
+            version={appVersion}
+            update={update}
+            installing={installing}
+            onCheck={() => void window.kora.checkUpdate()}
+            onInstall={() => void installUpdate()}
+            onClose={closeSettings}
+            theme={state.settings.theme}
+            onSetTheme={(theme) => void window.kora.setTheme(theme).then(setState)}
+            alerts={state.settings.alerts}
+            onAlertsChange={(alerts) => void window.kora.setAlerts(alerts).then(setState)}
+            onPreviewSound={playChime}
+            support={{
+              errors: errorSummary,
+              copyRecent: async () => navigator.clipboard.writeText(await window.kora.recentErrors()),
+              saveFile: () => window.kora.saveDiagnostic(),
+              openFolder: () => window.kora.openLogsFolder(),
+              clear: async () => setErrorSummary(await window.kora.clearErrors())
+            }}
+          />
+        )}
 
-      {tabMenu && menuTab && (
-        <ContextMenu
-          x={tabMenu.x}
-          y={tabMenu.y}
-          items={tabMenuItems(tabMenu.projectId, menuTab, tabMenu.where)}
-          onClose={() => setTabMenu(null)}
-        />
-      )}
-    </div>
+        {toast && (
+          <div className="pointer-events-none fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-md border bg-card px-3 py-1.5 text-xs font-medium shadow-lg">
+            {toast}
+          </div>
+        )}
+
+        {tabMenu && menuTab && (
+          <ContextMenu
+            x={tabMenu.x}
+            y={tabMenu.y}
+            items={tabMenuItems(tabMenu.projectId, menuTab, tabMenu.where)}
+            onClose={() => setTabMenu(null)}
+          />
+        )}
+      </div>
+    </LinkedRenameContext.Provider>
   )
 }
 

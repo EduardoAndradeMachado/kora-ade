@@ -605,6 +605,7 @@ function SideTabs(props: SideTabsProps): React.JSX.Element {
               className={cn('flex-1', isDormant(tab) && 'italic opacity-70')}
               onCommit={(title) => props.onRename(tab.id, title)}
               editRequest={props.renameRequest?.tabId === tab.id ? props.renameRequest.n : undefined}
+              linkId={tab.id}
             />
             <AlertBell tab={tab} />
             <button

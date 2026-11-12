@@ -160,6 +160,8 @@ export function TabBar(props: Props): React.JSX.Element {
               className={cn(isDormant(tab) && 'italic opacity-70')}
               onCommit={(title) => props.onRename(tab.id, title)}
               editRequest={props.renameRequest?.tabId === tab.id ? props.renameRequest.n : undefined}
+              linkId={tab.id}
+              linkFocus
             />
             <AlertBell tab={tab} />
             <button
