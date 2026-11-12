@@ -9,8 +9,7 @@ export function formatTokens(n: number): string {
 export function formatUsd(v: number): string {
   if (v === 0) return 'US$ 0'
   if (v < 0.01) return `US$ ${pt(v, 4)}`
-  if (v < 10) return `US$ ${pt(v, 3)}`
-  return `US$ ${pt(v, 2)}`
+  return `US$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 export function formatMs(ms: number): string {
