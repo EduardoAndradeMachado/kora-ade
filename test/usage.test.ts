@@ -1,10 +1,14 @@
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   CLAUDE_USAGE_URL,
   CODEX_USAGE_URL,
+  OPENCODE_USAGE_URL,
+  parseOpencodeUsage,
+  readOpencodeUsage,
   backoffMs,
   parseCodexApiUsage,
   createUsageReader,
@@ -764,5 +768,160 @@ describe('leitor: próxima consulta de verdade', () => {
     await reader.read()
     expect(f.calls).toHaveLength(3)
     expect(f.calls[2]!.url).toBe(CODEX_USAGE_URL)
+  })
+})
+
+// ───────────── OpenCode Go (resposta real de /zen/go/v1/usage, nov/2026; banco do OpenCode v2.3) ─────────────
+
+const goResponse = (): Record<string, unknown> => ({
+  usage: {
+    rolling: { status: 'ok', percent: 5, resetsAt: '2026-09-24T17:33:10.000Z' },
+    weekly: { status: 'ok', percent: 46, resetsAt: '2026-09-28T00:00:00.000Z' },
+    monthly: { status: 'ok', percent: 23, resetsAt: '2026-10-22T21:40:51.000Z' }
+  }
+})
+
+const FAKE_GO_KEY = 'oc_sk_FAKE_go_key_0123456789'
+
+const goOk = (body: unknown = goResponse()): Response =>
+  new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+
+let opencodeDir: string
+
+// Mesmo esquema da tabela credential do OpenCode v2.3: uma linha por chave conectada, com o JSON em `value`.
+function writeOpencodeCredentials(rows: { integration: string; key: string; active: number | null; updated: number }[]): string {
+  opencodeDir = mkdtempSync(join(tmpdir(), 'kora-usage-opencode-'))
+  const dbFile = join(opencodeDir, 'opencode.db')
+  const db = new DatabaseSync(dbFile)
+  db.exec(`create table credential (
+    id text primary key, integration_id text not null, label text, value text not null,
+    connector_id text, method_id text, active integer, time_created integer not null, time_updated integer not null)`)
+  const insert = db.prepare('insert into credential values (?, ?, ?, ?, null, null, ?, ?, ?)')
+  rows.forEach((r, i) =>
+    insert.run(`cred_${i}`, r.integration, 'chave', JSON.stringify({ type: 'key', key: r.key }), r.active, r.updated, r.updated)
+  )
+  db.close()
+  return dbFile
+}
+
+describe('parse da resposta de uso do OpenCode Go', () => {
+  it('lê as janelas de 5 h, semanal e mensal da resposta real', () => {
+    expect(parseOpencodeUsage(goResponse(), NOW)).toEqual([
+      { label: '5 h', usedPercent: 5, resetsAt: Date.parse('2026-09-24T17:33:10.000Z'), windowMinutes: 300 },
+      { label: 'Semanal', usedPercent: 46, resetsAt: Date.parse('2026-09-28T00:00:00.000Z'), windowMinutes: 10080 },
+      { label: 'Mensal', usedPercent: 23, resetsAt: Date.parse('2026-10-22T21:40:51.000Z'), windowMinutes: null }
+    ])
+  })
+
+  it('zera a janela cujo reset já passou', () => {
+    const body = goResponse()
+    ;(body['usage'] as Record<string, unknown>)['rolling'] = { status: 'ok', percent: 70, resetsAt: new Date(NOW - MIN).toISOString() }
+    expect(parseOpencodeUsage(body, NOW)[0]).toMatchObject({ label: '5 h', usedPercent: 0, resetsAt: null })
+  })
+
+  it('lança UsageFormatError para formato desconhecido ou sem janela', () => {
+    expect(() => parseOpencodeUsage({ rolling: { percent: 5 } }, NOW)).toThrow(UsageFormatError)
+    expect(() => parseOpencodeUsage({ usage: {} }, NOW)).toThrow(UsageFormatError)
+  })
+})
+
+describe('readOpencodeUsage', () => {
+  it('envia a chave ativa do plano Go só para opencode.ai, sem seguir redirecionamento, e não a devolve', async () => {
+    const dbFile = writeOpencodeCredentials([
+      { integration: 'deepseek', key: 'sk-FAKE-deepseek', active: null, updated: NOW - DAY },
+      { integration: 'opencode-go', key: 'oc_sk_FAKE_antiga', active: 0, updated: NOW },
+      { integration: 'opencode-go', key: FAKE_GO_KEY, active: 1, updated: NOW - HOUR }
+    ])
+    const f = fakeFetch(() => goOk())
+    const usage = await readOpencodeUsage({ dbFile, dataDir: opencodeDir }, NOW, { fetch: f.fetch })
+    expect(f.calls).toHaveLength(1)
+    expect(f.calls[0]!.url).toBe(OPENCODE_USAGE_URL)
+    expect(new URL(OPENCODE_USAGE_URL).host).toBe('opencode.ai')
+    expect(f.calls[0]!.init?.redirect).toBe('error')
+    expect(new Headers(f.calls[0]!.init?.headers).get('authorization')).toBe(`Bearer ${FAKE_GO_KEY}`)
+    expect(usage).toMatchObject({ agent: 'opencode', plan: 'Plano Go', updatedAt: NOW })
+    expect(usage?.windows.map((w) => w.usedPercent)).toEqual([5, 46, 23])
+    expect(usage?.error).toBeUndefined()
+    expect(JSON.stringify(usage)).not.toContain('FAKE')
+  })
+
+  it('sem o plano Go conectado devolve null sem chamar a rede, mesmo com outras chaves no banco', async () => {
+    const dbFile = writeOpencodeCredentials([{ integration: 'deepseek', key: 'sk-FAKE-deepseek', active: 1, updated: NOW }])
+    const f = fakeFetch(() => goOk())
+    expect(await readOpencodeUsage({ dbFile, dataDir: opencodeDir }, NOW, { fetch: f.fetch })).toBeNull()
+    expect(await readOpencodeUsage({ dbFile: join(opencodeDir, 'nao-existe.db'), dataDir: opencodeDir }, NOW, { fetch: f.fetch })).toBeNull()
+    expect(f.calls).toHaveLength(0)
+  })
+
+  it('OpenCode antigo: lê a chave do auth.json quando o banco não tem a tabela credential', async () => {
+    opencodeDir = mkdtempSync(join(tmpdir(), 'kora-usage-opencode-'))
+    writeFileSync(
+      join(opencodeDir, 'auth.json'),
+      JSON.stringify({ deepseek: { type: 'api', key: 'sk-FAKE-deepseek' }, 'opencode-go': { type: 'api', key: FAKE_GO_KEY } }),
+      'utf8'
+    )
+    const f = fakeFetch(() => goOk())
+    const usage = await readOpencodeUsage({ dbFile: join(opencodeDir, 'opencode.db'), dataDir: opencodeDir }, NOW, { fetch: f.fetch })
+    expect(new Headers(f.calls[0]!.init?.headers).get('authorization')).toBe(`Bearer ${FAKE_GO_KEY}`)
+    expect(usage?.windows).toHaveLength(3)
+  })
+
+  it('chave recusada vira mensagem acionável, sem vazar a chave nem lançar', async () => {
+    const dbFile = writeOpencodeCredentials([{ integration: 'opencode-go', key: FAKE_GO_KEY, active: 1, updated: NOW }])
+    const body = '{"type":"error","error":{"type":"AuthError","message":"Unauthorized"}}'
+    const usage = await readOpencodeUsage({ dbFile, dataDir: opencodeDir }, NOW, {
+      fetch: fakeFetch(() => new Response(body, { status: 401 })).fetch
+    })
+    expect(usage).toMatchObject({ agent: 'opencode', windows: [] })
+    expect(usage?.error).toMatch(/Chave do OpenCode Go recusada \(HTTP 401\)/)
+    expect(JSON.stringify(usage)).not.toContain('FAKE')
+  })
+
+  it('resposta em formato desconhecido vira erro claro', async () => {
+    const dbFile = writeOpencodeCredentials([{ integration: 'opencode-go', key: FAKE_GO_KEY, active: 1, updated: NOW }])
+    const usage = await readOpencodeUsage({ dbFile, dataDir: opencodeDir }, NOW, { fetch: fakeFetch(() => goOk({ ok: true })).fetch })
+    expect(usage?.error).toMatch(/OpenCode Go em formato desconhecido/)
+  })
+})
+
+describe('leitor: OpenCode Go', () => {
+  it('aparece depois de Claude e Codex e é consultado no máximo 1x a cada 2 min', async () => {
+    writeCredentials(NOW + DAY)
+    writeCodexAuth()
+    const dbFile = writeOpencodeCredentials([{ integration: 'opencode-go', key: FAKE_GO_KEY, active: 1, updated: NOW }])
+    const f = fakeFetch(() => {
+      const url = f.calls.at(-1)!.url
+      return url === CODEX_USAGE_URL ? wham() : url === OPENCODE_USAGE_URL ? goOk() : ok()
+    })
+    let clock = NOW
+    const reader = createUsageReader({ claudeRoot, codexRoot, opencode: { dbFile, dataDir: opencodeDir }, fetch: f.fetch, now: () => clock })
+    const first = await reader.read()
+    expect(first.map((u) => [u.agent, u.nextCheckAt])).toEqual([
+      ['claude', NOW + 5 * MIN],
+      ['codex', NOW + MIN],
+      ['opencode', NOW + 2 * MIN]
+    ])
+    const goCalls = (): number => f.calls.filter((c) => c.url === OPENCODE_USAGE_URL).length
+    clock = NOW + 2 * MIN - 1_000
+    await reader.read()
+    expect(goCalls()).toBe(1)
+    clock = NOW + 2 * MIN
+    await reader.read()
+    expect(goCalls()).toBe(2)
+  })
+
+  it('429 recua e mantém as janelas anteriores dizendo quando consulta de novo', async () => {
+    const dbFile = writeOpencodeCredentials([{ integration: 'opencode-go', key: FAKE_GO_KEY, active: 1, updated: NOW }])
+    let limited = false
+    const f = fakeFetch(() => (limited ? new Response('', { status: 429 }) : goOk()))
+    let clock = NOW
+    const reader = createUsageReader({ claudeRoot, codexRoot, opencode: { dbFile, dataDir: opencodeDir }, fetch: f.fetch, now: () => clock })
+    await reader.read()
+    limited = true
+    clock = NOW + 2 * MIN
+    const [go] = await reader.read()
+    expect(go?.windows.map((w) => w.usedPercent)).toEqual([5, 46, 23])
+    expect(go?.error).toMatch(/opencode\.ai limitou as consultas de uso \(HTTP 429\); nova consulta/)
+    expect(go?.nextCheckAt).toBe(NOW + 2 * MIN + 10 * MIN)
   })
 })

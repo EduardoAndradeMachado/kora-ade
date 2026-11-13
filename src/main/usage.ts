@@ -3,12 +3,15 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { formatResetAt, windowLabel } from '../shared/usage-format'
 import type { AgentUsage, UsageWindow } from '../shared/usage-types'
+import { queryOpencode } from './opencode'
 
 const MINUTE = 60_000
 const WEEK_MS = 7 * 24 * 60 * MINUTE
 // A API de uso do Codex (a do /status dele) aguenta consulta frequente; a do Claude devolve 429 se consultada demais.
 export const CODEX_MIN_INTERVAL_MS = MINUTE
 export const CLAUDE_MIN_INTERVAL_MS = 5 * MINUTE
+// Sem histórico de 429 do opencode.ai: um meio-termo até ele mostrar o limite dele.
+export const OPENCODE_MIN_INTERVAL_MS = 2 * MINUTE
 export const BACKOFF_START_MS = 10 * MINUTE
 export const BACKOFF_MAX_MS = 60 * MINUTE
 
@@ -571,6 +574,127 @@ export async function readClaudeUsage(claudeRoot: string, deps: ClaudeDeps = {})
   }
 }
 
+// ───────────────────────────── OpenCode Go ─────────────────────────────
+
+// Único destino da chave do OpenCode Go. É a rota que devolve as janelas da assinatura com a própria chave do plano;
+// o console tem outra (/console/api/go/status), mas ela traz dados de cobrança que não precisamos.
+export const OPENCODE_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage'
+const OPENCODE_SOURCE = 'opencode.ai/zen/go/v1/usage'
+const OPENCODE_PROVIDER = 'opencode-go'
+
+const OpencodeWindowSchema = z.object({ percent: z.number(), resetsAt: z.string().nullish() })
+
+const OpencodeUsageSchema = z.object({
+  usage: z.object({
+    rolling: OpencodeWindowSchema.nullish(),
+    weekly: OpencodeWindowSchema.nullish(),
+    monthly: OpencodeWindowSchema.nullish()
+  })
+})
+
+/** Converte a resposta de /zen/go/v1/usage; lança UsageFormatError se ela não tiver nenhuma janela reconhecível. */
+export function parseOpencodeUsage(json: unknown, now: number): UsageWindow[] {
+  const parsed = OpencodeUsageSchema.safeParse(json)
+  if (!parsed.success) throw new UsageFormatError('Resposta de uso do OpenCode Go em formato desconhecido')
+  const { rolling, weekly, monthly } = parsed.data.usage
+  // O mês da assinatura conta da data da compra e muda de tamanho; sem duração fixa, fica sem windowMinutes.
+  const known: [string, number | null, z.infer<typeof OpencodeWindowSchema> | null | undefined][] = [
+    ['5 h', 300, rolling],
+    ['Semanal', 10080, weekly],
+    ['Mensal', null, monthly]
+  ]
+  const windows = known.flatMap(([label, minutes, w]) =>
+    w ? [normalizeWindow(label, w.percent, epochMs(w.resetsAt), minutes, now)] : []
+  )
+  if (windows.length === 0) throw new UsageFormatError('Resposta de uso do OpenCode Go sem nenhuma janela reconhecível')
+  return windows
+}
+
+const OpencodeKeySchema = z.object({ key: z.string().min(1) })
+
+function opencodeKeyOf(raw: unknown): string | null {
+  const parsed = OpencodeKeySchema.safeParse(raw)
+  return parsed.success ? parsed.data.key : null
+}
+
+export interface OpencodeSource {
+  dbFile: string
+  dataDir: string
+}
+
+/**
+ * A chave que o OpenCode guardou ao conectar o plano Go. O OpenCode v2 guarda na tabela `credential` do banco;
+ * as versões anteriores, no auth.json da pasta de dados, que segue de reserva.
+ */
+export async function readOpencodeKey(source: OpencodeSource): Promise<string | null> {
+  const rows = queryOpencode<{ value: string }>(
+    source.dbFile,
+    'credential',
+    'select value from credential where integration_id = ? order by coalesce(active, 0) desc, time_updated desc limit 1',
+    [OPENCODE_PROVIDER]
+  )
+  for (const row of rows ?? []) {
+    try {
+      const key = opencodeKeyOf(JSON.parse(row.value))
+      if (key) return key
+    } catch {
+      // credencial ilegível: tenta o auth.json
+    }
+  }
+  try {
+    const auth = JSON.parse(await readFile(join(source.dataDir, 'auth.json'), 'utf8')) as Record<string, unknown> | null
+    return opencodeKeyOf(auth?.[OPENCODE_PROVIDER])
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Única função que envia a chave do OpenCode Go para a rede: GET em OPENCODE_USAGE_URL com `Authorization: Bearer`.
+ * `redirect: 'error'` impede que um redirecionamento leve a chave a outro host.
+ */
+export async function fetchOpencodeUsageJson(key: string, fetchImpl: typeof fetch = fetch): Promise<unknown> {
+  const res = await fetchImpl(OPENCODE_USAGE_URL, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
+    redirect: 'error',
+    signal: AbortSignal.timeout(USAGE_TIMEOUT_MS)
+  })
+  if (!res.ok) throw new UsageHttpError(res.status, parseRetryAfter(res.headers.get('retry-after'), Date.now()))
+  return await res.json()
+}
+
+function opencodeErrorMessage(err: unknown): string {
+  if (err instanceof UsageFormatError) return err.message
+  if (err instanceof UsageHttpError) {
+    if (err.status === 401 || err.status === 403)
+      return `Chave do OpenCode Go recusada (HTTP ${err.status}); conecte o plano de novo no OpenCode`
+    if (err.status === 429) return 'opencode.ai limitou as consultas de uso (HTTP 429)'
+    return `opencode.ai respondeu HTTP ${err.status}`
+  }
+  // Só o nome do erro: a mensagem de falhas de rede não é nossa e não vale arriscar que carregue cabeçalhos.
+  const name = err instanceof Error ? err.name : 'erro'
+  return `Sem resposta de opencode.ai (${name})`
+}
+
+/** null quando o OpenCode não tem o plano Go conectado nesta máquina: sem chave, nenhuma consulta sai. */
+export async function readOpencodeUsage(
+  source: OpencodeSource,
+  now = Date.now(),
+  deps: { fetch?: typeof fetch } = {}
+): Promise<UsageRead | null> {
+  const key = await readOpencodeKey(source)
+  if (!key) return null
+  const base = { agent: 'opencode' as const, updatedAt: now, source: OPENCODE_SOURCE, plan: 'Plano Go' }
+  try {
+    return { ...base, windows: parseOpencodeUsage(await fetchOpencodeUsageJson(key, deps.fetch), now) }
+  } catch (err) {
+    const failed: UsageRead = { ...base, windows: [], error: opencodeErrorMessage(err) }
+    if (err instanceof UsageHttpError && err.status === 429) failed.rateLimited = { retryAfterMs: err.retryAfterMs }
+    return failed
+  }
+}
+
 // ───────────────────────────── Leitor com throttle ─────────────────────────────
 
 export interface CachedSlot {
@@ -588,6 +712,7 @@ export interface UsageCache {
 export interface UsageReaderDeps {
   claudeRoot: string
   codexRoot: string
+  opencode?: OpencodeSource
   fetch?: typeof fetch
   now?: () => number
   cache?: UsageCache
@@ -599,7 +724,11 @@ interface Slot extends CachedSlot {
   inflight: Promise<AgentUsage | null> | null
 }
 
-const INTERVAL: Record<AgentUsage['agent'], number> = { claude: CLAUDE_MIN_INTERVAL_MS, codex: CODEX_MIN_INTERVAL_MS }
+const INTERVAL: Record<AgentUsage['agent'], number> = {
+  claude: CLAUDE_MIN_INTERVAL_MS,
+  codex: CODEX_MIN_INTERVAL_MS,
+  opencode: OPENCODE_MIN_INTERVAL_MS
+}
 
 export function backoffMs(failures: number, retryAfterMs: number | null): number {
   const exponential = Math.min(BACKOFF_MAX_MS, BACKOFF_START_MS * 2 ** Math.max(0, failures - 1))
@@ -607,7 +736,7 @@ export function backoffMs(failures: number, retryAfterMs: number | null): number
 }
 
 /**
- * Cada agente é consultado no máximo 1x por intervalo (5 min o Claude, 1 min o Codex), por mais que a UI peça,
+ * Cada agente é consultado no máximo 1x por intervalo (5 min o Claude, 1 min o Codex, 2 min o OpenCode Go), por mais que a UI peça,
  * inclusive o botão de atualizar; chamadas simultâneas compartilham a mesma consulta. Depois de um 429 a próxima
  * consulta respeita o Retry-After ou recua de 10 min até 1 h. Token vencido não consome o intervalo de consulta.
  * Se uma consulta falhar, as janelas anteriores
@@ -617,7 +746,7 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
   const now = deps.now ?? Date.now
   let slots: Map<string, Slot> | null = null
   // Consulta que estava no ar quando o login trocou é da conta anterior: chega, mas não vai para o cache.
-  const epochs: Record<AgentUsage['agent'], number> = { claude: 0, codex: 0 }
+  const epochs: Record<AgentUsage['agent'], number> = { claude: 0, codex: 0, opencode: 0 }
   const loaded = (): Map<string, Slot> => {
     if (slots) return slots
     slots = new Map()
@@ -678,7 +807,8 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
     async read() {
       const results = await Promise.all([
         throttled('claude', () => readClaudeUsage(deps.claudeRoot, { fetch: deps.fetch, now: now(), onUsage: deps.onClaudeUsage })),
-        throttled('codex', () => readCodexUsage(deps.codexRoot, now(), { fetch: deps.fetch }))
+        throttled('codex', () => readCodexUsage(deps.codexRoot, now(), { fetch: deps.fetch })),
+        throttled('opencode', async () => (deps.opencode ? readOpencodeUsage(deps.opencode, now(), { fetch: deps.fetch }) : null))
       ])
       return results.filter((r): r is AgentUsage => r !== null)
     },

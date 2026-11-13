@@ -17,7 +17,7 @@ import { AgentDetector, UNREADABLE } from './agent-detect'
 import { createRolloutFinder, FolderWatch, isClaudeTranscript } from './agent-watch'
 import { listProjectSessions, sessionArtifacts } from './sessions'
 import { dayMetrics, sessionMetrics, type MetricsSources } from './metrics'
-import { deleteOpencodeSession, newOpencodeSessionId, opencodeActivity, opencodeDbPath } from './opencode'
+import { deleteOpencodeSession, newOpencodeSessionId, opencodeActivity, opencodeDataDir, opencodeDbPath } from './opencode'
 import { createEntry, openInDefaultBrowser, renameEntry } from './file-actions'
 import { ProjectIcons } from './project-icons'
 import { savePastedImage } from './pasted-image'
@@ -73,6 +73,7 @@ const resumeFile = (): string => join(app.getPath('userData'), 'resume-after-upd
 const usage = createUsageReader({
   claudeRoot: join(homedir(), '.claude'),
   codexRoot: join(homedir(), '.codex'),
+  opencode: { dbFile: opencodeDbPath(), dataDir: opencodeDataDir() },
   cache: {
     load: () => JSON.parse(readFileSync(usageCacheFile(), 'utf8')),
     save: (slots) => writeFileSync(usageCacheFile(), JSON.stringify(slots), 'utf8')

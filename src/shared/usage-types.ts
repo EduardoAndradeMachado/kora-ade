@@ -6,7 +6,7 @@ export interface UsageWindow {
   windowMinutes: number | null
 }
 
-export type UsageAgent = 'claude' | 'codex'
+export type UsageAgent = 'claude' | 'codex' | 'opencode'
 
 export interface AgentUsage {
   agent: UsageAgent
@@ -16,6 +16,8 @@ export interface AgentUsage {
   source: string
   // E-mail da conta conectada, quando o agente o deixa legível no disco (Codex); o do Claude vem do cofre de contas.
   account?: string
+  /** Plano pago quando ele é o que identifica a conta (o OpenCode Go entra por chave, sem e-mail). */
+  plan?: string
   error?: string
   /** epoch ms da próxima consulta de verdade; antes disso, atualizar devolve o mesmo dado. */
   nextCheckAt?: number

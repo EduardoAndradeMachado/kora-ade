@@ -14,7 +14,7 @@ import { SessionActions } from './SessionActions'
 import { ProjectActions } from './ProjectActions'
 import { NewTabSheet, TabIcon, type NewTabKind } from './NewTabSheet'
 import { AgentIcon, agentLabel } from '@/components/AgentIcon'
-import { CompactAgent } from '@/components/UsageMeter'
+import { CompactUsage } from '@/components/UsageMeter'
 import { useLongPress } from './longPress'
 import { PcSheet } from './PcSheet'
 import { SkeletonHome, SkeletonRows } from './Skeleton'
@@ -273,7 +273,7 @@ export function MobileApp(): React.JSX.Element {
     {/* Uma linha só: os limites ocupam o espaço e a engrenagem fica ao lado; o tema mora nas configurações. */}
     <footer className="mobile-footer">
       {usage.length > 0 && <button className="usage-footer" aria-label="Limites de uso e conta" onClick={() => navigate({ ...route, pc: 'usage' })} {...longPress(() => navigate({ ...route, pc: 'usage' }))}>
-        {usage.map((agent) => <CompactAgent key={agent.agent} usage={agent} now={Date.now()} />)}
+        <CompactUsage usage={usage} now={Date.now()} />
       </button>}
       <button className="icon-button footer-settings" aria-label="Configurações" onClick={() => navigate({ ...route, pc: 'settings' })}><Icon name="engrenagem" /></button>
     </footer></> : route.file !== undefined ? <FileViewer actions={Boolean(route.fileOptions)} onActions={(open) => open ? navigate({ ...route, fileOptions: { path: route.file!, name: route.file!.split(/[\\/]/).pop() ?? route.file!, isDir: false } }) : back()} key={route.file} projectId={projectId} path={route.file} dark={document.documentElement.classList.contains('dark')} connection={connection} onBack={back} onChat={toChat} onOpenFile={(file) => navigate({ ...route, file })} />

@@ -50,26 +50,50 @@ export function Bar({ percent, className }: { percent: number; className?: strin
 const resetIn = (w: UsageWindow, now: number): string =>
   w.resetsAt === null ? 'sem reset pendente' : `reseta ${formatResetIn(w.resetsAt - now)}`
 
-export function CompactAgent({ usage, now }: { usage: AgentUsage; now: number }): React.JSX.Element {
+function compactTip(usage: AgentUsage, tight: UsageWindow | null, now: number): string {
+  const name = agentLabel(usage.agent)
+  if (!tight) return `${name}: ${usage.error ?? 'uso indisponível'}`
+  const line = `${name} · ${tight.label}: ${Math.round(tight.usedPercent)}% usado, ${resetIn(tight, now)}`
+  return usage.error ? `${line} · ${usage.error}` : line
+}
+
+// Uma célula por agente com a janela mais apertada; o "reseta em" só cabe quando há um agente sozinho na linha.
+function CompactAgent({ usage, now, alone }: { usage: AgentUsage; now: number; alone: boolean }): React.JSX.Element {
   const tight = mostConstrained(usage.windows)
   return (
-    <span className="flex min-w-0 items-center gap-1.5">
+    <span data-tip={compactTip(usage, tight, now)} className="flex min-w-0 items-center gap-1.5">
       <AgentIcon kind={usage.agent} className="size-3" />
       {tight ? (
         <>
-          <Bar percent={tight.usedPercent} className="h-1 w-8 shrink-0" />
-          <span className={cn('tabular-nums', isCritical(tight.usedPercent) && 'text-destructive')}>
+          <Bar percent={tight.usedPercent} className={cn('h-1 shrink-0 bg-foreground/10', alone ? 'w-8' : 'w-6')} />
+          <span className={cn('shrink-0 tabular-nums', isCritical(tight.usedPercent) && 'text-destructive')}>
             {Math.round(tight.usedPercent)}%
           </span>
-          <span className="truncate">· {resetIn(tight, now)}</span>
+          {alone && <span className="truncate">· {resetIn(tight, now)}</span>}
+          {usage.error && <Icon name="alerta" className="size-3 shrink-0 text-destructive" />}
         </>
       ) : (
-        <span className="flex items-center gap-1">
-          <Icon name="alerta" className="size-3" />
-          indisponível
+        <span className="flex min-w-0 items-center gap-1">
+          <Icon name="alerta" className="size-3 shrink-0" />
+          <span className="truncate">indisponível</span>
         </span>
       )}
-      {tight && usage.error && <Icon name="alerta" className="size-3 text-destructive" />}
+    </span>
+  )
+}
+
+export function CompactUsage({ usage, now }: { usage: AgentUsage[]; now: number }): React.JSX.Element {
+  return (
+    <span
+      className="grid w-full min-w-0 items-center gap-x-2"
+      style={{
+        gridTemplateColumns: `repeat(${usage.length}, minmax(0, auto))`,
+        justifyContent: usage.length === 1 ? 'start' : 'space-between'
+      }}
+    >
+      {usage.map((u) => (
+        <CompactAgent key={u.agent} usage={u} now={now} alone={usage.length === 1} />
+      ))}
     </span>
   )
 }
@@ -88,7 +112,9 @@ function AgentDetail({ usage, now, onRefresh }: { usage: AgentUsage; now: number
         {usage.agent === 'claude' ? (
           <ClaudeAccountSwitcher now={now} liveWeekly={claudeWeekly(usage)} onSwitched={onRefresh} />
         ) : (
-          usage.account && <span className="ml-auto truncate px-1.5 text-[11px] text-muted-foreground">{usage.account}</span>
+          (usage.account ?? usage.plan) && (
+            <span className="ml-auto truncate px-1.5 text-[11px] text-muted-foreground">{usage.account ?? usage.plan}</span>
+          )
         )}
       </header>
       {usage.error && (
@@ -126,7 +152,7 @@ function AgentDetail({ usage, now, onRefresh }: { usage: AgentUsage; now: number
 export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
   const now = useNow()
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const [anchor, setAnchor] = useState<{ left: number; bottom: number } | null>(null)
+  const [anchor, setAnchor] = useState<{ left: number; bottom: number; maxHeight: number } | null>(null)
 
   const toggle = (): void => {
     if (anchor) return setAnchor(null)
@@ -134,7 +160,9 @@ export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
     // Abre para cima (o medidor fica no rodapé) e não passa da borda direita em janelas estreitas.
     setAnchor({
       left: Math.max(8, Math.min(r.left, window.innerWidth - POPOVER_WIDTH - 8)),
-      bottom: window.innerHeight - r.top + GAP
+      bottom: window.innerHeight - r.top + GAP,
+      // Usa toda a altura acima do rodapé; só rola quando os agentes não cabem na janela.
+      maxHeight: Math.max(160, r.top - GAP - 8)
     })
   }
 
@@ -170,7 +198,7 @@ export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
         {usage.length === 0 ? (
           <span>Uso dos agentes indisponível</span>
         ) : (
-          usage.map((u) => <CompactAgent key={u.agent} usage={u} now={now} />)
+          <CompactUsage usage={usage} now={now} />
         )}
       </button>
       {anchor &&
@@ -179,8 +207,8 @@ export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
             role="dialog"
             aria-label="Limites de uso"
             onMouseDown={(e) => e.stopPropagation()}
-            style={{ left: anchor.left, bottom: anchor.bottom, width: POPOVER_WIDTH }}
-            className="fixed z-50 flex max-h-[70vh] max-w-[calc(100vw-16px)] flex-col gap-3 overflow-y-auto rounded-lg border bg-card p-3 text-card-foreground shadow-xl"
+            style={{ left: anchor.left, bottom: anchor.bottom, width: POPOVER_WIDTH, maxHeight: anchor.maxHeight }}
+            className="fixed z-50 flex max-w-[calc(100vw-16px)] flex-col gap-3 overflow-y-auto rounded-lg border bg-card p-3 text-card-foreground shadow-xl"
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium">Limites de uso</span>
@@ -195,7 +223,7 @@ export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
               </button>
             </div>
             {usage.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Nenhum dado de uso do Claude Code nem do Codex nesta máquina.</p>
+              <p className="text-xs text-muted-foreground">Nenhum dado de uso do Claude Code, do Codex nem do OpenCode Go nesta máquina.</p>
             ) : (
               usage.map((u, i) => (
                 <div key={u.agent} className={cn(i > 0 && 'border-t pt-3')}>
