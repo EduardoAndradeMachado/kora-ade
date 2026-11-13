@@ -58,19 +58,24 @@ function compactTip(usage: AgentUsage, tight: UsageWindow | null, now: number): 
 }
 
 // Uma célula por agente com a janela mais apertada; o "reseta em" só cabe quando há um agente sozinho na linha.
+// Erro com janelas antigas vira um ponto sobre o ícone: um alerta a mais por célula estoura os três na lateral.
 function CompactAgent({ usage, now, alone }: { usage: AgentUsage; now: number; alone: boolean }): React.JSX.Element {
   const tight = mostConstrained(usage.windows)
   return (
-    <span data-tip={compactTip(usage, tight, now)} className="flex min-w-0 items-center gap-1.5">
-      <AgentIcon kind={usage.agent} className="size-3" />
+    <span data-tip={compactTip(usage, tight, now)} className="flex min-w-0 items-center gap-1">
+      <span className="relative flex shrink-0">
+        <AgentIcon kind={usage.agent} className="size-3" />
+        {tight && usage.error && (
+          <span data-usage-error className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-destructive ring-1 ring-background" />
+        )}
+      </span>
       {tight ? (
         <>
-          <Bar percent={tight.usedPercent} className={cn('h-1 shrink-0 bg-foreground/10', alone ? 'w-8' : 'w-6')} />
+          <Bar percent={tight.usedPercent} className={cn('h-1 bg-foreground/10', alone ? 'w-8 shrink-0' : 'w-6 min-w-2 shrink')} />
           <span className={cn('shrink-0 tabular-nums', isCritical(tight.usedPercent) && 'text-destructive')}>
             {Math.round(tight.usedPercent)}%
           </span>
           {alone && <span className="truncate">· {resetIn(tight, now)}</span>}
-          {usage.error && <Icon name="alerta" className="size-3 shrink-0 text-destructive" />}
         </>
       ) : (
         <span className="flex min-w-0 items-center gap-1">
