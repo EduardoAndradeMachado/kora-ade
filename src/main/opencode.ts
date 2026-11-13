@@ -93,6 +93,24 @@ export function queryOpencode<T>(dbFile: string, table: string, sql: string, par
   return rows<T>(db, sql, params)
 }
 
+export type OpencodeTableRead<T> = { rows: T[] } | 'absent' | 'unreadable'
+
+/** Como queryOpencode, mas separa "não existe" (banco ou tabela ausente) de "não deu para ler agora" (travado, migrando). */
+export function readOpencodeTable<T>(dbFile: string, table: string, sql: string, params: SQLInputValue[] = []): OpencodeTableRead<T> {
+  if (!dbFile || !existsSync(dbFile)) return 'absent'
+  const db = connect(dbFile)
+  if (!db) return 'unreadable'
+  const found = rows<{ name: string }>(db, "select name from sqlite_master where type = 'table' and name = ?", [table])
+  const result = found === null ? null : found.length === 0 ? 'absent' : rows<T>(db, sql, params)
+  if (result === 'absent') return 'absent'
+  if (result === null) {
+    // A próxima leitura reabre: se o OpenCode recriou o arquivo, a conexão antiga não enxerga o novo.
+    closeConnection()
+    return 'unreadable'
+  }
+  return { rows: result }
+}
+
 const normalize = (path: string): string => resolve(path).replace(/[\\/]+$/, '').toLowerCase()
 
 const clip = (text: string): string => {

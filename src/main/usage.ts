@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { formatResetAt, windowLabel } from '../shared/usage-format'
 import type { AgentUsage, UsageWindow } from '../shared/usage-types'
-import { queryOpencode } from './opencode'
+import { readOpencodeTable } from './opencode'
 
 const MINUTE = 60_000
 const WEEK_MS = 7 * 24 * 60 * MINUTE
@@ -531,6 +531,8 @@ export interface ClaudeDeps {
 export interface UsageRead extends AgentUsage {
   rateLimited?: { retryAfterMs: number | null }
   credentialsExpired?: true
+  // A fonte local não respondeu agora (banco travado): fica o que já estava na tela, sem gastar o intervalo.
+  unreadable?: true
 }
 
 /** null quando não há login OAuth do Claude Code nesta máquina (sem .credentials.json). */
@@ -622,23 +624,37 @@ export interface OpencodeSource {
   dataDir: string
 }
 
+interface CredentialRow {
+  value: string
+  active?: number | null
+  time_updated?: number | null
+}
+
+// A conectada por último ganha; sem as colunas (esquema mais antigo da tabela), vale a ordem do banco.
+const byActiveThenRecent = (a: CredentialRow, b: CredentialRow): number =>
+  (b.active === 1 ? 1 : 0) - (a.active === 1 ? 1 : 0) || (b.time_updated ?? 0) - (a.time_updated ?? 0)
+
 /**
  * A chave que o OpenCode guardou ao conectar o plano Go. O OpenCode v2 guarda na tabela `credential` do banco;
- * as versões anteriores, no auth.json da pasta de dados, que segue de reserva.
+ * as versões anteriores, no auth.json da pasta de dados, que segue de reserva. 'unreadable' quando o banco existe
+ * mas não deu para ler agora: não é o mesmo que não ter o plano.
  */
-export async function readOpencodeKey(source: OpencodeSource): Promise<string | null> {
-  const rows = queryOpencode<{ value: string }>(
+export async function readOpencodeKey(source: OpencodeSource): Promise<string | null | 'unreadable'> {
+  const table = readOpencodeTable<CredentialRow>(
     source.dbFile,
     'credential',
-    'select value from credential where integration_id = ? order by coalesce(active, 0) desc, time_updated desc limit 1',
+    'select * from credential where integration_id = ?',
     [OPENCODE_PROVIDER]
   )
-  for (const row of rows ?? []) {
-    try {
-      const key = opencodeKeyOf(JSON.parse(row.value))
-      if (key) return key
-    } catch {
-      // credencial ilegível: tenta o auth.json
+  if (table === 'unreadable') return 'unreadable'
+  if (table !== 'absent') {
+    for (const row of [...table.rows].sort(byActiveThenRecent)) {
+      try {
+        const key = opencodeKeyOf(JSON.parse(row.value))
+        if (key) return key
+      } catch {
+        // credencial ilegível: tenta a próxima
+      }
     }
   }
   try {
@@ -661,7 +677,12 @@ export async function fetchOpencodeUsageJson(key: string, fetchImpl: typeof fetc
     signal: AbortSignal.timeout(USAGE_TIMEOUT_MS)
   })
   if (!res.ok) throw new UsageHttpError(res.status, parseRetryAfter(res.headers.get('retry-after'), Date.now()))
-  return await res.json()
+  try {
+    return await res.json()
+  } catch {
+    // Página de erro de CDN ou proxy chega com 200 e HTML.
+    throw new UsageFormatError('Resposta de uso do OpenCode Go não veio em JSON')
+  }
 }
 
 function opencodeErrorMessage(err: unknown): string {
@@ -686,6 +707,9 @@ export async function readOpencodeUsage(
   const key = await readOpencodeKey(source)
   if (!key) return null
   const base = { agent: 'opencode' as const, updatedAt: now, source: OPENCODE_SOURCE, plan: 'Plano Go' }
+  if (key === 'unreadable') {
+    return { ...base, windows: [], error: 'Banco do OpenCode indisponível agora; mostrando a última leitura', unreadable: true }
+  }
   try {
     return { ...base, windows: parseOpencodeUsage(await fetchOpencodeUsageJson(key, deps.fetch), now) }
   } catch (err) {
@@ -786,10 +810,13 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
       }))
       .then((result) => {
         const at = now()
-        const { rateLimited, credentialsExpired, ...next } = result ?? ({} as UsageRead)
+        const { rateLimited, credentialsExpired, unreadable, ...next } = result ?? ({} as UsageRead)
         const failures = rateLimited ? (slot?.failures ?? 0) + 1 : 0
-        const nextAt = credentialsExpired ? at : at + (rateLimited ? backoffMs(failures, rateLimited.retryAfterMs) : INTERVAL[key])
+        const nextAt =
+          credentialsExpired || unreadable ? at : at + (rateLimited ? backoffMs(failures, rateLimited.retryAfterMs) : INTERVAL[key])
         let value: AgentUsage | null = result === null ? null : next
+        // Sem leitura anterior, nada aparece: quem não tem o plano não deve ver o OpenCode por causa de um banco travado.
+        if (unreadable) value = previous && previous.windows.length > 0 ? { ...previous, error: next.error } : previous
         if (value && rateLimited) value = { ...value, error: `${value.error}; nova consulta ${formatResetAt(nextAt, at, deps.timeZone)}` }
         if (value?.error && value.windows.length === 0 && previous && previous.windows.length > 0) {
           value = { ...previous, error: value.error }

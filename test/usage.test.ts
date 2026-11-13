@@ -924,4 +924,75 @@ describe('leitor: OpenCode Go', () => {
     expect(go?.error).toMatch(/opencode\.ai limitou as consultas de uso \(HTTP 429\); nova consulta/)
     expect(go?.nextCheckAt).toBe(NOW + 2 * MIN + 10 * MIN)
   })
+
+  // O OpenCode segura o banco numa escrita ou migração: a leitura da chave falha, mas o plano continua conectado.
+  const lockExclusive = (dbFile: string): DatabaseSync => {
+    const lock = new DatabaseSync(dbFile)
+    lock.exec('begin exclusive')
+    return lock
+  }
+
+  it('banco travado mantém as janelas anteriores com aviso, sem chamar a rede, e tenta de novo na próxima leitura', async () => {
+    const dbFile = writeOpencodeCredentials([{ integration: 'opencode-go', key: FAKE_GO_KEY, active: 1, updated: NOW }])
+    const f = fakeFetch(() => goOk())
+    let clock = NOW
+    const reader = createUsageReader({ claudeRoot, codexRoot, opencode: { dbFile, dataDir: opencodeDir }, fetch: f.fetch, now: () => clock })
+    await reader.read()
+    clock = NOW + 2 * MIN
+    const lock = lockExclusive(dbFile)
+    const [held] = await reader.read()
+    expect(held?.windows.map((w) => w.usedPercent)).toEqual([5, 46, 23])
+    expect(held?.error).toMatch(/Banco do OpenCode indisponível agora/)
+    expect(held?.nextCheckAt).toBe(NOW + 2 * MIN)
+    expect(f.calls).toHaveLength(1)
+    lock.exec('rollback')
+    lock.close()
+    clock += 1_000
+    const [fresh] = await reader.read()
+    expect(f.calls).toHaveLength(2)
+    expect(fresh?.error).toBeUndefined()
+  })
+
+  it('banco travado sem leitura anterior não faz o OpenCode aparecer', async () => {
+    const dbFile = writeOpencodeCredentials([{ integration: 'opencode-go', key: FAKE_GO_KEY, active: 1, updated: NOW }])
+    const lock = lockExclusive(dbFile)
+    const f = fakeFetch(() => goOk())
+    const reader = createUsageReader({ claudeRoot, codexRoot, opencode: { dbFile, dataDir: opencodeDir }, fetch: f.fetch, now: () => NOW })
+    expect(await reader.read()).toEqual([])
+    lock.exec('rollback')
+    lock.close()
+    expect(f.calls).toHaveLength(0)
+  })
+})
+
+describe('readOpencodeUsage: credenciais fora do caso comum', () => {
+  it('tabela credential sem as colunas active e time_updated ainda entrega a chave', async () => {
+    opencodeDir = mkdtempSync(join(tmpdir(), 'kora-usage-opencode-'))
+    const dbFile = join(opencodeDir, 'opencode.db')
+    const db = new DatabaseSync(dbFile)
+    db.exec('create table credential (id text primary key, integration_id text not null, value text not null)')
+    db.prepare('insert into credential values (?, ?, ?)').run('cred_0', 'opencode-go', JSON.stringify({ type: 'key', key: FAKE_GO_KEY }))
+    db.close()
+    const f = fakeFetch(() => goOk())
+    await readOpencodeUsage({ dbFile, dataDir: opencodeDir }, NOW, { fetch: f.fetch })
+    expect(new Headers(f.calls[0]!.init?.headers).get('authorization')).toBe(`Bearer ${FAKE_GO_KEY}`)
+  })
+
+  it('credencial ativa ilegível passa para a próxima do banco, não para a chave antiga do auth.json', async () => {
+    const dbFile = writeOpencodeCredentials([{ integration: 'opencode-go', key: FAKE_GO_KEY, active: null, updated: NOW - DAY }])
+    const db = new DatabaseSync(dbFile)
+    db.prepare("insert into credential values ('cred_x', 'opencode-go', 'chave', '{corrompido', null, null, 1, ?, ?)").run(NOW, NOW)
+    db.close()
+    writeFileSync(join(opencodeDir, 'auth.json'), JSON.stringify({ 'opencode-go': { type: 'api', key: 'oc_sk_FAKE_antiga' } }), 'utf8')
+    const f = fakeFetch(() => goOk())
+    await readOpencodeUsage({ dbFile, dataDir: opencodeDir }, NOW, { fetch: f.fetch })
+    expect(new Headers(f.calls[0]!.init?.headers).get('authorization')).toBe(`Bearer ${FAKE_GO_KEY}`)
+  })
+
+  it('200 com página HTML vira erro de formato, não falta de resposta', async () => {
+    const dbFile = writeOpencodeCredentials([{ integration: 'opencode-go', key: FAKE_GO_KEY, active: 1, updated: NOW }])
+    const html = new Response('<html>manutenção</html>', { status: 200, headers: { 'content-type': 'text/html' } })
+    const usage = await readOpencodeUsage({ dbFile, dataDir: opencodeDir }, NOW, { fetch: fakeFetch(() => html).fetch })
+    expect(usage?.error).toBe('Resposta de uso do OpenCode Go não veio em JSON')
+  })
 })
