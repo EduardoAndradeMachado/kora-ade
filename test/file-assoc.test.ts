@@ -47,7 +47,8 @@ describe.runIf(process.platform === 'win32')('defaultAppFor no Windows de verdad
     expect(await defaultAppFor(`x.kora-sem-programa-${process.pid}`)).toBeNull()
   })
 
-  it('.txt tem programa em qualquer Windows', async () => {
+  // A imagem Windows Server do GitHub Actions não associa programa ao .txt.
+  it.skipIf(process.env.CI)('.txt tem programa num Windows de desktop', async () => {
     expect(await defaultAppFor('notas.TXT')).toMatch(/\S/)
   })
 })
