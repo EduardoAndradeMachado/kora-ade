@@ -1,11 +1,29 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Icon, type IconName } from '@/brand/icons'
-import type { GitBranch, GitCommitResult, GitFile, GitFileStatus, GitStatus, GitWorktree } from '@shared/git-types'
+import type {
+  GitBranch,
+  GitBranchDeleteResult,
+  GitCommitResult,
+  GitFile,
+  GitFileStatus,
+  GitHeadCommit,
+  GitStatus,
+  GitWorktree
+} from '@shared/git-types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/brand/Button'
 import { useConfirm } from '@/components/ConfirmDialog'
+import { ContextMenu, type MenuItem } from '@/components/ContextMenu'
+import { HistorySection } from '@/components/git/HistorySection'
+import { GitErrorNotice } from '@/components/git/GitErrorNotice'
+import { GIT_STYLE } from '@/lib/git-decorations'
+import { copyPath } from '@/lib/copied-path'
+import { ipcErrorMessage } from '@/lib/ipc-error'
+import type { GitDiffOpen } from '@/lib/file-tabs'
 
 interface Props {
+  projectId: string
+  projectPath: string
   status: GitStatus | null
   branches: GitBranch[]
   worktrees: GitWorktree[]
@@ -15,8 +33,9 @@ interface Props {
   onRefresh(): void
   onCreateBranch(name: string, checkout: boolean): void
   onCheckout(name: string, remote: string | null): void
-  onOpenFile(path: string): void
-  onOpenDiff(path: string, staged: boolean): void
+  // preview: clique simples (aba de pré-visualização); sem ele, a aba fica fixa (duplo clique, menu).
+  onOpenFile(path: string, opts?: { preview?: boolean }): void
+  onOpenDiff(path: string, staged: boolean, opts?: GitDiffOpen): void
   onOpenWorktree(path: string): void
   remote: string | null
   onInit(): void
@@ -32,6 +51,12 @@ interface Props {
   onPull(): void
   onSync(): void
   onFetch(): void
+  // Ações que o painel chama direto (histórico, branches, .gitignore, corrigir/desfazer commit): o `run` do
+  // useGit mostra o andamento, guarda o erro e atualiza o status no fim. true se deu certo.
+  run(action: () => Promise<unknown>, busyLabel?: string): Promise<boolean>
+  // Merge/rebase em andamento (topo do painel) e a seção de stash, montados pelo dono dos fluxos de conflito.
+  operationBanner?: React.ReactNode
+  stashSection?: React.ReactNode
 }
 
 const shortRemote = (url: string): string => url.replace(/^(https:\/\/github\.com\/|git@github\.com:)/, '').replace(/\.git$/, '')
@@ -115,19 +140,20 @@ function RemoteRow({ remote, onSave }: { remote: string | null; onSave(url: stri
   )
 }
 
-// Tons do VS Code: os claros para o tema escuro, os escuros para manter contraste no tema claro.
-const STATUS_BADGE: Record<GitFileStatus, { letter: string; label: string; className: string }> = {
-  modified: { letter: 'M', label: 'Modificado', className: 'text-[#895503] dark:text-[#e2c08d]' },
-  added: { letter: 'A', label: 'Adicionado', className: 'text-[#587c0c] dark:text-[#73c991]' },
-  untracked: { letter: 'U', label: 'Não rastreado', className: 'text-[#587c0c] dark:text-[#73c991]' },
-  deleted: { letter: 'D', label: 'Excluído', className: 'text-[#ad0707] dark:text-[#f48771]' },
-  renamed: { letter: 'R', label: 'Renomeado', className: 'text-[#1a6fb5] dark:text-[#75beff]' },
-  conflicted: { letter: '!', label: 'Conflito', className: 'font-bold text-[#c50f1f] dark:text-[#ff5c5c]' }
+// Letra e cor vêm das decorações da árvore de arquivos: o mesmo status tem a mesma cara nos dois painéis.
+const STATUS_LABEL: Record<GitFileStatus, string> = {
+  modified: 'Modificado',
+  added: 'Adicionado',
+  untracked: 'Não rastreado',
+  deleted: 'Excluído',
+  renamed: 'Renomeado',
+  conflicted: 'Conflito'
 }
 
+// "Na fila" em todo o painel (e nos títulos das abas de diff), no lugar do "Staged"/"Preparadas" do VS Code.
 const FILE_GROUPS: { id: string; title: string; match(file: GitFile): boolean }[] = [
   { id: 'files:conflicts', title: 'Conflitos', match: (f) => f.status === 'conflicted' },
-  { id: 'files:staged', title: 'Staged', match: (f) => f.staged && f.status !== 'conflicted' },
+  { id: 'files:staged', title: 'Na fila', match: (f) => f.staged && f.status !== 'conflicted' },
   {
     id: 'files:changes',
     title: 'Alterações',
@@ -186,6 +212,7 @@ function RowActions({ actions, disabled }: { actions: RowAction[]; disabled: boo
             e.stopPropagation()
             action.run()
           }}
+          onDoubleClick={(e) => e.stopPropagation()}
           className={cn(
             'rounded p-0.5 text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent',
             action.danger ? 'hover:text-destructive' : 'hover:text-foreground'
@@ -208,7 +235,7 @@ function SectionHeader({
   onToggle
 }: {
   title: string
-  count: number
+  count?: number
   open: boolean
   depth?: number
   actions?: RowAction[]
@@ -228,7 +255,7 @@ function SectionHeader({
       <Icon name="expandir" className={cn('size-3 shrink-0 transition-transform', open && 'rotate-90')} />
       <span className="flex-1 truncate">{title}</span>
       <RowActions actions={actions} disabled={disabled} />
-      <span className="rounded-full bg-secondary px-1.5 text-[10px] leading-4 normal-case">{count}</span>
+      {count !== undefined && <span className="rounded-full bg-secondary px-1.5 text-[10px] leading-4 normal-case">{count}</span>}
     </div>
   )
 }
@@ -236,53 +263,92 @@ function SectionHeader({
 // Renomeado na fila só sai inteiro levando o caminho antigo junto (senão a exclusão do antigo fica na fila).
 const pathsOf = (files: GitFile[]): string[] => files.flatMap((f) => (f.origPath ? [f.path, f.origPath] : [f.path]))
 
-// Não rastreado e conflito não têm diff útil com a fila: abre o próprio arquivo.
+// Não rastreado e conflito não têm diff útil com a fila: abrem o próprio arquivo, como no VS Code.
 const opensAsFile = (file: GitFile): boolean => file.status === 'untracked' || file.status === 'conflicted'
+
+// O HEAD tem o arquivo (no caminho antigo, se renomeado): não vale para não rastreado nem adicionado na fila.
+const existsInHead = (file: GitFile): boolean => file.status !== 'untracked' && !(file.staged && file.status === 'added')
 
 function FileRow({
   file,
   actions,
   disabled,
-  onOpen
+  onOpen,
+  onMenu
 }: {
   file: GitFile
   actions: RowAction[]
   disabled: boolean
-  onOpen(file: GitFile): void
+  onOpen(file: GitFile, preview: boolean): void
+  onMenu(e: React.MouseEvent, file: GitFile): void
 }): React.JSX.Element {
   const { name, dir } = splitPath(file.path)
-  const badge = STATUS_BADGE[file.status]
+  const style = GIT_STYLE[file.status]
   const deleted = file.status === 'deleted'
   const click = opensAsFile(file) ? 'clique para abrir o arquivo' : 'clique para ver o diff'
-  const title = `${file.origPath ? `${file.origPath} → ${file.path}` : file.path} — ${badge.label}\n${click}`
+  const title = `${file.origPath ? `${file.origPath} → ${file.path}` : file.path} — ${STATUS_LABEL[file.status]}\n${click} (duplo clique fixa a aba)`
 
   return (
-    <div data-git-file={file.path} data-tip={title} onClick={() => onOpen(file)} className={cn(ROW, 'group pl-4')}>
+    <div
+      data-git-file={file.path}
+      data-tip={title}
+      onClick={() => onOpen(file, true)}
+      onDoubleClick={() => onOpen(file, false)}
+      onContextMenu={(e) => onMenu(e, file)}
+      className={cn(ROW, 'group pl-4')}
+    >
       <Icon name="arquivo" className={cn('size-3.5 shrink-0 text-muted-foreground', deleted && 'opacity-50')} />
       <span className={cn('min-w-0 truncate text-foreground', deleted && 'line-through opacity-70')}>{name}</span>
       <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{dir}</span>
       <RowActions actions={actions} disabled={disabled} />
-      <span className={cn('w-3 shrink-0 text-center font-mono text-[11px]', badge.className)}>{badge.letter}</span>
+      <span className={cn('w-3 shrink-0 text-center font-mono text-[11px]', style.className)}>{style.letter}</span>
     </div>
   )
 }
+
+interface Amend {
+  // O rascunho que estava na caixa antes de "Corrigir": volta quando a correção termina ou é cancelada.
+  draft: string
+  hash: string
+  pushed: boolean
+}
+
+// Desabilitado em cinza com texto legível (o âmbar com opacidade 0,4 ficava ~2:1 no tema escuro).
+const COMMIT_DISABLED = 'disabled:bg-secondary disabled:text-muted-foreground disabled:opacity-100 disabled:hover:brightness-100'
 
 function CommitBox({
   message,
   disabled,
   canCommit,
+  amend,
   onChange,
-  onCommit
+  onCommit,
+  onMore,
+  onCancelAmend
 }: {
   message: string
   disabled: boolean
   canCommit: boolean
+  amend: Amend | null
   onChange(message: string): void
   onCommit(): void
+  onMore(e: React.MouseEvent): void
+  onCancelAmend(): void
 }): React.JSX.Element {
-  const ready = !disabled && canCommit && message.trim() !== ''
+  const ready = !disabled && (canCommit || amend !== null) && message.trim() !== ''
   return (
     <div className="flex shrink-0 flex-col gap-1.5 border-b px-2 py-2">
+      {amend && (
+        <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+          <span className="min-w-0 flex-1">
+            Corrigindo o último commit ({amend.hash.slice(0, 7)}): leva a mensagem abaixo e o que estiver na fila.
+            {amend.pushed && <span className="text-[#895503] dark:text-[#e2c08d]"> Ele já foi enviado: o próximo Push vai exigir force push.</span>}
+          </span>
+          <button type="button" onClick={onCancelAmend} className="shrink-0 rounded px-1 text-foreground hover:bg-secondary">
+            Cancelar
+          </button>
+        </div>
+      )}
       <textarea
         aria-label="Mensagem do commit"
         value={message}
@@ -293,22 +359,37 @@ function CommitBox({
             e.preventDefault()
             if (ready) onCommit()
           }
+          if (e.key === 'Escape' && amend) onCancelAmend()
         }}
         placeholder="Mensagem do commit (Ctrl+Enter)"
         spellCheck={false}
         className="w-full resize-none rounded-md border bg-card px-2 py-1.5 text-xs leading-relaxed outline-none select-text focus:border-ring"
       />
-      <Button
-        disabled={!ready}
-        onClick={onCommit}
-        data-tip="Commitar"
-        data-tip-detail="Grava o que está na fila. Sem nada na fila, pergunta se coloca tudo."
-        data-tip-shortcut="Ctrl+Enter"
-        className="w-full py-1.5"
-      >
-        <Icon name="ok" className="size-3.5" />
-        Commitar
-      </Button>
+      <div className="flex">
+        <Button
+          disabled={!ready}
+          onClick={onCommit}
+          data-tip={amend ? 'Corrigir o último commit' : 'Commitar'}
+          data-tip-detail={
+            amend ? 'Refaz o último commit com esta mensagem e o que estiver na fila.' : 'Grava o que está na fila. Sem nada na fila, pergunta se coloca tudo.'
+          }
+          data-tip-shortcut="Ctrl+Enter"
+          className={cn('min-w-0 flex-1 rounded-r-none py-1.5', COMMIT_DISABLED)}
+        >
+          <Icon name="ok" className="size-3.5" />
+          {amend ? 'Corrigir commit' : 'Commitar'}
+        </Button>
+        <Button
+          disabled={disabled}
+          onClick={onMore}
+          aria-label="Mais ações de commit"
+          data-tip="Mais ações de commit"
+          data-tip-detail="Corrigir o último commit ou desfazê-lo."
+          className={cn('rounded-l-none border-l border-[var(--brand-ink)]/20 px-2 py-1.5', COMMIT_DISABLED)}
+        >
+          <Icon name="expandir" className="size-3 rotate-90" />
+        </Button>
+      </div>
     </div>
   )
 }
@@ -416,13 +497,15 @@ function BranchRow({
   label,
   depth,
   disabled,
-  onCheckout
+  onCheckout,
+  onMenu
 }: {
   branch: GitBranch
   label: string
   depth: number
   disabled: boolean
   onCheckout(name: string, remote: string | null): void
+  onMenu(e: React.MouseEvent, branch: GitBranch): void
 }): React.JSX.Element {
   const action = branch.current
     ? 'Branch atual'
@@ -431,11 +514,12 @@ function BranchRow({
       : 'Clique para trocar para esta branch'
   return (
     <div
-      data-tip={branchTitle(branch, action)}
+      data-tip={branchTitle(branch, `${action} · botão direito para mais ações`)}
       style={{ paddingLeft: 8 + depth * 12 }}
       onClick={() => {
         if (!branch.current && !disabled) onCheckout(branch.name, branch.remote)
       }}
+      onContextMenu={(e) => onMenu(e, branch)}
       className={cn(ROW, branch.current ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}
     >
       <Icon name="ok" className={cn('size-3 shrink-0', !branch.current && 'invisible')} />
@@ -483,16 +567,23 @@ function WorktreeRow({
   )
 }
 
-function NewBranchInput({
+// Campo de nome de branch: criar (com "trocar para a nova") e renomear usam o mesmo.
+function BranchNameInput({
+  initial = '',
   disabled,
+  submitLabel,
+  withCheckout,
   onSubmit,
   onCancel
 }: {
+  initial?: string
   disabled: boolean
+  submitLabel: string
+  withCheckout: boolean
   onSubmit(name: string, checkout: boolean): void
   onCancel(): void
 }): React.JSX.Element {
-  const [name, setName] = useState('')
+  const [name, setName] = useState(initial)
   const [checkout, setCheckout] = useState(true)
 
   const submit = (): void => {
@@ -508,6 +599,7 @@ function NewBranchInput({
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
+          onFocus={(e) => e.target.select()}
           onKeyDown={(e) => {
             e.stopPropagation()
             if (e.key === 'Enter') submit()
@@ -519,9 +611,9 @@ function NewBranchInput({
         />
         <button
           type="button"
-          data-tip="Criar branch"
+          data-tip={submitLabel}
           data-tip-shortcut="Enter"
-          aria-label="Criar branch"
+          aria-label={submitLabel}
           disabled={disabled || !name.trim()}
           onClick={submit}
           className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
@@ -539,15 +631,21 @@ function NewBranchInput({
           <Icon name="fechar" className="size-3.5" />
         </button>
       </div>
-      <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <input type="checkbox" checked={checkout} onChange={(e) => setCheckout(e.target.checked)} className="size-3" />
-        Trocar para a branch nova
-      </label>
+      {withCheckout && (
+        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <input type="checkbox" checked={checkout} onChange={(e) => setCheckout(e.target.checked)} className="size-3" />
+          Trocar para a branch nova
+        </label>
+      )}
     </div>
   )
 }
 
+const menuIcon = (name: IconName): React.ReactNode => <Icon name={name} className="size-3.5" />
+
 export function GitPanel({
+  projectId,
+  projectPath,
   status,
   branches,
   worktrees,
@@ -572,11 +670,24 @@ export function GitPanel({
   onPush,
   onPull,
   onSync,
-  onFetch
+  onFetch,
+  run,
+  operationBanner,
+  stashSection
 }: Props): React.JSX.Element {
   const confirm = useConfirm()
   const [branchesOpen, setBranchesOpen] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [amend, setAmend] = useState<Amend | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
+  const [historyFile, setHistoryFile] = useState<string | null>(null)
+  // Erro de leitura que não passou pelo `run` (ex.: consultar o último commit antes de corrigir).
+  const [localError, setLocalError] = useState<string | null>(null)
+  // Qualquer ação que começa (stage, commit, push, pelos botões de fora do painel também) vale como resposta ao erro.
+  useEffect(() => {
+    if (busy !== null) setLocalError(null)
+  }, [busy])
   // Guarda só as seções que o usuário inverteu em relação ao padrão (remotas começam fechadas, o resto aberto).
   const [toggled, setToggled] = useState<Set<string>>(new Set())
 
@@ -602,9 +713,20 @@ export function GitPanel({
   const working = busy !== null
   const files = isRepo ? status.files : []
 
-  const openEntry = (file: GitFile): void => {
-    if (opensAsFile(file)) onOpenFile(file.path)
-    else onOpenDiff(file.path, file.staged)
+  const act = (action: () => Promise<unknown>, label: string): Promise<boolean> => {
+    setLocalError(null)
+    return run(action, label)
+  }
+
+  const openEntry = (file: GitFile, preview: boolean): void => {
+    if (opensAsFile(file)) onOpenFile(file.path, { preview })
+    else onOpenDiff(file.path, file.staged, { ...(file.origPath ? { origPath: file.origPath } : {}), preview })
+  }
+
+  const openMenu = (e: React.MouseEvent, items: MenuItem[]): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    setMenu({ x: e.clientX, y: e.clientY, items })
   }
 
   // Rastreado volta à versão da fila (sem volta pelo git); não rastreado vai para a Lixeira (volta por lá).
@@ -629,6 +751,24 @@ export function GitPanel({
 
   const commit = async (): Promise<void> => {
     const message = commitMessage
+    if (amend) {
+      if (amend.pushed) {
+        const ok = await confirm({
+          title: 'Corrigir um commit que já foi enviado?',
+          message: `O commit ${amend.hash.slice(0, 7)} já está no remoto. Corrigir troca ele por outro, e o próximo Push vai precisar de force push, que reescreve o histórico do remoto.`,
+          confirmLabel: 'Corrigir mesmo assim',
+          danger: true
+        })
+        if (!ok) return
+      }
+      const draft = amend.draft
+      if (await act(() => window.kora.gitAmend(projectId, message), 'Corrigindo o último commit…')) {
+        setAmend(null)
+        onCommitMessageChange(draft)
+      }
+      return
+    }
+    setLocalError(null)
     if ((await onCommit(message, false)) !== 'nothing-staged') return
     const ok = await confirm({
       title: 'Nada na fila',
@@ -638,13 +778,145 @@ export function GitPanel({
     if (ok) await onCommit(message, true)
   }
 
+  const headCommit = async (): Promise<GitHeadCommit | undefined> => {
+    setLocalError(null)
+    try {
+      const head = await window.kora.gitHeadCommit(projectId)
+      if (!head) setLocalError('Ainda não há commits neste repositório.')
+      return head ?? undefined
+    } catch (err) {
+      setLocalError(ipcErrorMessage(err))
+      return undefined
+    }
+  }
+
+  const startAmend = async (): Promise<void> => {
+    const head = await headCommit()
+    if (!head) return
+    setAmend({ draft: commitMessage, hash: head.hash, pushed: head.pushed })
+    onCommitMessageChange(head.message)
+  }
+
+  const cancelAmend = (): void => {
+    if (amend) onCommitMessageChange(amend.draft)
+    setAmend(null)
+  }
+
+  const undoLastCommit = async (): Promise<void> => {
+    const head = await headCommit()
+    if (!head) return
+    if (head.isRoot) {
+      setLocalError('Este é o primeiro commit do repositório: não há commit anterior para onde voltar.')
+      return
+    }
+    const subject = head.message.split('\n')[0]
+    const ok = await confirm({
+      title: 'Desfazer o último commit?',
+      message: [
+        `"${subject}" sai do histórico e as alterações dele voltam para a fila. Os arquivos no disco não mudam.`,
+        head.pushed && 'Esse commit já foi enviado: o remoto continua com ele, e o próximo Push vai precisar de force push.'
+      ]
+        .filter(Boolean)
+        .join(' '),
+      confirmLabel: 'Desfazer commit',
+      danger: head.pushed
+    })
+    if (!ok) return
+    const draft = commitMessage
+    let undone: { message: string } | null = null
+    await act(async () => {
+      undone = await window.kora.gitUndoLastCommit(projectId)
+    }, 'Desfazendo o último commit…')
+    // Como no VS Code: a mensagem volta para a caixa, se ela estava vazia.
+    const message = (undone as { message: string } | null)?.message
+    if (message && !draft.trim()) onCommitMessageChange(message)
+  }
+
+  const commitMenu = (e: React.MouseEvent): void =>
+    openMenu(e, [
+      { label: 'Commitar (corrigir último)', icon: menuIcon('editar'), onSelect: () => void startAmend() },
+      { label: 'Desfazer último commit', icon: menuIcon('descartar'), onSelect: () => void undoLastCommit() }
+    ])
+
+  const deleteBranch = async (name: string): Promise<void> => {
+    let result: GitBranchDeleteResult | null = null
+    const done = await act(async () => {
+      result = await window.kora.gitDeleteBranch(projectId, name, false)
+    }, 'Apagando a branch…')
+    if (!done || (result as GitBranchDeleteResult | null) !== 'not-merged') return
+    const ok = await confirm({
+      title: `A branch "${name}" não foi mesclada`,
+      message:
+        'Ela tem commits que não estão na branch atual nem no upstream dela. Apagando, esses commits ficam sem nenhuma branch e podem se perder. Apagar mesmo assim?',
+      confirmLabel: 'Apagar mesmo assim',
+      danger: true
+    })
+    if (ok) await act(() => window.kora.gitDeleteBranch(projectId, name, true), 'Apagando a branch…')
+  }
+
+  const branchMenu = (e: React.MouseEvent, branch: GitBranch): void => {
+    const items: MenuItem[] = []
+    if (!branch.current) {
+      items.push({ label: branch.remote ? 'Trocar (criar a branch local)' : 'Trocar para esta branch', icon: menuIcon('ok'), onSelect: () => onCheckout(branch.name, branch.remote) })
+    }
+    if (branch.remote === null) {
+      items.push({ label: 'Renomear branch…', icon: menuIcon('editar'), onSelect: () => setRenaming(branch.name) })
+      if (!branch.upstream && remote !== null) {
+        items.push({ label: 'Publicar branch', icon: menuIcon('publicar'), onSelect: () => void act(() => window.kora.gitPublishBranch(projectId, branch.name), 'Publicando a branch…') })
+      }
+    }
+    items.push({ label: 'Copiar nome da branch', icon: menuIcon('copiar'), onSelect: () => void navigator.clipboard.writeText(branch.name) })
+    if (branch.remote === null && !branch.current) {
+      items.push('separator', { label: 'Apagar branch', danger: true, icon: menuIcon('excluir'), onSelect: () => void deleteBranch(branch.name) })
+    }
+    openMenu(e, items)
+  }
+
+  const showHistory = (path: string): void => {
+    setHistoryFile(path)
+    if (!isOpen('history', true)) toggle('history')
+    requestAnimationFrame(() => document.querySelector('[data-git-history]')?.scrollIntoView({ block: 'start', behavior: 'smooth' }))
+  }
+
+  const fileMenu = (e: React.MouseEvent, file: GitFile): void => {
+    const items: MenuItem[] = []
+    if (!opensAsFile(file)) items.push({ label: 'Abrir alterações', icon: menuIcon('git'), onSelect: () => openEntry(file, false) })
+    if (file.status !== 'deleted') items.push({ label: 'Abrir arquivo', icon: menuIcon('arquivo'), onSelect: () => onOpenFile(file.path) })
+    if (existsInHead(file)) {
+      items.push({ label: 'Abrir arquivo (HEAD)', onSelect: () => onOpenDiff(file.origPath ?? file.path, false, { commit: 'HEAD', fileAt: true }) })
+    }
+    items.push('separator')
+    if (file.staged) items.push({ label: 'Tirar da fila', icon: menuIcon('menos'), onSelect: () => onUnstage(pathsOf([file])) })
+    else items.push({ label: file.status === 'conflicted' ? 'Marcar como resolvido' : 'Colocar na fila', icon: menuIcon('novaAba'), onSelect: () => onStage([file.path]) })
+    if (!file.staged && file.status !== 'conflicted') {
+      items.push({ label: 'Descartar alterações', danger: true, icon: menuIcon('descartar'), onSelect: () => void discard([file]) })
+    }
+    if (file.status === 'untracked') {
+      items.push({ label: 'Adicionar ao .gitignore', onSelect: () => void act(() => window.kora.gitAddToIgnore(projectId, [file.path]), 'Adicionando ao .gitignore…') })
+    }
+    items.push('separator')
+    if (file.status !== 'deleted') {
+      items.push({ label: 'Mostrar no Explorer', icon: menuIcon('pastaAberta'), onSelect: () => void window.kora.revealInExplorer(projectId, file.path) })
+    }
+    items.push(
+      { label: 'Copiar caminho', icon: menuIcon('copiar'), onSelect: () => void copyPath(`${projectPath}\\${file.path}`) },
+      { label: 'Copiar caminho relativo', onSelect: () => void copyPath(file.path) }
+    )
+    if (file.status !== 'untracked') items.push('separator', { label: 'Histórico do arquivo', onSelect: () => showHistory(file.origPath && file.status === 'deleted' ? file.origPath : file.path) })
+    openMenu(e, items)
+  }
+
   const fileActions = (file: GitFile): RowAction[] => {
     const open: RowAction[] =
       file.status === 'deleted' || opensAsFile(file) ? [] : [{ label: 'Abrir arquivo', icon: 'arquivo', run: () => onOpenFile(file.path) }]
     if (file.staged) return [...open, { label: 'Tirar da fila', icon: 'menos', run: () => onUnstage(pathsOf([file])) }]
     const discardAction: RowAction[] =
       file.status === 'conflicted' ? [] : [{ label: 'Descartar alterações', icon: 'descartar', danger: true, run: () => void discard([file]) }]
-    return [...open, ...discardAction, { label: 'Colocar na fila', icon: 'novaAba', run: () => onStage([file.path]) }]
+    const stage: RowAction =
+      file.status === 'conflicted'
+        ? { label: 'Marcar como resolvido', icon: 'ok', run: () => onStage([file.path]) }
+        : { label: 'Colocar na fila', icon: 'novaAba', run: () => onStage([file.path]) }
+    return [...open, ...discardAction, stage]
   }
 
   const groupActions = (id: string, list: GitFile[]): RowAction[] => {
@@ -657,6 +929,8 @@ export function GitPanel({
   }
 
   const canSync = isRepo && !status.detached && status.branch !== null && (status.upstream !== null || remote !== null)
+  // HEAD, branch e distância do upstream: qualquer mudança aí muda o que o histórico mostra (commit, push, troca).
+  const historyKey = isRepo ? `${status.oid}|${status.branch}|${status.upstream}|${status.ahead}|${status.behind}` : ''
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -693,14 +967,18 @@ export function GitPanel({
         </button>
       </div>
 
+      {operationBanner}
       {isRepo && <RemoteRow remote={remote} onSave={onSetRemote} />}
       {isRepo && (
         <CommitBox
           message={commitMessage}
           disabled={working}
           canCommit={files.some((f) => f.status !== 'conflicted')}
+          amend={amend}
           onChange={onCommitMessageChange}
           onCommit={() => void commit()}
+          onMore={commitMenu}
+          onCancelAmend={cancelAmend}
         />
       )}
       {canSync && (
@@ -712,7 +990,11 @@ export function GitPanel({
           {busy}
         </p>
       )}
-      {error && <p className="break-words px-3 py-1.5 text-xs text-destructive select-text">{error}</p>}
+      {localError ? (
+        <GitErrorNotice error={localError} onDismiss={() => setLocalError(null)} />
+      ) : (
+        error && <GitErrorNotice error={error} />
+      )}
 
       <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-1 py-1">
         {!status && loading && <p className="px-2 py-1 text-xs text-muted-foreground">Carregando…</p>}
@@ -737,12 +1019,29 @@ export function GitPanel({
             />
             {isOpen('branches:local', true) && (
               <>
-                {locals.map((b) => (
-                  <BranchRow key={b.name} branch={b} label={b.name} depth={0} disabled={loading} onCheckout={onCheckout} />
-                ))}
+                {locals.map((b) =>
+                  renaming === b.name ? (
+                    <BranchNameInput
+                      key={b.name}
+                      initial={b.name}
+                      disabled={working}
+                      submitLabel="Renomear branch"
+                      withCheckout={false}
+                      onSubmit={(name) => {
+                        setRenaming(null)
+                        if (name !== b.name) void act(() => window.kora.gitRenameBranch(projectId, b.name, name), 'Renomeando a branch…')
+                      }}
+                      onCancel={() => setRenaming(null)}
+                    />
+                  ) : (
+                    <BranchRow key={b.name} branch={b} label={b.name} depth={0} disabled={loading} onCheckout={onCheckout} onMenu={branchMenu} />
+                  )
+                )}
                 {creating ? (
-                  <NewBranchInput
+                  <BranchNameInput
                     disabled={loading}
+                    submitLabel="Criar branch"
+                    withCheckout
                     onSubmit={(name, checkout) => {
                       onCreateBranch(name, checkout)
                       setCreating(false)
@@ -788,6 +1087,7 @@ export function GitPanel({
                           depth={1}
                           disabled={loading}
                           onCheckout={onCheckout}
+                          onMenu={branchMenu}
                         />
                       ))}
                   </div>
@@ -835,12 +1135,31 @@ export function GitPanel({
                       actions={fileActions(file)}
                       disabled={working}
                       onOpen={openEntry}
+                      onMenu={fileMenu}
                     />
                   ))}
               </div>
             )
           })}
+
+        {stashSection}
+
+        {isRepo && (
+          <div className="mt-1 border-t pt-1">
+            <SectionHeader title="Histórico" open={isOpen('history', true)} onToggle={() => toggle('history')} />
+            {isOpen('history', true) && (
+              <HistorySection
+                projectId={projectId}
+                refreshKey={historyKey}
+                file={historyFile}
+                onClearFile={() => setHistoryFile(null)}
+                onOpenDiff={onOpenDiff}
+              />
+            )}
+          </div>
+        )}
       </div>
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
   )
 }

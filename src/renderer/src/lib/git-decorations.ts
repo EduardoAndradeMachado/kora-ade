@@ -1,11 +1,12 @@
 import type { GitFile, GitFileStatus } from '@shared/git-types'
 
-// Mesmas cores do VS Code: claras no tema escuro, escuras no claro para manter contraste.
+// Mesmas cores do VS Code: claras no tema escuro, escuras no claro para manter contraste. Adicionado (A, já na
+// fila) e não rastreado (U) têm verdes diferentes, como lá.
 export const GIT_STYLE: Record<GitFileStatus, { letter: string; className: string }> = {
   modified: { letter: 'M', className: 'text-[#895503] dark:text-[#e2c08d]' },
-  added: { letter: 'A', className: 'text-[#587c0c] dark:text-[#73c991]' },
-  untracked: { letter: 'U', className: 'text-[#587c0c] dark:text-[#73c991]' },
-  renamed: { letter: 'R', className: 'text-[#007acc] dark:text-[#73c991]' },
+  added: { letter: 'A', className: 'text-[#587c0c] dark:text-[#81b88b]' },
+  untracked: { letter: 'U', className: 'text-[#007100] dark:text-[#73c991]' },
+  renamed: { letter: 'R', className: 'text-[#007100] dark:text-[#73c991]' },
   deleted: { letter: 'D', className: 'text-[#ad0707] dark:text-[#f48771]' },
   conflicted: { letter: '!', className: 'text-[#ad0707] dark:text-[#e06c75]' }
 }

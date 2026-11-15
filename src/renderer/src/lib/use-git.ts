@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { GitBranch, GitStatus, GitWorktree } from '@shared/git-types'
 import { ipcErrorMessage } from '@/lib/ipc-error'
+import { notifyGitChanged } from '@/lib/git-refresh'
 
 const POLL_MS = 5000
 // Salvar em sequência (agente editando vários arquivos) gera um aviso atrás do outro; um status por segundo basta.
 const CHANGE_THROTTLE_MS = 1000
+const PENDING_HEAD = '(aguardando o status)'
 
 export interface GitState {
   status: GitStatus | null
@@ -91,6 +93,21 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
     }
   }, [refresh])
 
+  // Erro de ação que ficou para trás: o HEAD mudou depois dele (troca de branch, commit, merge feito no terminal ou
+  // por um agente) e o motivo não vale mais. A referência é o primeiro status lido depois do erro, porque a própria
+  // ação pode ter mudado o HEAD antes de falhar (trocou de branch, mas não reaplicou o stash).
+  const [errorHead, setErrorHead] = useState<string | null>(null)
+  const head = status?.isRepo ? `${status.branch}\0${status.oid}\0${status.operation?.kind ?? ''}` : ''
+  useEffect(() => {
+    if (errorHead === PENDING_HEAD) setErrorHead(head)
+    else if (errorHead !== null && head !== errorHead) {
+      setErrorHead(null)
+      setActionError(null)
+    }
+    // Cada status novo conta, mesmo com o mesmo HEAD: é assim que o PENDING_HEAD vira referência.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status])
+
   const run = async (action: () => Promise<unknown>, busyLabel = 'Aguarde…'): Promise<boolean> => {
     setLoading(true)
     setBusy(busyLabel)
@@ -98,10 +115,12 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
     try {
       await action()
       refresh()
+      notifyGitChanged(projectId)
       return true
     } catch (err) {
       setActionError(ipcErrorMessage(err))
-      setLoading(false)
+      setErrorHead(PENDING_HEAD)
+      refresh()
       return false
     } finally {
       setBusy(null)

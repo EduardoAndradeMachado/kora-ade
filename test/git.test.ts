@@ -27,7 +27,7 @@ import {
   parseWorktreePorcelain,
   relativeTime
 } from '../src/main/git'
-import type { GitFile } from '../src/shared/git-types'
+import { GIT_ERROR_DETAIL, type GitFile } from '../src/shared/git-types'
 
 const savedEnv = { ...process.env }
 const tempDirs: string[] = []
@@ -226,7 +226,7 @@ describe('parsePorcelainV2', () => {
       { path: join('docs', 'novo nome.md'), status: 'renamed', staged: true, origPath: '? falso.txt' },
       { path: join('src', 'x.ts'), status: 'modified', staged: true },
       { path: join('src', 'x.ts'), status: 'modified', staged: false },
-      { path: 'conflito.ts', status: 'conflicted', staged: false },
+      { path: 'conflito.ts', status: 'conflicted', staged: false, conflict: 'UU' },
       { path: 'solto.txt', status: 'untracked', staged: false }
     ])
   })
@@ -264,6 +264,18 @@ describe('branches', () => {
       await expect(gitCreateBranch(repo, name, false), name).rejects.toThrow(/Nome de branch inválido/)
     }
     expect((await gitBranches(repo)).map((b) => b.name)).toEqual(['main'])
+  })
+
+  it('branch que já existe: primeira linha em português, a saída do git só nos detalhes', async () => {
+    await gitCreateBranch(repo, 'repetida', false)
+    const err = await gitCreateBranch(repo, 'repetida', true).then(
+      () => null,
+      (e: unknown) => e as Error
+    )
+    const [first, detail] = (err?.message ?? '').split(GIT_ERROR_DETAIL)
+    expect(first).toBe('Não foi possível criar a branch "repetida".')
+    expect(detail).toMatch(/already exists/)
+    expect((await gitStatus(repo)).branch).toBe('main')
   })
 
   it('não deixa atalho ou opção se passar por nome de branch no checkout', async () => {
@@ -888,7 +900,7 @@ describe('commit', () => {
     commitAll(repo, 'main')
     expect(() => git(repo, 'merge', 'lado')).toThrow()
 
-    await expect(gitCommit(repo, 'merge', false)).rejects.toThrow('Há arquivos em conflito. Resolva, coloque na fila e commite de novo.')
+    await expect(gitCommit(repo, 'merge', false)).rejects.toThrow('Há arquivos em conflito. Resolva e marque como resolvidos antes de continuar.')
   })
 
   it('hook que recusa o commit mostra o motivo do hook', async () => {
@@ -896,7 +908,7 @@ describe('commit', () => {
     write('a.txt', 'a alterado\n')
     git(repo, 'add', 'a.txt')
 
-    await expect(gitCommit(repo, 'x', false)).rejects.toThrow(/O commit falhou: lint quebrou/)
+    await expect(gitCommit(repo, 'x', false)).rejects.toThrow(/^O commit falhou\.\n\nDetalhes do git:\n[\s\S]*lint quebrou/)
   })
 })
 
@@ -980,12 +992,12 @@ describe('push, pull, buscar e sincronizar', () => {
     expect(pushed).toContain('local')
   })
 
-  it('pull com branches divergentes e sem configuração explica o que escolher', async () => {
+  it('pull com branches divergentes e sem configuração devolve a divergência para a interface perguntar', async () => {
     commitIn(other, 'r.txt', 'remoto')
     git(other, 'push', '-q')
     commitIn(repo, 'l.txt', 'local')
 
-    await expect(gitPull(repo)).rejects.toThrow(/divergiram/)
+    expect(await gitPull(repo)).toEqual({ status: 'diverged', ahead: 1, behind: 1, upstream: 'origin/main' })
   })
 
   it('HEAD destacado recusa push e pull', async () => {

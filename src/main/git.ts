@@ -1,7 +1,24 @@
 import { execFile, type ExecFileException } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { join, normalize, relative, sep } from 'node:path'
+import { join, normalize, relative, resolve, sep } from 'node:path'
 import type { GitBranch, GitCommitResult, GitDiff, GitFile, GitFileStatus, GitStatus, GitWorktree } from '../shared/git-types'
+import {
+  GIT_ERROR_DETAIL,
+  type GitCheckoutMode,
+  type GitCheckoutResult,
+  type GitConflictCode,
+  type GitContinueResult,
+  type GitDeletionChoice,
+  type GitOperation,
+  type GitPullResult,
+  type GitPullStrategy,
+  type GitPushResult,
+  type GitPushRewritten,
+  type GitResolveResult,
+  type GitStash,
+  type GitStashFile,
+  type GitStashRef
+} from '../shared/git-types'
 import { resolveInside } from './files'
 
 const TIMEOUT_MS = 15_000
@@ -51,15 +68,19 @@ interface RunResult {
 function runGit(
   root: string,
   args: string[],
-  opts: { input?: string; okCodes?: number[]; timeoutMs?: number; literalPathspecs?: boolean } = {}
+  opts: { input?: string; okCodes?: number[]; timeoutMs?: number; literalPathspecs?: boolean; noEditor?: boolean } = {}
 ): Promise<RunResult> {
   const okCodes = opts.okCodes ?? [0]
   const timeout = opts.timeoutMs ?? TIMEOUT_MS
+  const env = gitEnv(opts.literalPathspecs === true)
+  // `rebase --continue` e `cherry-pick --continue` abrem o editor da mensagem, que ninguém veria: `true` (o
+  // builtin do sh do Git for Windows) aceita a mensagem que o git preparou.
+  if (opts.noEditor) env.GIT_EDITOR = 'true'
   return new Promise((resolvePromise, reject) => {
     const child = execFile(
       'git',
       ['--no-pager', '-c', 'color.ui=never', ...args],
-      { cwd: root, env: gitEnv(opts.literalPathspecs === true), timeout, maxBuffer: MAX_BUFFER, windowsHide: true, encoding: 'utf8' },
+      { cwd: root, env, timeout, maxBuffer: MAX_BUFFER, windowsHide: true, encoding: 'utf8' },
       (err: ExecFileException | null, stdout: string, stderr: string) => {
         if (!err) return resolvePromise({ stdout, code: 0 })
         if (err.code === 'ENOENT') {
@@ -87,12 +108,19 @@ function runGit(
 const isNotRepo = (err: unknown): boolean =>
   err instanceof GitError && err.exitCode === 128 && NOT_A_REPO.test(err.stderr)
 
-// O porcelain devolve caminhos relativos à raiz do repositório, que pode ser uma pasta acima do projeto.
-async function repoPrefix(root: string): Promise<string | null> {
+interface RepoInfo {
+  // O porcelain devolve caminhos relativos à raiz do repositório, que pode ser uma pasta acima do projeto.
+  prefix: string
+  // Numa worktree adicional, MERGE_HEAD e rebase-merge ficam na pasta dela; o stash fica na comum.
+  gitDir: string
+  commonDir: string
+}
+
+async function repoInfo(root: string): Promise<RepoInfo | null> {
   try {
-    const { stdout } = await runGit(root, ['rev-parse', '--is-inside-work-tree', '--show-prefix'])
-    const [inside, prefix = ''] = stdout.split(/\r?\n/)
-    return inside === 'true' ? prefix : null
+    const { stdout } = await runGit(root, ['rev-parse', '--is-inside-work-tree', '--show-prefix', '--git-dir', '--git-common-dir'])
+    const [inside, prefix = '', gitDir = '.git', commonDir = gitDir] = stdout.split(/\r?\n/)
+    return inside === 'true' ? { prefix, gitDir: resolve(root, gitDir), commonDir: resolve(root, commonDir) } : null
   } catch (err) {
     if (isNotRepo(err)) return null
     throw err
@@ -196,7 +224,11 @@ export function parsePorcelainV2(output: string, prefix = ''): GitStatus {
         break
       case 'u': {
         const path = toLocal(afterFields(record, 10))
-        if (path !== undefined) status.files.push({ path, status: 'conflicted', staged: false })
+        const code = record.slice(2, 4)
+        if (path === undefined) break
+        const file: GitFile = { path, status: 'conflicted', staged: false }
+        if (CONFLICT_CODES.has(code)) file.conflict = code as GitConflictCode
+        status.files.push(file)
         break
       }
       case '?': {
@@ -209,9 +241,62 @@ export function parsePorcelainV2(output: string, prefix = ''): GitStatus {
   return status
 }
 
+const CONFLICT_CODES = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'])
+
+const readOptional = (file: string): string | null => {
+  try {
+    return readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+// O git comenta com "#" o que não vai para o commit (a lista "# Conflicts:"); com --file a mensagem não passa pela
+// limpeza do editor, então essas linhas iriam para o commit.
+export function cleanMergeMessage(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => !line.startsWith('#'))
+    .join('\n')
+    .trim()
+}
+
+// Lê os arquivos de estado que o próprio git usa para saber o que está em andamento (é o que o `git status` faz).
+export function detectOperation(gitDir: string): GitOperation | null {
+  const number = (file: string): number | undefined => {
+    const n = Number(readOptional(file)?.trim())
+    return Number.isInteger(n) && n > 0 ? n : undefined
+  }
+  const headName = (file: string): string | undefined => readOptional(file)?.trim().replace(/^refs\/heads\//, '') || undefined
+  const merge = join(gitDir, 'rebase-merge')
+  if (isDirectory(merge)) {
+    return { kind: 'rebase', head: headName(join(merge, 'head-name')), step: number(join(merge, 'msgnum')), total: number(join(merge, 'end')) }
+  }
+  const apply = join(gitDir, 'rebase-apply')
+  // rebase-apply com "applying" é um `git am`, não um rebase.
+  if (isDirectory(apply) && !existsSync(join(apply, 'applying'))) {
+    return { kind: 'rebase', head: headName(join(apply, 'head-name')), step: number(join(apply, 'next')), total: number(join(apply, 'last')) }
+  }
+  const withMessage = (kind: GitOperation['kind']): GitOperation => {
+    const message = cleanMergeMessage(readOptional(join(gitDir, 'MERGE_MSG')) ?? '')
+    return message ? { kind, message } : { kind }
+  }
+  if (existsSync(join(gitDir, 'MERGE_HEAD'))) return withMessage('merge')
+  if (existsSync(join(gitDir, 'CHERRY_PICK_HEAD'))) return withMessage('cherry-pick')
+  if (existsSync(join(gitDir, 'REVERT_HEAD'))) return withMessage('revert')
+  return null
+}
+
+// O stash sempre grava o reflog de refs/stash: uma linha por entrada, sem precisar de outro processo do git.
+function stashCount(commonDir: string): number {
+  const log = readOptional(join(commonDir, 'logs', 'refs', 'stash'))
+  return log ? log.split('\n').filter(Boolean).length : 0
+}
+
 export async function gitStatus(root: string): Promise<GitStatus> {
-  const prefix = await repoPrefix(root)
-  if (prefix === null) return { ...NOT_REPO, files: [] }
+  const info = await repoInfo(root)
+  if (info === null) return { ...NOT_REPO, files: [] }
+  const { prefix } = info
   const { stdout } = await runGit(root, [
     'status',
     '--porcelain=v2',
@@ -222,7 +307,10 @@ export async function gitStatus(root: string): Promise<GitStatus> {
     '--',
     '.'
   ])
-  return parsePorcelainV2(stdout, prefix)
+  const status = parsePorcelainV2(stdout, prefix)
+  status.operation = detectOperation(info.gitDir)
+  status.stashCount = stashCount(info.commonDir)
+  return status
 }
 
 const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
@@ -309,7 +397,7 @@ export async function gitCreateBranch(root: string, name: string, checkout: bool
   try {
     await runGit(root, checkout ? ['switch', '-c', name] : ['branch', name])
   } catch (err) {
-    if (err instanceof GitError) throw new GitError(`Não foi possível criar a branch "${name}": ${err.message}`, err.exitCode, err.stderr)
+    if (err instanceof GitError) throw friendlyGitError(err, `Não foi possível criar a branch "${name}"`)
     throw err
   }
 }
@@ -329,15 +417,63 @@ async function checkoutArgs(root: string, name: string, remote: string | null): 
   return ['switch', local]
 }
 
-export async function gitCheckout(root: string, name: string, remote: string | null = null): Promise<void> {
+const OVERWRITTEN_BY_SWITCH = /would be overwritten by checkout|untracked working tree files would be overwritten by checkout/i
+
+// O git lista os arquivos que barram a troca um por linha, indentados com tab, entre o aviso e o "Please commit".
+export function overwrittenFiles(output: string): string[] {
+  return output
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('\t'))
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+async function stashTop(root: string): Promise<string | null> {
+  const { stdout, code } = await runGit(root, ['rev-parse', '--verify', '-q', 'refs/stash'], { okCodes: [1] })
+  return code === 0 ? stdout.trim() : null
+}
+
+// Guarda tudo (com não rastreados, que também barram a troca) e devolve o stash criado; null se não havia nada.
+async function stashForSwitch(root: string, name: string): Promise<string | null> {
+  const before = await stashTop(root)
+  await withHint('Não foi possível guardar as alterações no stash', () =>
+    runGit(root, ['stash', 'push', '--include-untracked', '-m', `Kora: antes de trocar para ${name}`])
+  )
+  const after = await stashTop(root)
+  return after !== null && after !== before ? after : null
+}
+
+// Sem `mode`, alteração local que seria sobrescrita não vira erro: volta a lista para a interface perguntar o que
+// fazer (guardar, levar junto ou descartar), como o VS Code.
+export async function gitCheckout(
+  root: string,
+  name: string,
+  remote: string | null = null,
+  mode: GitCheckoutMode = 'normal'
+): Promise<GitCheckoutResult> {
   await assertBranchName(root, name)
   const args = await checkoutArgs(root, name, remote)
+  if (mode === 'force') args.splice(1, 0, '--discard-changes')
+  const stashed = mode === 'stash' || mode === 'migrate' ? await stashForSwitch(root, name) : null
   try {
     await runGit(root, args)
   } catch (err) {
-    if (err instanceof GitError) throw new GitError(`Não foi possível trocar para "${name}": ${err.message}`, err.exitCode, err.stderr)
-    throw err
+    if (!(err instanceof GitError)) throw err
+    if (mode === 'normal' && OVERWRITTEN_BY_SWITCH.test(err.stderr)) return { status: 'local-changes', files: overwrittenFiles(err.stderr) }
+    const kept = stashed ? ' As alterações continuam guardadas no stash.' : ''
+    throw friendlyGitError(err, `Não foi possível trocar para "${name}"`, kept)
   }
+  if (mode !== 'migrate' || stashed === null) return { status: 'ok' }
+  const index = (await gitStashList(root)).find((s) => s.oid === stashed)?.index
+  if (index === undefined) throw new GitError(`Trocou para "${name}", mas o stash com as alterações sumiu da lista.`, null, '')
+  const applied = await applyStash(
+    root,
+    { index, oid: stashed },
+    true,
+    'Não foi possível reaplicar as alterações',
+    ` Você já está em "${name}"; as alterações continuam guardadas no stash.`
+  )
+  return { status: applied }
 }
 
 const samePath = (a: string, b: string): boolean =>
@@ -497,45 +633,99 @@ export async function gitSetRemote(root: string, input: string): Promise<string>
   return url
 }
 
-// Saídas do git que têm um próximo passo claro; o resto vai com o texto original do git.
+// Saídas do git que têm um próximo passo claro. A ordem importa: a primeira que casa vence (ex.: "Pulling is not
+// possible because you have unmerged files" é merge em andamento antes de ser conflito).
 const HINTS: [RegExp, string][] = [
   [
     /Please tell me who you are|Author identity unknown/i,
     'O git não sabe seu nome e e-mail. Configure com git config --global user.name e user.email e commite de novo.'
   ],
+  [
+    /index\.lock|Another git process seems to be running/i,
+    'Outro processo do git está usando este repositório. Espere ele terminar e tente de novo.'
+  ],
   [/nothing to commit|nothing added to commit|no changes added to commit/i, 'Nada na fila para commitar.'],
-  [/unmerged files|unresolved conflict/i, 'Há arquivos em conflito. Resolva, coloque na fila e commite de novo.'],
+  [
+    /Pulling is not possible because you have unmerged files|You have not concluded your merge|MERGE_HEAD exists/i,
+    'Há um merge em andamento. Conclua ou aborte o merge antes.'
+  ],
+  [
+    /unmerged files|unresolved conflict|you need to resolve your current index first|needs merge/i,
+    'Há arquivos em conflito. Resolva e marque como resolvidos antes de continuar.'
+  ],
+  [
+    /\(stale info\)/i,
+    'O remoto recebeu commits depois da última busca; o push forçado foi cancelado para não apagá-los. Faça Pull e confira.'
+  ],
   [
     /\[rejected\]|non-fast-forward|fetch first/i,
     'O remoto tem commits que você ainda não tem. Faça Pull (ou Sincronizar) antes do Push.'
   ],
   [
-    /divergent branches|Need to specify how to reconcile/i,
-    'A branch local e a remota divergiram e o git não sabe se junta por merge ou por rebase. Escolha uma vez no terminal (git config pull.rebase false para merge, true para rebase) e faça o Pull de novo.'
+    /Not possible to fast-forward|Diverging branches can't be fast-forwarded|divergent branches|Need to specify how to reconcile/i,
+    'Sua branch e a remota divergiram. Faça o Pull e escolha mesclar (merge) ou rebase.'
+  ],
+  [
+    /cannot (pull with rebase|rebase): (You have unstaged changes|Your index contains uncommitted changes)/i,
+    'O rebase precisa da árvore de trabalho limpa. Commite ou guarde as alterações no stash e tente de novo.'
+  ],
+  [
+    /would be overwritten by checkout/i,
+    'Trocar de branch sobrescreveria alterações locais. Guarde no stash, leve as alterações junto ou descarte-as.'
   ],
   [
     /local changes to the following files would be overwritten|untracked working tree files would be overwritten/i,
-    'O Pull sobrescreveria alterações locais. Commite ou descarte essas alterações e faça o Pull de novo.'
+    'A operação sobrescreveria alterações locais. Commite ou guarde essas alterações no stash e tente de novo.'
   ],
-  [/Automatic merge failed|CONFLICT \(/, 'O Pull trouxe conflitos. Resolva os arquivos em Conflitos, coloque na fila e commite.'],
+  [
+    /is already (used by worktree|checked out) at/i,
+    'Essa branch já está aberta em outra worktree. Troque por lá ou use outra branch.'
+  ],
+  [/Automatic merge failed|CONFLICT \(/, 'A operação trouxe conflitos. Resolva os arquivos em Conflitos e marque como resolvidos.'],
+  [
+    /There is no tracking information|has no upstream branch|no upstream configured/i,
+    'A branch ainda não existe no remoto. Publique com Push primeiro.'
+  ],
+  [/No stash entries found|is not a stash-like commit|is not a valid reference/i, 'Esse stash não existe mais. Atualize a lista.'],
+  [
+    /There is no merge to abort|No rebase in progress|no cherry-pick or revert in progress|no cherry-pick in progress/i,
+    'Não há merge, rebase ou cherry-pick em andamento.'
+  ],
+  [
+    /No changes - did you forget to use 'git add'|The previous cherry-pick is now empty/i,
+    'Este passo ficou sem alterações depois da resolução. Pule pelo terminal (git rebase --skip ou git cherry-pick --skip) ou aborte.'
+  ],
   [
     /Authentication failed|could not read Username|Permission denied \(publickey\)|terminal prompts disabled/i,
     'O git não conseguiu se autenticar no remoto. Faça login uma vez pelo terminal (ex.: git push) e tente de novo.'
   ],
   [
-    /Could not resolve host|unable to access|Could not read from remote repository/i,
+    /Could not resolve host|unable to access|Could not read from remote repository|does not appear to be a git repository/i,
     'Não foi possível falar com o remoto. Confira a conexão e a URL do repositório.'
   ]
 ]
+
+export function explainGitOutput(output: string): string | null {
+  return HINTS.find(([pattern]) => pattern.test(output))?.[1] ?? null
+}
+
+// A primeira linha é sempre português; a saída crua do git vai depois do separador, para "Detalhes".
+// Erro sem código de saída é do Kora (validação, timeout, git ausente) e já está em português.
+export function friendlyGitError(err: GitError, action: string, extra = ''): GitError {
+  if (err.message.includes(GIT_ERROR_DETAIL)) return err
+  const hint = explainGitOutput([err.message, err.stderr, err.stdout].join('\n'))
+  if (!hint && err.exitCode === null) return extra ? new GitError(err.message + extra, null, err.stderr, err.stdout) : err
+  const message = (hint ?? `${action}.`) + extra
+  const raw = (err.stderr.trim() || err.stdout.trim() || err.message).trim()
+  return new GitError(raw ? message + GIT_ERROR_DETAIL + raw : message, err.exitCode, err.stderr, err.stdout)
+}
 
 async function withHint<T>(action: string, task: () => Promise<T>): Promise<T> {
   try {
     return await task()
   } catch (err) {
     if (!(err instanceof GitError)) throw err
-    const output = [err.message, err.stderr, err.stdout].join('\n')
-    const hint = HINTS.find(([pattern]) => pattern.test(output))?.[1]
-    throw new GitError(hint ?? `${action}: ${err.message}`, err.exitCode, err.stderr, err.stdout)
+    throw friendlyGitError(err, action)
   }
 }
 
@@ -635,7 +825,10 @@ export async function gitCommit(root: string, message: string, stageAll: boolean
   if (!message.trim()) throw new GitError('Escreva a mensagem do commit.', null, '')
   return withHint('O commit falhou', async () => {
     if (stageAll) await runGit(root, ['add', '-A', '--', '.'])
-    else if ((await runGit(root, ['diff', '--cached', '--quiet'], { okCodes: [1] })).code === 0) return 'nothing-staged'
+    // Merge em que a resolução ficou igual ao HEAD ainda precisa do commit de merge, mesmo sem diff na fila.
+    else if (!(await mergeInProgress(root)) && (await runGit(root, ['diff', '--cached', '--quiet'], { okCodes: [1] })).code === 0) {
+      return 'nothing-staged'
+    }
     // Mensagem pelo stdin: várias linhas, acentos e aspas chegam intactos.
     await runGit(root, ['commit', '--file=-'], { input: message, timeoutMs: COMMIT_TIMEOUT_MS })
     return 'committed'
@@ -664,27 +857,335 @@ async function publishRemote(root: string): Promise<string> {
   )
 }
 
-// Branch sem upstream é publicada no remoto e passa a rastreá-lo, como o "Publicar branch" do VS Code.
-export async function gitPush(root: string): Promise<void> {
-  const status = await currentBranch(root)
-  const args = status.upstream ? ['push'] : ['push', '-u', await publishRemote(root), `refs/heads/${status.branch}`]
-  await withHint('O Push falhou', () => runGit(root, args, { timeoutMs: NETWORK_TIMEOUT_MS }))
+// Commits do upstream que faltam aqui. Se todos já foram desta branch (estão no reflog dela), quem os tirou foi um
+// "corrigir" ou "desfazer commit" local, não um colega: Pull traria de volta o que foi corrigido, e o caminho é o
+// push forçado. Usa a ref de rastreamento do último fetch; se o remoto andou desde então, o lease recusa o push.
+async function rewrittenUpstream(root: string, status: GitStatus & { branch: string }): Promise<GitPushRewritten | null> {
+  if (!status.upstream || status.behind === 0) return null
+  const remoteOid = (await runGit(root, ['rev-parse', '--verify', '@{upstream}'])).stdout.trim()
+  const reflog = (await runGit(root, ['reflog', 'show', '--format=%H', `refs/heads/${status.branch}`])).stdout.split(/\r?\n/).filter(Boolean)
+  const input = ['@{upstream}', '^HEAD', ...reflog.map((oid) => `^${oid}`)].join('\n') + '\n'
+  if ((await runGit(root, ['rev-list', '--stdin'], { input })).stdout.trim()) return null
+  const { stdout } = await runGit(root, ['log', '--format=%H%x1f%s', 'HEAD..@{upstream}'])
+  const lost = stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const [hash = '', subject = ''] = line.split('\x1f')
+      return { hash, subject }
+    })
+  return { status: 'rewritten', upstream: status.upstream, remoteOid, lost }
 }
 
-export async function gitPull(root: string): Promise<void> {
+async function upstreamTarget(root: string, branch: string): Promise<{ remote: string; ref: string }> {
+  const get = async (key: string): Promise<string> => (await runGit(root, ['config', '--get', key], { okCodes: [1] })).stdout.trim()
+  const remote = await get(`branch.${branch}.remote`)
+  const ref = await get(`branch.${branch}.merge`)
+  if (!remote || !ref.startsWith('refs/heads/')) throw new GitError(`A branch "${branch}" não tem upstream configurado para o push forçado.`, null, '')
+  return { remote, ref }
+}
+
+// Branch sem upstream é publicada no remoto e passa a rastreá-lo, como o "Publicar branch" do VS Code.
+// `forceWithLease`: o oid que o remoto precisa ter para ser sobrescrito (o `remoteOid` mostrado ao usuário); nunca
+// --force puro, para não apagar o que alguém enviou depois.
+export async function gitPush(root: string, opts: { forceWithLease?: string } = {}): Promise<GitPushResult> {
+  const status = await currentBranch(root)
+  const lease = opts.forceWithLease
+  if (lease !== undefined) {
+    if (!/^[0-9a-f]{40,64}$/.test(lease)) throw new GitError('Push forçado inválido.', null, '')
+    const { remote, ref } = await upstreamTarget(root, status.branch)
+    await withHint('O push forçado falhou', () =>
+      runGit(root, ['push', `--force-with-lease=${ref}:${lease}`, remote, `HEAD:${ref}`], { timeoutMs: NETWORK_TIMEOUT_MS })
+    )
+    return { status: 'ok' }
+  }
+  const rewritten = await rewrittenUpstream(root, status)
+  if (rewritten) return rewritten
+  const args = status.upstream ? ['push'] : ['push', '-u', await publishRemote(root), `refs/heads/${status.branch}`]
+  await withHint('O Push falhou', () => runGit(root, args, { timeoutMs: NETWORK_TIMEOUT_MS }))
+  return { status: 'ok' }
+}
+
+const DIVERGED = /Not possible to fast-forward|Diverging branches can't be fast-forwarded|divergent branches|Need to specify how to reconcile/i
+
+async function hasConfig(root: string, key: string): Promise<boolean> {
+  return (await runGit(root, ['config', '--get', key], { okCodes: [1] })).code === 0
+}
+
+async function pullArgs(root: string, strategy: GitPullStrategy): Promise<string[]> {
+  // A escolha explícita na linha de comando vence o pull.rebase/pull.ff=only da config.
+  if (strategy === 'merge') return ['pull', '--no-rebase']
+  if (strategy === 'rebase') return ['pull', '--rebase']
+  // Quem configurou como o pull junta as branches recebe isso; sem config, só avança e divergência vira pergunta.
+  if ((await hasConfig(root, 'pull.rebase')) || (await hasConfig(root, 'pull.ff'))) return ['pull']
+  return ['pull', '--ff-only']
+}
+
+const conflictCount = (status: GitStatus): number => status.files.filter((f) => f.status === 'conflicted').length
+
+// Ação que pode parar no meio com conflito (pull, rebase --continue, stash apply): conflito novo não é erro, é o
+// estado que o painel mostra. Conflito que já existia antes não conta.
+async function allowingConflicts(root: string, action: string, task: () => Promise<unknown>, extra = ''): Promise<'ok' | 'conflicts'> {
+  const before = conflictCount(await gitStatus(root))
+  try {
+    await task()
+    return 'ok'
+  } catch (err) {
+    if (!(err instanceof GitError)) throw err
+    if (before === 0 && conflictCount(await gitStatus(root)) > 0) return 'conflicts'
+    throw friendlyGitError(err, action, extra)
+  }
+}
+
+export async function gitPull(root: string, strategy: GitPullStrategy = 'default'): Promise<GitPullResult> {
   const status = await currentBranch(root)
   if (!status.upstream) {
     throw new GitError(`A branch "${status.branch}" ainda não existe no remoto. Publique com Push primeiro.`, null, '')
   }
-  await withHint('O Pull falhou', () => runGit(root, ['pull'], { timeoutMs: NETWORK_TIMEOUT_MS }))
+  if (status.operation) throw new GitError(`Há ${OPERATION_LABEL[status.operation.kind]} em andamento. Conclua ou aborte antes do Pull.`, null, '')
+  if (conflictCount(status) > 0) throw new GitError('Há arquivos em conflito. Resolva e marque como resolvidos antes do Pull.', null, '')
+  const args = await pullArgs(root, strategy)
+  try {
+    const result = await allowingConflicts(root, 'O Pull falhou', () => runGit(root, args, { timeoutMs: NETWORK_TIMEOUT_MS }))
+    return { status: result }
+  } catch (err) {
+    if (!(err instanceof GitError) || !DIVERGED.test(err.stderr)) throw err
+    // O pull já buscou: a contagem é contra o remoto de agora, não o do último fetch.
+    const { stdout } = await runGit(root, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'])
+    const [ahead = 0, behind = 0] = stdout.trim().split(/\s+/).map(Number)
+    return { status: 'diverged', ahead, behind, upstream: status.upstream }
+  }
 }
 
 export async function gitFetch(root: string): Promise<void> {
   await withHint('Não foi possível buscar do remoto', () => runGit(root, ['fetch'], { timeoutMs: NETWORK_TIMEOUT_MS }))
 }
 
-export async function gitSync(root: string): Promise<void> {
+// Histórico reescrito para antes do Pull: o Pull juntaria de volta o commit que foi corrigido ou desfeito.
+export async function gitSync(root: string, strategy: GitPullStrategy = 'default'): Promise<GitPullResult | GitPushRewritten> {
   const status = await currentBranch(root)
-  if (status.upstream) await gitPull(root)
-  await gitPush(root)
+  if (status.upstream) {
+    const rewritten = await rewrittenUpstream(root, status)
+    if (rewritten) return rewritten
+    const pulled = await gitPull(root, strategy)
+    if (pulled.status !== 'ok') return pulled
+  }
+  return gitPush(root)
 }
+
+const OPERATION_LABEL: Record<GitOperation['kind'], string> = {
+  merge: 'um merge',
+  rebase: 'um rebase',
+  'cherry-pick': 'um cherry-pick',
+  revert: 'um revert'
+}
+
+async function mergeInProgress(root: string): Promise<boolean> {
+  const info = await repoInfo(root)
+  return info !== null && existsSync(join(info.gitDir, 'MERGE_HEAD'))
+}
+
+async function operationOf(root: string): Promise<{ status: GitStatus; operation: GitOperation }> {
+  const status = await gitStatus(root)
+  if (!status.isRepo) throw new GitError('Esta pasta não é um repositório git.', null, '')
+  if (!status.operation) throw new GitError('Não há merge, rebase ou cherry-pick em andamento.', null, '')
+  return { status, operation: status.operation }
+}
+
+export async function gitAbortOperation(root: string): Promise<void> {
+  const { operation } = await operationOf(root)
+  await withHint(`Não foi possível abortar ${OPERATION_LABEL[operation.kind]}`, () => runGit(root, [operation.kind, '--abort']))
+}
+
+// Merge conclui com o commit de merge e a mensagem dada (a da caixa de commit, preenchida com a do git). Rebase,
+// cherry-pick e revert seguem com `--continue` e a mensagem que o git guardou para o passo.
+export async function gitContinueOperation(root: string, message: string): Promise<GitContinueResult> {
+  const { status, operation } = await operationOf(root)
+  const pending = conflictCount(status)
+  if (pending > 0) {
+    throw new GitError(
+      pending === 1 ? 'Ainda há 1 arquivo em conflito. Resolva e marque como resolvido antes de concluir.' : `Ainda há ${pending} arquivos em conflito. Resolva e marque como resolvidos antes de concluir.`,
+      null,
+      ''
+    )
+  }
+  if (operation.kind === 'merge') {
+    const text = message.trim() || operation.message
+    if (!text) throw new GitError('Escreva a mensagem do commit de merge.', null, '')
+    await withHint('Não foi possível concluir o merge', () => runGit(root, ['commit', '--file=-'], { input: text, timeoutMs: COMMIT_TIMEOUT_MS }))
+    return 'done'
+  }
+  const result = await allowingConflicts(root, `Não foi possível continuar ${OPERATION_LABEL[operation.kind]}`, () =>
+    runGit(root, [operation.kind, '--continue'], { timeoutMs: COMMIT_TIMEOUT_MS, noEditor: true })
+  )
+  return result === 'ok' ? 'done' : 'conflicts'
+}
+
+const MARKER_START = /^<{7}(?: |\r?$)/m
+const MARKER_END = /^>{7}(?: |\r?$)/m
+const MAX_MARKER_SCAN_BYTES = 20 * 1024 * 1024
+
+// Só início ou fim de bloco contam: uma linha "=======" sozinha é o sublinhado de título do Markdown.
+export function hasConflictMarkers(text: string): boolean {
+  return MARKER_START.test(text) || MARKER_END.test(text)
+}
+
+function fileHasMarkers(file: string): boolean {
+  try {
+    if (statSync(file).size > MAX_MARKER_SCAN_BYTES) return false
+    const text = readFileSync(file, 'utf8')
+    return !text.includes('\0') && hasConflictMarkers(text)
+  } catch {
+    return false
+  }
+}
+
+// Um lado apagou e o outro mudou (ou só um lado adicionou): o arquivo no disco é a versão de um dos lados e
+// colocar na fila escolheria essa versão sem perguntar.
+const NEEDS_CHOICE = new Set<GitConflictCode>(['DU', 'UD', 'AU', 'UA'])
+
+// Marca como resolvido, como o "Preparar" do VS Code num arquivo da seção de conflitos: recusa (devolvendo a
+// lista) arquivo que ainda tem marcadores, a menos que `force`; conflito de exclusão exige `deletion`.
+export async function gitResolve(
+  root: string,
+  paths: readonly string[],
+  opts: { force?: boolean; deletion?: GitDeletionChoice } = {}
+): Promise<GitResolveResult> {
+  const wanted = new Set(paths.map((p) => projectRel(root, p)))
+  if (wanted.size === 0) throw new GitError('Nenhum arquivo informado.', null, '')
+  const status = await gitStatus(root)
+  if (!status.isRepo) throw new GitError('Esta pasta não é um repositório git.', null, '')
+  const conflicted = status.files.filter((f) => f.status === 'conflicted' && wanted.has(f.path))
+  const choice = conflicted.filter((f) => f.conflict && NEEDS_CHOICE.has(f.conflict))
+  const first = choice[0]
+  if (first && !opts.deletion) return { status: 'needs-choice', path: first.path, conflict: first.conflict! }
+  if (!opts.force) {
+    const marked = conflicted.filter((f) => !choice.includes(f) && fileHasMarkers(resolveInside(root, f.path))).map((f) => f.path)
+    if (marked.length > 0) return { status: 'has-markers', paths: marked }
+  }
+  const remove = opts.deletion === 'delete' ? choice.map((f) => f.path) : []
+  const add = [...wanted].filter((p) => !remove.includes(p))
+  await withHint('Não foi possível marcar como resolvido', async () => {
+    if (add.length > 0) await runGit(root, ['add', '-A', ...PATHSPEC_STDIN], { input: pathspecs(root, add), literalPathspecs: true })
+    if (remove.length > 0) await runGit(root, ['rm', '-q', '--force', ...PATHSPEC_STDIN], { input: pathspecs(root, remove), literalPathspecs: true })
+  })
+  return { status: 'resolved' }
+}
+
+// %x1f separa os campos: a mensagem do stash é texto livre. -z separa as entradas.
+const STASH_FORMAT = '%H%x1f%gd%x1f%gs%x1f%ct'
+
+export function parseStashList(output: string, nowMs = Date.now()): GitStash[] {
+  const stashes: GitStash[] = []
+  for (const record of output.split('\0')) {
+    const [oid = '', selector = '', subject = '', unix = ''] = record.replace(/^\r?\n/, '').split('\x1f')
+    const index = /^stash@\{(\d+)\}$/.exec(selector)?.[1]
+    if (!oid || index === undefined) continue
+    // "WIP on main: abc1234 assunto" (sem mensagem) ou "On main: mensagem". Nome de branch não pode ter ":".
+    const m = /^(?:WIP on|On) ([^:]+): ([\s\S]*)$/.exec(subject)
+    const branch = m && m[1] !== '(no branch)' ? m[1]! : null
+    stashes.push({ index: Number(index), oid, message: m ? m[2]! : subject, branch, relative: relativeTime(Number(unix), nowMs) })
+  }
+  return stashes
+}
+
+export async function gitStashList(root: string): Promise<GitStash[]> {
+  try {
+    const { stdout } = await runGit(root, ['stash', 'list', '-z', `--format=${STASH_FORMAT}`])
+    return parseStashList(stdout)
+  } catch (err) {
+    if (isNotRepo(err)) return []
+    throw err
+  }
+}
+
+export async function gitStashPush(root: string, message: string, includeUntracked: boolean): Promise<void> {
+  const before = await stashTop(root)
+  const args = ['stash', 'push', ...(includeUntracked ? ['--include-untracked'] : []), ...(message.trim() ? ['-m', message.trim()] : [])]
+  await withHint('Não foi possível guardar no stash', () => runGit(root, args))
+  // Sem nada para guardar o git sai com 0 e só avisa "No local changes to save".
+  if ((await stashTop(root)) === before) {
+    throw new GitError(
+      includeUntracked ? 'Não há alterações para guardar no stash.' : 'Não há alterações rastreadas para guardar. Para arquivos novos, marque "Incluir não rastreados".',
+      null,
+      ''
+    )
+  }
+}
+
+const STALE_STASH_LIST = 'A lista de stash mudou (outro programa mexeu nela). Atualize e tente de novo.'
+
+// O índice de um stash muda quando outro programa (um agente, o terminal) guarda ou remove um: o oid confere que
+// `stash@{n}` ainda é o que a interface mostrou.
+async function stashSelector(root: string, ref: GitStashRef): Promise<string> {
+  if (!Number.isInteger(ref.index) || ref.index < 0 || !/^[0-9a-f]{40,64}$/.test(ref.oid)) {
+    throw new GitError('Stash inválido.', null, '')
+  }
+  const selector = `stash@{${ref.index}}`
+  const { stdout, code } = await runGit(root, ['rev-parse', '--verify', '-q', selector], { okCodes: [1] })
+  if (code !== 0 || stdout.trim() !== ref.oid) {
+    throw new GitError(STALE_STASH_LIST, null, '')
+  }
+  return selector
+}
+
+// `git stash drop` só aceita a posição, e outro programa pode guardar um stash entre a conferência e o drop: a saída
+// diz qual oid saiu. Se não era o pedido, ele volta para o topo (de onde um stash recém-guardado acabou de sair) com
+// a mesma mensagem, e o drop vai de novo atrás do oid pedido.
+async function dropStash(root: string, ref: GitStashRef, action: string): Promise<void> {
+  let index = ref.index
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { stdout } = await withHint(action, () => runGit(root, ['stash', 'drop', `stash@{${index}}`]))
+    const dropped = /\(([0-9a-f]{40,64})\)/.exec(stdout)?.[1]
+    if (dropped === undefined || dropped === ref.oid) return
+    const { stdout: subject } = await runGit(root, ['log', '-1', '--format=%s', dropped])
+    await runGit(root, ['stash', 'store', '-m', subject.trim(), dropped])
+    const current = (await gitStashList(root)).find((s) => s.oid === ref.oid)
+    if (!current) return
+    index = current.index
+  }
+  throw new GitError(STALE_STASH_LIST, null, '')
+}
+
+async function applyStash(root: string, ref: GitStashRef, pop: boolean, action: string, extra = ''): Promise<'ok' | 'conflicts'> {
+  await stashSelector(root, ref)
+  // Pelo oid: o status que o allowingConflicts roda antes dá tempo de outro programa guardar um stash e empurrar
+  // as posições. Conflito ao aplicar não remove o stash nem no pop, então nada se perde.
+  const result = await allowingConflicts(root, action, () => runGit(root, ['stash', 'apply', ref.oid]), extra)
+  if (pop && result === 'ok') {
+    const current = (await gitStashList(root)).find((s) => s.oid === ref.oid)
+    if (current) await dropStash(root, current, action)
+  }
+  return result
+}
+
+export async function gitStashApply(root: string, ref: GitStashRef, pop: boolean): Promise<'ok' | 'conflicts'> {
+  return applyStash(root, ref, pop, 'Não foi possível aplicar o stash')
+}
+
+export async function gitStashDrop(root: string, ref: GitStashRef): Promise<void> {
+  await stashSelector(root, ref)
+  await dropStash(root, ref, 'Não foi possível remover o stash')
+}
+
+// Caminhos relativos à raiz do repositório, com "/". Inclui os não rastreados guardados com -u.
+export async function gitStashFiles(root: string, ref: GitStashRef): Promise<GitStashFile[]> {
+  const selector = await stashSelector(root, ref)
+  const { stdout } = await withHint('Não foi possível listar o stash', () =>
+    runGit(root, ['stash', 'show', '--include-untracked', '--name-status', '-z', selector])
+  )
+  const fields = stdout.split('\0')
+  const files: GitStashFile[] = []
+  for (let i = 0; i < fields.length; i++) {
+    const code = fields[i]!
+    if (!code) continue
+    // Rename e cópia trazem dois caminhos: o de origem e o novo.
+    if (/^[RC]/.test(code)) i++
+    const path = fields[++i]
+    if (path) files.push({ status: code[0]!, path })
+  }
+  return files
+}
+
+// Para os módulos de histórico, branches, .gitignore e trechos (git-history.ts e vizinhos).
+export { assertBranchName, blobAt, gitEnv, isNotRepo, projectRel, publishRemote, runGit, toGitPath, withHint }
