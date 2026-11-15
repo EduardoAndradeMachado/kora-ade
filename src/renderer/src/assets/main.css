@@ -17,6 +17,13 @@
   --primary-foreground: #1c1917;
   --checker-a: #e4e6ea;
   --checker-b: #f3f4f6;
+  /* Ignorado pelo Git na árvore: esmaecido em relação aos outros nomes, mas ainda com 4,5:1 sobre o fundo. */
+  --git-ignored: #6c7079;
+  --markdown-pre: var(--muted);
+  --markdown-code: var(--secondary);
+  /* Bordas de tabela e barra da citação: linha que dá forma ao conteúdo, 3:1 sobre o canvas no escuro. */
+  --markdown-rule: var(--border);
+  --markdown-check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
   --secondary: #e9ebef;
   --secondary-foreground: #15171b;
   --muted: #eceef2;
@@ -57,8 +64,13 @@
   --card-foreground: #eceef2;
   --primary: #d98e3a;
   --primary-foreground: #1c1917;
-  --checker-a: #2a2d33;
-  --checker-b: #23262c;
+  --checker-a: #3d4048;
+  --checker-b: #25282d;
+  --git-ignored: #80858f;
+  --markdown-pre: #2b2e35;
+  --markdown-code: #2b2e35;
+  --markdown-rule: #696d76;
+  --markdown-check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%231f2126' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
   --secondary: #262930;
   --secondary-foreground: #eceef2;
   --muted: #23262c;
@@ -99,6 +111,7 @@
   --color-ring: var(--ring);
   --color-terminal: var(--terminal-surface);
   --color-canvas: var(--canvas);
+  --color-git-ignored: var(--git-ignored);
   --radius-sm: 0.25rem;
   --radius-md: 0.375rem;
   --radius-lg: var(--radius);
@@ -189,24 +202,56 @@
   @apply text-sky-400 underline-offset-2 hover:underline;
 }
 .markdown code {
-  @apply rounded bg-secondary px-1 py-0.5 font-mono text-[0.923em] break-all;
+  @apply rounded bg-(--markdown-code) px-1 py-0.5 font-mono text-[0.923em] break-all;
 }
 .markdown pre {
-  @apply my-3 overflow-x-auto rounded-md bg-card p-3;
+  @apply my-3 overflow-x-auto rounded-md border border-input bg-(--markdown-pre) p-3;
 }
 .markdown pre code {
   @apply bg-transparent p-0 break-normal;
 }
 .markdown blockquote {
-  @apply my-2 border-l-2 pl-3 text-muted-foreground;
+  @apply my-2 border-l-2 border-(--markdown-rule) pl-3 text-muted-foreground;
 }
 .markdown table {
   @apply my-3 w-full border-collapse text-[0.923em];
 }
 .markdown th,
 .markdown td {
-  @apply border px-2 py-1 text-left;
+  @apply border border-(--markdown-rule) px-2 py-1 text-left;
+}
+/* Lista de tarefas (- [x]): a caixa nativa desabilitada some no escuro, que o Chromium desenha no esquema claro. */
+.markdown input[type='checkbox'] {
+  @apply m-0 mr-1.5 size-[0.95em] appearance-none rounded-[3px] border-[1.5px] border-muted-foreground bg-center bg-no-repeat align-[-0.12em];
+}
+.markdown input[type='checkbox']:checked {
+  @apply bg-muted-foreground bg-size-[100%];
+  background-image: var(--markdown-check-mark);
 }
 .markdown hr {
   @apply my-4;
+}
+.markdown img {
+  @apply inline max-w-full;
+}
+/* O mermaid mede os rótulos num elemento solto no body: dentro do artigo, a entrelinha e a margem do <p> do
+   Markdown deixariam o texto maior que a caixa medida e cortado. */
+.markdown .mermaid-diagram {
+  @apply my-3 flex justify-center overflow-x-auto leading-normal;
+}
+.markdown .mermaid-diagram p {
+  @apply m-0;
+}
+.markdown .mermaid-diagram[data-stale] {
+  @apply opacity-50;
+}
+.markdown .mermaid-error {
+  @apply mt-3 mb-1 text-[0.923em] whitespace-pre-wrap text-destructive;
+}
+
+/* Abas (e camadas) escondidas ficam montadas com `absolute … invisible` para não perder a edição. O Monaco marca
+   partes do editor com visibility: visible, que vence a herança: sem isto, o editor de uma aba escondida aparece por
+   cima da aba ativa e recebe os cliques. Só camadas absolutas: ícones `invisible group-hover:visible` não entram. */
+.absolute.invisible * {
+  visibility: hidden !important;
 }

@@ -99,7 +99,7 @@ export function applyLayout(state: KoraState, layout: SidebarLayout): KoraState 
 // conhecia), só valem as mudanças feitas a partir dela: o que o celular mudou nesse meio-tempo fica.
 export function mergeTabs(
   state: KoraState,
-  incoming: { id: string; projectId: string; title: string; titleLocked?: boolean }[],
+  incoming: { id: string; projectId: string; title: string; titleLocked?: boolean; dir?: string }[],
   baseline?: { id: string; projectId: string; title: string; titleLocked?: boolean }[]
 ): KoraState {
   if (baseline) incoming = reconcileTabRefs(state.tabs, incoming, baseline)
@@ -107,13 +107,18 @@ export function mergeTabs(
   const projectIds = new Set(state.projects.map((p) => p.id))
   const tabs = incoming
     .filter((t) => projectIds.has(t.projectId))
-    .map((t) => ({
-      id: t.id,
-      projectId: t.projectId,
-      title: t.title,
-      titleLocked: t.titleLocked ?? false,
-      agent: known.get(t.id)?.agent ?? null
-    }))
+    .map((t) => {
+      // A pasta é decidida quando a aba nasce; um save que não a traz (ex.: a lista vinda do celular) não a apaga.
+      const dir = known.get(t.id)?.dir ?? (typeof t.dir === 'string' ? t.dir : undefined)
+      return {
+        id: t.id,
+        projectId: t.projectId,
+        title: t.title,
+        titleLocked: t.titleLocked ?? false,
+        agent: known.get(t.id)?.agent ?? null,
+        ...(dir ? { dir } : {})
+      }
+    })
   return syncSessionNames(state, { ...state, tabs })
 }
 

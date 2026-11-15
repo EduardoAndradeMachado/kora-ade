@@ -1,6 +1,22 @@
 import type { Alerts, KoraState, ProjectGroup, ThemePreference } from './state'
 import type { AgentActivity, AgentSession } from './agent'
+import type { MemoryPressure, MemoryUsage } from './open-limits'
 import type { GitBranch, GitCommitResult, GitDiff, GitStatus, GitWorktree } from './git-types'
+import type { GitBranchDeleteResult, GitCommitFile, GitHeadCommit, GitHunk, GitHunkAction, GitLogPage } from './git-types'
+import type {
+  GitCheckoutMode,
+  GitCheckoutResult,
+  GitContinueResult,
+  GitDeletionChoice,
+  GitPullResult,
+  GitPullStrategy,
+  GitPushResult,
+  GitPushRewritten,
+  GitResolveResult,
+  GitStash,
+  GitStashFile,
+  GitStashRef
+} from './git-types'
 import type { AgentUsage } from './usage-types'
 import type { ClaudeAccountsView } from './claude-accounts'
 import type { DayPoint, SessionMetrics } from './metrics'
@@ -16,6 +32,45 @@ export interface FileEntry {
 export interface TextFile {
   content: string
   mtimeMs: number
+  encoding?: string
+  // Identificador para devolver no writeText: arquivo Windows-1252 salvo só com ASCII não teria como ser reconhecido.
+  encodingId?: string
+  eol?: 'LF' | 'CRLF'
+}
+
+export interface ProjectSearchOptions {
+  caseSensitive: boolean
+  wholeWord: boolean
+  regex: boolean
+  // "Arquivos a incluir" do VS Code: itens separados por vírgula; ".\pasta" ancora na raiz, "pasta" e glob
+  // ("*.ts", "src/**/*.tsx") valem em qualquer nível. Vazio ou ausente: o projeto todo.
+  include?: string
+  // "Arquivos a excluir", com a mesma sintaxe; vale junto com o incluir.
+  exclude?: string
+}
+
+// line e column começam em 1; column e length contam em unidades UTF-16, como o Monaco. start/end marcam a
+// ocorrência em preview, que pode cortá-la.
+export interface ProjectSearchMatch {
+  line: number
+  column: number
+  length: number
+  preview: string
+  start: number
+  end: number
+}
+
+export interface ProjectSearchFile {
+  path: string
+  matches: ProjectSearchMatch[]
+}
+
+export interface ProjectSearchResult {
+  files: ProjectSearchFile[]
+  total: number
+  truncated: boolean
+  // A lista do projeto passou do teto e só os primeiros arquivos foram lidos.
+  capped: boolean
 }
 
 // O que mudou no disco de um projeto, por quem quer que seja: pastas cuja listagem mudou ('' = raiz),
@@ -31,7 +86,28 @@ export interface FilesChange {
   rescan: boolean
 }
 
-export type CreateResult = { ok: true; rel: string } | { ok: false; message: string }
+// `top`: primeira pasta (ou o próprio item) que não existia; `stamp` é o retrato dela para o desfazer.
+export type CreateResult = { ok: true; rel: string; top: string; stamp: string } | { ok: false; message: string }
+
+export interface CopiedEntry {
+  rel: string
+  stamp: string
+}
+
+// Desfazer da árvore: `remove` manda para a Lixeira o que ela criou (só se continua igual ao retrato), `move` leva
+// de volta de `to` para `from`, `restore` tira da Lixeira do Windows o que foi excluído a partir de `since` (ms).
+export type TreeUndoStep =
+  | { kind: 'remove'; items: CopiedEntry[] }
+  | { kind: 'move'; moves: { from: string; to: string }[] }
+  | { kind: 'restore'; items: { rel: string; since: number }[] }
+
+// `moved` são os caminhos que mudaram (para as abas acompanharem); `message` diz por que não fez, ou o que faltou.
+// `remaining`: com `message`, o passo só com os itens que não foram desfeitos (o passo inteiro se nada mudou).
+export interface TreeUndoResult {
+  moved: { from: string; to: string }[]
+  message: string | null
+  remaining: TreeUndoStep | null
+}
 
 export type SaveResult = { ok: true; mtimeMs: number } | { ok: false; conflict: boolean; message: string }
 
@@ -57,6 +133,8 @@ export interface TabRef {
   projectId: string
   title: string
   titleLocked?: boolean
+  // Pasta inicial do terminal, relativa ao projeto ("Abrir no terminal integrado"); sem ela, a raiz.
+  dir?: string
 }
 
 // Por que o app pediu para a interface resolver os arquivos não salvos: o X esconde na bandeja, o resto encerra.
@@ -111,18 +189,48 @@ export interface KoraApi {
   }): Promise<KoraState>
 
   listDir(projectId: string, rel: string): Promise<FileEntry[]>
+  // Arquivos do projeto todo: no git, rastreados e não rastreados sem os ignorados; fora dele, tudo menos .git e node_modules.
+  listProjectFiles(projectId: string): Promise<string[]>
+  // Uma busca nova cancela a anterior, que resolve com null; texto vazio só cancela.
+  searchProject(projectId: string, query: string, opts: ProjectSearchOptions): Promise<ProjectSearchResult | null>
   onFilesChanged(listener: (projectId: string, change: FilesChange) => void): () => void
-  readText(projectId: string, rel: string): Promise<TextFile>
-  writeText(projectId: string, rel: string, content: string, expectedMtimeMs: number): Promise<SaveResult>
+  // force: abre acima do limite normal, até o teto do editor (o usuário pediu "Abrir mesmo assim").
+  // encoding: decodifica nessa codificação em vez de detectar ("Reabrir com codificação").
+  readText(projectId: string, rel: string, opts?: { force?: boolean; encoding?: string }): Promise<TextFile>
+  // Os bytes de um .xlsx para a planilha, com os mesmos limites e mensagens do readText (force = "Abrir mesmo assim").
+  readSheetBytes(projectId: string, rel: string, opts?: { force?: boolean }): Promise<Uint8Array>
+  // Memória privada do processo da janela e o limite do vigia (null sem medida).
+  memoryUsage(): Promise<MemoryUsage | null>
+  // Tamanho no disco de cada caminho (0 se sumiu), para estimar quanto cada aba ocupa.
+  memoryFileSizes(projectId: string, rels: string[]): Promise<number[]>
+  // O vigia do main: a janela passou do limite, libere o que der.
+  onMemoryPressure(listener: (pressure: MemoryPressure) => void): () => void
+  // forceEncoding: grava em encodingId mesmo que o disco mostre outra ("Salvar com codificação").
+  writeText(
+    projectId: string,
+    rel: string,
+    content: string,
+    expectedMtimeMs: number,
+    encodingId?: string,
+    opts?: { forceEncoding?: boolean }
+  ): Promise<SaveResult>
   openFile(projectId: string, rel: string): Promise<void>
+  // app: nome do programa que o Windows usa para a extensão; null se o Windows for perguntar qual usar.
+  fileInfo(projectId: string, rel: string): Promise<{ size: number; mtimeMs: number; app: string | null }>
+  // Só arquivo conta: pasta no lugar do arquivo é tão "apagado" quanto nada no lugar.
+  fileExists(projectId: string, rel: string): Promise<boolean>
   createEntry(projectId: string, parentRel: string, name: string, kind: 'file' | 'dir'): Promise<CreateResult>
   // Os dois devolvem o caminho relativo novo; nenhum sobrescreve item existente.
   moveEntry(projectId: string, fromRel: string, toDirRel: string): Promise<string>
   renameEntry(projectId: string, rel: string, name: string): Promise<string>
   // Copia para a pasta (relativa ao projeto) o que veio de fora do app; devolve os caminhos relativos novos.
-  importEntries(projectId: string, sources: string[], toDirRel: string): Promise<string[]>
-  // Caminho impresso no terminal que é um arquivo do projeto; null para qualquer outra coisa.
-  resolveTerminalLink(projectId: string, text: string): Promise<{ rel: string; line: number | null } | null>
+  importEntries(projectId: string, sources: string[], toDirRel: string): Promise<CopiedEntry[]>
+  // Colar/duplicar dentro do projeto: cópia com nome livre ("nome (2).ext") quando já existe um igual.
+  copyEntries(projectId: string, rels: string[], toDirRel: string): Promise<CopiedEntry[]>
+  undoTreeStep(projectId: string, step: TreeUndoStep): Promise<TreeUndoResult>
+  // Caminho impresso no terminal que é um arquivo do projeto; null para qualquer outra coisa. Com a aba do terminal,
+  // o relativo vale primeiro a partir da pasta em que ela abriu.
+  resolveTerminalLink(projectId: string, text: string, terminalTabId?: string): Promise<{ rel: string; line: number | null } | null>
   // Caminho no disco de um arquivo solto de fora do app (Explorer do Windows); '' se ele não vier do disco.
   pathForFile(file: File): string
   reportLongTask(ms: number): void
@@ -168,7 +276,8 @@ export interface KoraApi {
   gitBranches(projectId: string): Promise<GitBranch[]>
   gitWorktrees(projectId: string): Promise<GitWorktree[]>
   gitCreateBranch(projectId: string, name: string, checkout: boolean): Promise<void>
-  gitCheckout(projectId: string, name: string, remote: string | null): Promise<void>
+  // Sem `mode`, alteração local que barra a troca volta como 'local-changes' para a interface perguntar.
+  gitCheckout(projectId: string, name: string, remote: string | null, mode?: GitCheckoutMode): Promise<GitCheckoutResult>
   gitIgnored(projectId: string, relPaths: string[]): Promise<string[]>
   gitInit(projectId: string): Promise<void>
   gitRemoteUrl(projectId: string): Promise<string | null>
@@ -183,11 +292,42 @@ export interface KoraApi {
   // Fila vazia devolve 'nothing-staged' sem commitar; stageAll coloca todas as alterações do projeto antes.
   gitCommit(projectId: string, message: string, stageAll: boolean): Promise<GitCommitResult>
   // Branch sem upstream é publicada (push -u) no origin.
-  gitPush(projectId: string): Promise<void>
-  gitPull(projectId: string): Promise<void>
+  // Histórico local reescrito (commit enviado foi corrigido/desfeito) volta como 'rewritten', sem enviar; com
+  // `forceWithLease` (o remoteOid devolvido) envia com --force-with-lease.
+  gitPush(projectId: string, opts?: { forceWithLease?: string }): Promise<GitPushResult>
+  gitPull(projectId: string, strategy?: GitPullStrategy): Promise<GitPullResult>
   gitFetch(projectId: string): Promise<void>
   // Pull e depois Push.
-  gitSync(projectId: string): Promise<void>
+  gitSync(projectId: string, strategy?: GitPullStrategy): Promise<GitPullResult | GitPushRewritten>
+  // Marca arquivos em conflito como resolvidos; recusa com marcadores (sem `force`) e conflito de exclusão sem `deletion`.
+  gitResolve(projectId: string, paths: string[], opts?: { force?: boolean; deletion?: GitDeletionChoice }): Promise<GitResolveResult>
+  gitAbortOperation(projectId: string): Promise<void>
+  // Merge: commit com `message`. Rebase, cherry-pick e revert: --continue.
+  gitContinueOperation(projectId: string, message: string): Promise<GitContinueResult>
+  gitStashList(projectId: string): Promise<GitStash[]>
+  gitStashPush(projectId: string, message: string, includeUntracked: boolean): Promise<void>
+  gitStashApply(projectId: string, ref: GitStashRef, pop: boolean): Promise<'ok' | 'conflicts'>
+  gitStashDrop(projectId: string, ref: GitStashRef): Promise<void>
+  gitStashFiles(projectId: string, ref: GitStashRef): Promise<GitStashFile[]>
+  // Histórico: do repositório, ou de um arquivo seguindo renomeações (`path`). Paginado por skip/limit.
+  gitLog(projectId: string, opts: { skip?: number; limit?: number; path?: string }): Promise<GitLogPage>
+  gitCommitFiles(projectId: string, hash: string): Promise<GitCommitFile[]>
+  // Diff de um arquivo num commit: primeiro pai ↔ commit (`origPath`: caminho antes do rename).
+  gitCommitDiff(projectId: string, hash: string, path: string, origPath?: string): Promise<GitDiff>
+  // Conteúdo do arquivo num commit ("HEAD" ou hash); `exists` false se ele não existia ali.
+  gitFileAt(projectId: string, rev: string, path: string): Promise<{ text: string; binary: boolean; exists: boolean }>
+  gitHeadCommit(projectId: string): Promise<GitHeadCommit | null>
+  gitAmend(projectId: string, message: string): Promise<void>
+  // reset --soft HEAD~1: as alterações do commit voltam para a fila; devolve a mensagem dele.
+  gitUndoLastCommit(projectId: string): Promise<{ message: string }>
+  // Sem `force`, branch não mesclada volta 'not-merged' sem apagar.
+  gitDeleteBranch(projectId: string, name: string, force: boolean): Promise<GitBranchDeleteResult>
+  gitRenameBranch(projectId: string, from: string, to: string): Promise<void>
+  gitPublishBranch(projectId: string, name: string): Promise<void>
+  // Grava no .gitignore da pasta do projeto; devolve as linhas que entraram (as que já existiam ficam de fora).
+  gitAddToIgnore(projectId: string, paths: string[]): Promise<string[]>
+  gitHunks(projectId: string, path: string, staged: boolean): Promise<GitHunk[]>
+  gitApplyHunk(projectId: string, path: string, staged: boolean, hunkId: string, action: GitHunkAction): Promise<void>
   projectIcon(projectId: string): Promise<string | null>
   refreshProjectIcon(projectId: string): Promise<string | null>
 
@@ -220,6 +360,8 @@ export interface KoraApi {
   onTerminalExit(listener: (id: string, exitCode: number) => void): () => void
   // Tela atual de um terminal já rodando (aberto pelo celular) e o tamanho que ele usa agora.
   terminalSnapshot(id: string): Promise<{ snapshot: TerminalSnapshot | null; size: TerminalSizeEvent | null }>
+  // Terminais que continuaram rodando enquanto a interface recarregava (queda); vazio na abertura do app.
+  reattachTerminals(): Promise<{ id: string; activity: AgentActivity | null }[]>
   // Digitar no PC traz o tamanho do terminal de volta para a janela.
   takeTerminal(id: string): void
   onTerminalSize(listener: (event: TerminalSizeEvent) => void): () => void

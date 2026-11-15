@@ -1,9 +1,11 @@
+import './monaco-pt-br'
 import * as monaco from 'monaco-editor'
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker'
 import JsonWorker from 'monaco-editor/language/json/json.worker?worker'
 import CssWorker from 'monaco-editor/language/css/css.worker?worker'
 import HtmlWorker from 'monaco-editor/language/html/html.worker?worker'
 import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker'
+import { registerConflictSupport } from './git-conflicts-editor'
 
 // O Monaco resolve sozinho os workers com `new URL(..., import.meta.url)`, o que quebra no
 // pré-bundle do Vite em dev; com `getWorker` definido esse caminho nunca é usado.
@@ -29,10 +31,39 @@ self.MonacoEnvironment = {
   }
 }
 
-// Sem o projeto inteiro carregado no worker, todo import vira "Cannot find module"; a
-// validação semântica só geraria sublinhado vermelho falso. A de sintaxe continua.
+// O worker conhece os arquivos do projeto (code-nav.ts), mas não os pacotes de node_modules: todo import de pacote
+// viraria "Cannot find module" e cada JSX sem os tipos do React, erro. A validação semântica só geraria sublinhado
+// vermelho falso; a de sintaxe continua.
 for (const defaults of [monaco.typescript.typescriptDefaults, monaco.typescript.javascriptDefaults]) {
   defaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false })
+}
+
+// tsconfig e .jsonc aceitam comentário e vírgula sobrando; nos outros JSON (package.json) isso continua erro.
+// O validador do JSON tolera os dois quando o esquema associado ao arquivo diz que pode.
+const JSON_WITH_COMMENTS = ['*.jsonc', 'tsconfig.json', 'tsconfig.*.json', 'jsconfig.json', 'jsconfig.*.json']
+monaco.json.jsonDefaults.setDiagnosticsOptions({
+  ...monaco.json.jsonDefaults.diagnosticsOptions,
+  schemas: [{ uri: 'kora://schemas/json-com-comentarios', fileMatch: JSON_WITH_COMMENTS, schema: { allowComments: true, allowTrailingCommas: true } }]
+})
+
+// Nomes que o Monaco não reconhece sozinho pela URI. ini realça `CHAVE=valor`, `[seção]` e comentário com #;
+// shell, as receitas do Makefile.
+export function languageForPath(path: string): string | undefined {
+  const name = (path.split(/[\\/]/).pop() ?? '').toLowerCase()
+  const ext = name.includes('.', 1) ? name.slice(name.lastIndexOf('.')) : ''
+  if (name === '.env' || name.startsWith('.env.') || ext === '.env') return 'ini'
+  if (ext === '.toml' || name === '.editorconfig' || name === '.gitignore' || name === '.dockerignore') return 'ini'
+  if (name === 'makefile' || name === 'gnumakefile' || ext === '.mk') return 'shell'
+  if (name === 'dockerfile' || name.startsWith('dockerfile.') || ext === '.dockerfile') return 'dockerfile'
+  if (ext === '.cjs' || ext === '.mjs') return 'javascript'
+  if (ext === '.jsonc' || /^[tj]sconfig(\..+)?\.json$/.test(name)) return 'json'
+  return undefined
+}
+
+// Nome legível da linguagem do model, como na barra de status do VS Code.
+export function languageLabel(languageId: string): string {
+  if (languageId === 'plaintext') return 'Texto'
+  return monaco.languages.getLanguages().find((l) => l.id === languageId)?.aliases?.[0] ?? languageId
 }
 
 const DARK_THEME = 'kora-dark'
@@ -115,5 +146,7 @@ export const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions 
   smoothScrolling: true,
   padding: { top: 8 }
 }
+
+registerConflictSupport()
 
 export { monaco }

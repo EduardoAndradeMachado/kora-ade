@@ -32,7 +32,10 @@ export const SavedTabSchema = z.object({
   title: z.string(),
   // Nome dado pelo usuário: o título que o Claude/Codex publicam no terminal não o substitui.
   titleLocked: z.boolean().default(false),
-  agent: AgentSessionSchema.nullable()
+  agent: AgentSessionSchema.nullable(),
+  // Terminal aberto numa pasta do projeto (relativa à raiz); sem ela, a raiz. O agente retomado precisa da mesma
+  // pasta: o Claude guarda as conversas pela pasta em que rodou.
+  dir: z.string().optional()
 })
 
 export const ThemePreferenceSchema = z.enum(['system', 'light', 'dark'])

@@ -533,7 +533,7 @@ test('R61 Abrir pasta dos logs funciona mesmo sem nenhum erro registrado; falha 
   await expect(failure).not.toContainText('invoking remote method')
 })
 
-test('R72 abrir um PDF não encerra os terminais abertos; recarregar a interface encerra (sem órfãos)', async ({ kora }) => {
+test('R72 abrir um PDF não encerra os terminais abertos; recarregar a interface reconecta o mesmo terminal (sem órfãos nem duplicado)', async ({ kora }) => {
   const env = kora.env()
   writeFileSync(join(env.project, 'doc.pdf'), pdfBytes())
   const run = await kora.launch(env)
@@ -550,7 +550,10 @@ test('R72 abrir um PDF não encerra os terminais abertos; recarregar a interface
   expect(shells(run).map((p) => p.pid)).toContain(shellPid)
 
   await page.reload()
-  await expect.poll(() => isAlive(shellPid), { timeout: 15_000, message: 'recarregar a interface encerra o terminal' }).toBe(false)
+  await expect(ui.terminal(page)).toBeVisible()
+  await page.waitForTimeout(1500)
+  expect(isAlive(shellPid), 'recarregar a interface reconecta o terminal em vez de encerrar').toBe(true)
+  expect(shells(run).map((p) => p.pid), 'a aba reconectada não sobe um segundo shell').toEqual([shellPid])
 })
 
 test('R80 Suporte recolhido por padrão; Limpar log pede confirmação na própria seção e zera o log; Relatar um problema abre a issue nova no GitHub', async ({ kora }) => {
@@ -621,7 +624,8 @@ test('R83 limites de uso: o Codex aparece pelo último uso gravado e o painel di
 
   const run = await kora.launch(env)
   const page = run.page
-  await page.locator(tip('Limites de uso')).click()
+  // Com uso conhecido o medidor perde a dica: o cartão do hover de cada agente faz esse papel.
+  await page.locator('button[aria-expanded]').filter({ has: page.getByRole('progressbar') }).click()
   const panel = page.getByRole('dialog', { name: 'Limites de uso' })
   await expect(panel).toContainText('Codex')
   await expect(panel).toContainText('42% usado')

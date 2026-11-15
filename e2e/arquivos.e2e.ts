@@ -26,7 +26,15 @@ import {
 const panelOf = (run: KoraRun) => run.page.locator('aside').last()
 // A dica (data-tip) é o caminho relativo com "\", que no seletor CSS precisa ser escapado.
 const row = (run: KoraRun, rel: string) => panelOf(run).locator(`div[data-tip="${rel.replaceAll('\\', '\\\\')}"]`)
-const menuLabels = (run: KoraRun) => run.page.locator('body > div.fixed button').allTextContents()
+// "Nome [atalho]" e "(desabilitado)" quando o item não responde, como o "Colar" do VS Code sem nada copiado.
+const menuLabels = (run: KoraRun) =>
+  run.page.locator('body > div.fixed button').evaluateAll((buttons) =>
+    buttons.map((b) => {
+      const name = b.querySelector('span.flex-1')?.textContent ?? ''
+      const key = b.querySelector('kbd')?.textContent
+      return `${name}${key ? ` [${key}]` : ''}${(b as HTMLButtonElement).disabled ? ' (desabilitado)' : ''}`
+    })
+  )
 
 test('R16 explorador: clique abre; menus de arquivo, pasta e área vazia; criar, copiar caminho e excluir com diálogo próprio', async ({ kora }) => {
   const env = kora.env()
@@ -46,13 +54,19 @@ test('R16 explorador: clique abre; menus de arquivo, pasta e área vazia; criar,
     'Abrir',
     'Abrir no navegador padrão',
     'Abrir no programa padrão',
-    'Mostrar no Explorer',
-    'Renomear',
+    'Mostrar no Explorer [Shift+Alt+R]',
+    'Abrir no terminal integrado',
     'Novo arquivo',
     'Nova pasta',
-    'Copiar caminho',
-    'Copiar caminho relativo',
-    'Excluir'
+    'Selecionar para comparar',
+    'Recortar [Ctrl+X]',
+    'Copiar [Ctrl+C]',
+    'Colar [Ctrl+V] (desabilitado)',
+    'Duplicar',
+    'Copiar caminho [Shift+Alt+C]',
+    'Copiar caminho relativo [Ctrl+K Ctrl+Shift+C]',
+    'Renomear [F2]',
+    'Excluir [Del]'
   ])
   await ui.menuItem(page, 'Abrir no programa padrão').click()
   await expect.poll(() => shellCalls(run)).toContainEqual(['openPath', join(env.project, 'notas.txt')])
@@ -71,11 +85,17 @@ test('R16 explorador: clique abre; menus de arquivo, pasta e área vazia; criar,
   expect(await menuLabels(run)).toEqual([
     'Novo arquivo',
     'Nova pasta',
-    'Abrir no Explorer',
-    'Renomear',
-    'Copiar caminho',
-    'Copiar caminho relativo',
-    'Excluir'
+    'Abrir no Explorer [Shift+Alt+R]',
+    'Abrir no terminal integrado',
+    'Buscar na pasta… [Shift+Alt+F]',
+    'Recortar [Ctrl+X]',
+    'Copiar [Ctrl+C]',
+    'Colar [Ctrl+V] (desabilitado)',
+    'Duplicar',
+    'Copiar caminho [Shift+Alt+C]',
+    'Copiar caminho relativo [Ctrl+K Ctrl+Shift+C]',
+    'Renomear [F2]',
+    'Excluir [Del]'
   ])
   await ui.menuItem(page, 'Nova pasta').click()
   const dirInput = panelOf(run).getByPlaceholder('nome da pasta')
@@ -88,7 +108,14 @@ test('R16 explorador: clique abre; menus de arquivo, pasta e área vazia; criar,
   // Área vazia do explorador: criação na raiz.
   const empty = panelOf(run).locator('div.min-h-8')
   await empty.click({ button: 'right' })
-  expect(await menuLabels(run)).toEqual(['Novo arquivo', 'Nova pasta', 'Abrir pasta do projeto no Explorer'])
+  expect(await menuLabels(run)).toEqual([
+    'Novo arquivo',
+    'Nova pasta',
+    'Abrir pasta do projeto no Explorer [Shift+Alt+R]',
+    'Abrir no terminal integrado',
+    'Buscar na pasta… [Shift+Alt+F]',
+    'Colar [Ctrl+V] (desabilitado)'
+  ])
   await ui.menuItem(page, 'Novo arquivo').click()
   const fileInput = panelOf(run).getByPlaceholder('nome do arquivo')
   await fileInput.fill('novo.txt')
@@ -163,7 +190,9 @@ test('R33 explorador: arrastar move (aba aberta acompanha), duplo clique na past
   await ui.barTab(page, 'notas.txt').click()
   await expect(page.locator('.monaco-editor').filter({ visible: true })).toContainText('notas')
 
-  await row(run, 'arquivo-morto').dblclick()
+  // Duplo clique em pasta só expande/recolhe, como no VS Code; renomear é pelo F2.
+  await row(run, 'arquivo-morto').click()
+  await row(run, 'arquivo-morto').press('F2')
   const renameInput = panelOf(run).locator('input').filter({ visible: true })
   await renameInput.fill('antigos')
   await renameInput.press('Enter')
@@ -248,7 +277,7 @@ test('R35 caminho impresso no terminal: clique simples não abre; Ctrl+clique ab
   await expect(editor.locator('.active-line-number')).toHaveText('3')
 })
 
-test('R17 explorador com git: modificado com cor e M, não rastreado com U, pasta ignorada opaca inclusive o ícone', async ({ kora }) => {
+test('R17 explorador com git: modificado com cor e M, não rastreado com U, pasta ignorada com nome em cinza e ícone opaco', async ({ kora }) => {
   const env = kora.env()
   seedRepo(env)
   writeFileSync(join(env.project, 'tracked.txt'), 'alterado\n')
@@ -263,11 +292,15 @@ test('R17 explorador com git: modificado com cor e M, não rastreado com U, past
     [modified, untracked, row(run, 'README.md')].map((r) => r.locator('span.truncate').evaluate((e) => getComputedStyle(e).color))
   )
   expect(['rgb(137, 85, 3)', 'rgb(226, 192, 141)']).toContain(colors[0])
-  expect(['rgb(88, 124, 12)', 'rgb(115, 201, 145)']).toContain(colors[1])
+  expect(['rgb(0, 113, 0)', 'rgb(115, 201, 145)']).toContain(colors[1])
   expect(colors[2]).not.toBe(colors[0])
 
+  // O nome do ignorado vai na cor --git-ignored (contraste de 4,5:1 nos dois temas), não em opacidade.
   const ignored = row(run, 'ignored-dir')
-  await expect.poll(() => ignored.locator('span.truncate').evaluate((e) => getComputedStyle(e).opacity)).toBe('0.45')
+  await expect
+    .poll(() => ignored.locator('span.truncate').evaluate((e) => getComputedStyle(e).color))
+    .toMatch(/^rgb\((108, 112, 121|128, 133, 143)\)$/)
+  expect(await ignored.locator('span.truncate').evaluate((e) => getComputedStyle(e).opacity)).toBe('1')
   expect(await ignored.locator('svg').nth(1).evaluate((e) => getComputedStyle(e).opacity)).toBe('0.4')
   expect(await row(run, 'src').locator('svg').nth(1).evaluate((e) => getComputedStyle(e).opacity)).toBe('1')
 })
@@ -654,7 +687,7 @@ test('R81 Git como no VS Code: diff ao clicar, descartar, fila e tirar da fila, 
   git(other, env, 'push', '-q', 'origin', 'main')
   const pull = panel.getByRole('button', { name: /^Pull/ })
   // Dica na identidade do app, não o title nativo do Windows.
-  const fetch = panel.getByRole('button', { name: 'Buscar' })
+  const fetch = panel.getByRole('button', { name: 'Buscar', exact: true })
   await expect(fetch).not.toHaveAttribute('title')
   await fetch.hover()
   await expect(page.getByRole('tooltip')).toContainText('Atualiza o que o remoto tem, sem mexer nos seus arquivos.')
@@ -744,19 +777,24 @@ test('R43 texto dos arquivos: tamanho próprio no painel Aa e no Ctrl + roda sob
   await waitFor(() => readState(env).settings?.fileFontSize === 16, 'Ctrl + roda sobre o arquivo salvo')
 })
 
-test('R46 explorador sem trocar de aba: .gitignore editado por fora deixa o item opaco na hora; cor do git chega antes do polling', async ({ kora }) => {
+test('R46 explorador sem trocar de aba: .gitignore editado por fora marca o item como ignorado na hora; cor do git chega antes do polling', async ({ kora }) => {
   const env = kora.env()
   seedRepo(env)
   writeFileSync(join(env.project, 'segredo.env'), 'x=1\n')
   const run = await kora.launch(env)
-  const opacity = (rel: string) => row(run, rel).locator('span.truncate').evaluate((e) => getComputedStyle(e).opacity)
+  const iconOpacity = (rel: string) => row(run, rel).locator('svg').nth(1).evaluate((e) => getComputedStyle(e).opacity)
+  const nameColor = (rel: string) => row(run, rel).locator('span.truncate').evaluate((e) => getComputedStyle(e).color)
+  const ignoredColor = /^rgb\((108, 112, 121|128, 133, 143)\)$/
 
   await expect(row(run, 'segredo.env')).toBeVisible()
   await expect(row(run, 'segredo.env').locator('span.font-semibold')).toHaveText('U')
-  await expect.poll(() => opacity('segredo.env')).toBe('1')
+  expect(await nameColor('segredo.env')).not.toMatch(ignoredColor)
+  expect(await iconOpacity('segredo.env')).toBe('1')
 
   appendFileSync(join(env.project, '.gitignore'), 'segredo.env\n')
-  await expect.poll(() => opacity('segredo.env'), { timeout: 4000 }).toBe('0.45')
+  await expect.poll(() => iconOpacity('segredo.env'), { timeout: 4000 }).toBe('0.4')
+  expect(await nameColor('segredo.env')).toMatch(ignoredColor)
+  await expect(row(run, 'segredo.env').locator('span.font-semibold')).toHaveCount(0)
 
   // O polling do status é de 5 s: três viradas seguidas, cada uma em até 1,5 s, só passam pelo aviso do watcher.
   const tracked = row(run, 'tracked.txt').locator('span.font-semibold')
@@ -898,7 +936,7 @@ test('R65 "Copiar caminho" de imagem e Ctrl+V no chat chega como texto digitado;
   const saved = await saveClipboard(run)
   try {
     await row(run, 'tela.png').click({ button: 'right' })
-    await page.locator('body > div.fixed button').filter({ hasText: /^Copiar caminho$/ }).click()
+    await ui.menuItem(page, 'Copiar caminho').click()
     await ui.terminal(page).click()
     await page.keyboard.press('Control+V')
     expect(await sendLine(), '"Copiar caminho" do Kora chega digitado: o Claude não converte em imagem').toMatchObject({ line: image, pasted: false })

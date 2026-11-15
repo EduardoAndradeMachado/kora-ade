@@ -79,6 +79,26 @@ export function arrangeProjects<T extends Arrangeable>(projects: T[], draggedId:
   return sortBySection(placed, groups)
 }
 
+// Os projetos da mesma seção do projeto, na ordem em que a lateral desenha (vazio se ele não existe).
+export function sectionSiblings<T extends Arrangeable>(projects: T[], id: string, groups: GroupRef[]): T[] {
+  const ids = new Set(groups.map((g) => g.id))
+  const key = (project: T): string => {
+    const section = sectionOf(project, ids)
+    return section.hidden ? HIDDEN : section.groupId ? `g:${section.groupId}` : NONE
+  }
+  const project = projects.find((p) => p.id === id)
+  if (!project) return []
+  return sortBySection(projects, groups).filter((p) => key(p) === key(project))
+}
+
+// Sobe ou desce uma posição dentro da seção, sem trocar de categoria; nas pontas não mexe.
+export function moveProjectBy<T extends Arrangeable>(projects: T[], id: string, delta: -1 | 1, groups: GroupRef[]): T[] {
+  const siblings = sectionSiblings(projects, id, groups)
+  const neighbor = siblings[siblings.findIndex((p) => p.id === id) + delta]
+  if (!neighbor) return projects
+  return arrangeProjects(projects, id, { kind: 'project', id: neighbor.id, place: delta < 0 ? 'before' : 'after' }, groups)
+}
+
 // Excluir a categoria só tira a divisória: os projetos dela voltam para "sem categoria".
 export function ungroup<T extends Arrangeable>(projects: T[], groupId: string): T[] {
   return projects.map((p) => {

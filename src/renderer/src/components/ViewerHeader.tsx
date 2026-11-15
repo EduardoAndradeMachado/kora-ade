@@ -20,7 +20,7 @@ export function ViewerHeader({ projectId, projectPath, path, onReload, onOpenPat
   const absolutePath = `${projectPath}\\${path}`
 
   return (
-    <div className="flex h-8 shrink-0 items-center gap-2 border-b px-4 text-xs text-muted-foreground">
+    <div className="@container flex h-8 shrink-0 items-center gap-2 border-b px-4 text-xs text-muted-foreground">
       {editing ? (
         <PathEditor projectId={projectId} path={absolutePath} onOpen={onOpenPath} onDone={() => setEditing(false)} />
       ) : (

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import type { Viewer } from '@shared/file-kind'
 import type { AgentActivity, AgentSession } from '@shared/agent'
 import { AgentIcon, agentLabel } from '@/components/AgentIcon'
@@ -8,6 +9,7 @@ import { hintClass, useReorderDrag } from '@/lib/drag'
 import type { Place } from '@shared/arrange'
 import { Icon, type IconName } from '@/brand/icons'
 import { SymbolCropped } from '@/brand/Logo'
+import type { FileTab } from '@/lib/file-tabs'
 
 export type Tab =
   | {
@@ -20,20 +22,10 @@ export type Tab =
       activity?: AgentActivity | null
       // Parou de trabalhar e você ainda não abriu a aba: símbolo do Kora no lugar do ícone e sininho no título.
       alert?: boolean
+      // Pasta inicial, relativa ao projeto ("Abrir no terminal integrado"); sem ela, a raiz.
+      dir?: string
     }
-  | {
-      kind: 'file'
-      id: string
-      title: string
-      path: string
-      viewer: Exclude<Viewer, 'external'>
-      editing: boolean
-      dirty: boolean
-      // Pedido de ir até uma linha (ex.: Ctrl+clique em "src/a.ts:42" no terminal); n muda a cada pedido.
-      jump?: { line: number; n: number }
-      // Aba de diff do git (só leitura) em vez do arquivo: staged compara HEAD com a fila, senão a fila com o disco.
-      diff?: { staged: boolean }
-    }
+  | FileTab
 
 export type TabPlace = 'bar' | 'side'
 export interface RenameRequest {
@@ -44,11 +36,33 @@ export interface RenameRequest {
 
 export const isDormant = (tab: Tab): boolean => tab.kind === 'terminal' && !tab.live
 
+// Título da aba de arquivo: itálico na pré-visualização, riscado quando o arquivo sumiu do disco.
+export function fileTitleStyle(tab: Tab): { className: string | false; tooltip: string | undefined } {
+  if (tab.kind !== 'file') return { className: false, tooltip: undefined }
+  const tips = [tab.deleted && 'Apagado do disco', tab.preview && 'Pré-visualização: duplo clique para manter aberta'].filter(Boolean)
+  // O título da comparação só tem os nomes; a dica mostra os caminhos, o da esquerda primeiro.
+  const title = tab.compare ? `${tab.compare.left} ↔ ${tab.path}` : tab.title
+  return {
+    className: cn(tab.preview && 'italic', tab.deleted && 'line-through opacity-70'),
+    tooltip: tips.length ? `${title} — ${tips.join('. ')}` : tab.compare ? title : undefined
+  }
+}
+
+const FILE_ICON: Record<Viewer, IconName> = {
+  markdown: 'arquivo',
+  code: 'codigo',
+  pdf: 'pdf',
+  image: 'imagem',
+  media: 'retomar',
+  notebook: 'metricas',
+  sheet: 'planilha',
+  external: 'externo'
+}
+
 export function TabIcon({ tab, selected, className }: { tab: Tab; selected: boolean; className?: string }): React.JSX.Element {
   const dim = isDormant(tab) && 'opacity-50'
   if (tab.kind === 'file') {
-    const name: IconName = tab.diff ? 'git' : ({ markdown: 'arquivo', code: 'codigo', pdf: 'pdf', image: 'imagem' }[tab.viewer] as IconName)
-    return <Icon name={name} active={selected} className={cn('size-3.5', className)} />
+    return <Icon name={tab.diff || tab.compare ? 'git' : FILE_ICON[tab.viewer]} active={selected} className={cn('size-3.5', className)} />
   }
   if (tab.agent) {
     const icon = <AgentIcon kind={tab.agent.kind} className={cn('size-3.5', dim, className)} />
@@ -116,11 +130,21 @@ interface Props {
   atWindowEdge: boolean
   projectId: string
   onReorder(fromId: string, toId: string, place: Place): void
+  // Duplo clique na aba de pré-visualização a mantém aberta.
+  onPin(id: string): void
+  // Sem projeto (ou sem a pasta dele) não há arquivo para procurar.
+  onQuickOpen?(): void
 }
 
 export function TabBar(props: Props): React.JSX.Element {
   // Mesmo escopo das abas desse projeto na lateral: dá para arrastar de uma lista para a outra.
   const drag = useReorderDrag(`tabs-${props.projectId}`, 'x', props.onReorder)
+  const stripRef = useRef<HTMLDivElement>(null)
+  // Com mais abas do que cabem, a ativa (inclusive a aberta pela árvore, Ctrl+P ou atalho) rola para a vista.
+  useEffect(() => {
+    if (!props.activeId) return
+    stripRef.current?.querySelector(`[data-tab-id="${CSS.escape(props.activeId)}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [props.activeId, props.tabs.length])
   return (
     <div
       className={cn(
@@ -129,6 +153,7 @@ export function TabBar(props: Props): React.JSX.Element {
       )}
     >
       <div
+        ref={stripRef}
         className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
         onWheel={(e) => {
           if (!e.ctrlKey && e.deltaY) e.currentTarget.scrollLeft += e.deltaY
@@ -137,9 +162,11 @@ export function TabBar(props: Props): React.JSX.Element {
         {props.tabs.map((tab) => (
           <div
             key={tab.id}
+            data-tab-id={tab.id}
             data-no-drag
             {...drag.itemProps(tab.id)}
             onClick={() => props.onSelect(tab.id)}
+            onDoubleClick={() => tab.kind === 'file' && tab.preview && props.onPin(tab.id)}
             onAuxClick={(e) => e.button === 1 && props.onClose(tab.id)}
             onContextMenu={(e) => {
               e.preventDefault()
@@ -157,7 +184,8 @@ export function TabBar(props: Props): React.JSX.Element {
             <EditableTitle
               value={tab.title}
               editable={tab.kind === 'terminal'}
-              className={cn(isDormant(tab) && 'italic opacity-70')}
+              className={cn(isDormant(tab) && 'italic opacity-70', fileTitleStyle(tab).className)}
+              tooltip={fileTitleStyle(tab).tooltip}
               onCommit={(title) => props.onRename(tab.id, title)}
               editRequest={props.renameRequest?.tabId === tab.id ? props.renameRequest.n : undefined}
               linkId={tab.id}
@@ -188,6 +216,17 @@ export function TabBar(props: Props): React.JSX.Element {
           className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
         />
       </div>
+      {props.onQuickOpen && (
+        <button
+          type="button"
+          data-tip="Ir para arquivo (Ctrl+P)"
+          aria-label="Ir para arquivo"
+          onClick={props.onQuickOpen}
+          className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+        >
+          <Icon name="buscar" />
+        </button>
+      )}
       <button
         type="button"
         data-tip={props.rightPanelOpen ? 'Esconder painel lateral' : 'Mostrar painel lateral'}

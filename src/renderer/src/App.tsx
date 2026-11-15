@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FILE_FONT, GROUP_NAME_MAX, stepValue, TERMINAL_FONT, ZOOM, type KoraState, type Project, type ProjectGroup } from '@shared/state'
 import type { AgentSession } from '@shared/agent'
 import { viewerFor } from '@shared/file-kind'
@@ -9,15 +9,39 @@ import { Sidebar, type GroupAction } from '@/components/Sidebar'
 import { TabBar, type Tab } from '@/components/TabBar'
 import { TerminalView } from '@/components/TerminalView'
 import { RightPanel } from '@/components/RightPanel'
-import { MarkdownView } from '@/components/MarkdownView'
+import { MarkdownTab } from '@/components/MarkdownView'
 import { PdfView } from '@/components/PdfView'
-import { ImageView } from '@/components/ImageView'
+import { ImageView, isSvg, SVG_MODES, SvgTab } from '@/components/ImageView'
+import { ExternalView } from '@/components/ExternalView'
+import { MediaView } from '@/components/MediaView'
+import { NotebookView } from '@/components/NotebookView'
+import { isTextSheet, SheetModeToggle, SheetTab, type SheetMode } from '@/components/SpreadsheetView'
 import { ipcErrorMessage } from '@/lib/ipc-error'
 import { cn } from '@/lib/utils'
-import { ModeToggle } from '@/components/ModeToggle'
+import { ModeToggle, type MarkdownMode } from '@/components/ModeToggle'
 import { useZoomShortcuts } from '@/lib/use-zoom-shortcuts'
-import { useCloseTabShortcut } from '@/lib/use-close-tab-shortcut'
+import { TAB_SHORTCUT_LABEL, useTabShortcuts, type TabCommand } from '@/lib/use-tab-shortcuts'
 import { useRenameTabShortcut } from '@/lib/use-rename-tab-shortcut'
+import { useQuickOpenShortcut } from '@/lib/use-quick-open-shortcut'
+import {
+  changeMayRemove,
+  fileTabsToClose,
+  moveFileTab,
+  moveRecentPaths,
+  placeCompareTab,
+  placeDiffTab,
+  placeFileTab,
+  rememberClosed,
+  reopenClosed,
+  siblingFileTab,
+  tabShowsPathUnder,
+  type ClosedFileTab,
+  type CloseScope,
+  type GitDiffOpen,
+  type OpenAtOptions,
+  type OpenFileOptions
+} from '@/lib/file-tabs'
+import { QuickOpen } from '@/components/QuickOpen'
 import { Button } from '@/brand/Button'
 import { SymbolMark } from '@/brand/Logo'
 import { OrphanDialog, type OrphanSurvivor } from '@/components/OrphanDialog'
@@ -34,8 +58,10 @@ import type { UpdateStatus } from '@shared/update'
 const loadCodeView = () => import('@/components/CodeView').then((m) => ({ default: m.CodeView }))
 const CodeView = lazy(loadCodeView)
 const DiffView = lazy(() => import('@/components/DiffView').then((m) => ({ default: m.DiffView })))
+const CompareView = lazy(() => import('@/components/CompareView').then((m) => ({ default: m.CompareView })))
 const MONACO_PRELOAD_DELAY_MS = 3000
 import { DormantView } from '@/components/DormantView'
+import { ViewerBoundary } from '@/components/ViewerBoundary'
 import { useChoose, useConfirm } from '@/components/ConfirmDialog'
 import { ContextMenu, type MenuItem } from '@/components/ContextMenu'
 import { Icon } from '@/brand/icons'
@@ -44,9 +70,20 @@ import { LinkedRenameContext, type LinkedRename } from '@/components/EditableTit
 import type { NewTabChoice } from '@/components/NewTabMenu'
 import { terminalBus } from '@/lib/terminal-bus'
 import { reconcileTabRefs } from '@shared/tab-sync'
+import { useTabMemory } from '@/lib/memory-budget'
 import { saveAllScrollbacks, saveScrollbackNow } from '@/lib/scrollback'
 
 type TabsByProject = Record<string, Tab[]>
+const NO_RECENT: string[] = []
+
+// Cada aba no seu limite de erro: um visualizador que lança ao desenhar não desmonta a janela com os terminais.
+const guarded =
+  (isVisible: (tab: Tab) => boolean, render: (tab: Tab) => React.ReactNode) =>
+  (tab: Tab): React.ReactNode => (
+    <ViewerBoundary key={tab.id} visible={isVisible(tab)}>
+      {render(tab)}
+    </ViewerBoundary>
+  )
 
 type Sizes = { zoom: number; terminalFontSize: number; fileFontSize: number }
 const SIZE_RANGES: Record<keyof Sizes, typeof ZOOM> = { zoom: ZOOM, terminalFontSize: TERMINAL_FONT, fileFontSize: FILE_FONT }
@@ -81,7 +118,8 @@ function restoreTabs(state: KoraState): TabsByProject {
       title: saved.title,
       titleLocked: saved.titleLocked,
       live: false,
-      agent: saved.agent
+      agent: saved.agent,
+      ...(saved.dir ? { dir: saved.dir } : {})
     }
     ;(byProject[saved.projectId] ??= []).push(tab)
   }
@@ -91,13 +129,10 @@ function restoreTabs(state: KoraState): TabsByProject {
 function tabRefs(tabs: TabsByProject): TabRef[] {
   return Object.entries(tabs).flatMap(([projectId, list]) =>
     list.flatMap((t) =>
-      t.kind === 'terminal' ? [{ id: t.id, projectId, title: t.title, titleLocked: t.titleLocked }] : []
+      t.kind === 'terminal' ? [{ id: t.id, projectId, title: t.title, titleLocked: t.titleLocked, ...(t.dir ? { dir: t.dir } : {}) }] : []
     )
   )
 }
-
-const isUnder = (path: string, rel: string): boolean =>
-  path === rel || path.startsWith(`${rel}\\`) || path.startsWith(`${rel}/`)
 
 export function App(): React.JSX.Element {
   const [state, setState] = useState<KoraState | null>(null)
@@ -129,6 +164,13 @@ export function App(): React.JSX.Element {
   const closeMobile = useCallback(() => setMobileOpen(false), [])
   const [errorSummary, setErrorSummary] = useState<ErrorSummary | null>(null)
   const [missing, setMissing] = useState<ReadonlySet<string>>(new Set())
+  const openFileTabs = useMemo(
+    () => Object.entries(tabs).flatMap(([projectId, list]) => list.flatMap((tab) => (tab.kind === 'file' ? [{ projectId, tab }] : []))),
+    [tabs]
+  )
+  const shownTabId = selectedId && !missing.has(selectedId) ? activeTab[selectedId] : undefined
+  const shownTabIds = useMemo(() => (shownTabId ? [shownTabId] : []), [shownTabId])
+  const tabMemory = useTabMemory({ fileTabs: openFileTabs, visibleIds: shownTabIds, isDirty })
   const checkMissing = useCallback(() => {
     window.kora.missingProjects().then(
       (ids) => setMissing((prev) => (ids.length === prev.size && ids.every((id) => prev.has(id)) ? prev : new Set(ids))),
@@ -216,13 +258,25 @@ export function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    void Promise.all([window.kora.getState(), window.kora.takeResumeAfterUpdate(), window.kora.takeRecoveryNotice()]).then(([s, resume, notice]) => {
+    void Promise.all([
+      window.kora.getState(),
+      window.kora.takeResumeAfterUpdate(),
+      window.kora.takeRecoveryNotice(),
+      window.kora.reattachTerminals()
+    ]).then(([s, resume, notice, alive]) => {
       setRecoveryNotice(notice)
       const restored = restoreTabs(s)
+      const running = new Map(alive.map((t) => [t.id, t.activity]))
       // Quem rodava antes da atualização volta a rodar, como no "Continuar chat", sem trocar a aba aberta.
+      // Quem sobreviveu à queda da interface só volta a aparecer, ligado ao mesmo processo.
       for (const [projectId, list] of Object.entries(restored)) {
         restored[projectId] = list.map((tab) => {
-          if (tab.kind !== 'terminal' || !resume.includes(tab.id)) return tab
+          if (tab.kind !== 'terminal') return tab
+          if (running.has(tab.id)) {
+            reattached.current.add(tab.id)
+            return { ...tab, live: true, activity: running.get(tab.id) ?? null }
+          }
+          if (!resume.includes(tab.id)) return tab
           const how: Launch = tab.agent ? { type: 'resume', agent: tab.agent } : { type: 'shell' }
           pendingLaunch.current.set(tab.id, { tab: { id: tab.id, projectId, title: tab.title }, how })
           terminalBus.expect(tab.id)
@@ -238,6 +292,7 @@ export function App(): React.JSX.Element {
     const offExit = window.kora.onTerminalExit((id) => {
       // O processo saiu: guarda a tela antes de adormecer a aba.
       saveScrollbackNow(id)
+      reattached.current.delete(id)
       terminalBus.forget(id)
       patchTerminal(id, { live: false, activity: null, alert: false })
     })
@@ -286,6 +341,33 @@ export function App(): React.JSX.Element {
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
 
+  // Arquivo aberto apagado (ou movido) por fora: a aba fica, riscada, e volta ao normal se ele reaparecer.
+  useEffect(
+    () =>
+      window.kora.onFilesChanged((projectId, change) => {
+        const paths = new Set(
+          (tabsRef.current[projectId] ?? []).flatMap((t) => (t.kind === 'file' && !t.diff && changeMayRemove(change, t.path) ? [t.path] : []))
+        )
+        for (const path of paths) {
+          window.kora.fileExists(projectId, path).then(
+            (exists) =>
+              setTabs((prev) => {
+                const list = prev[projectId]
+                const stale = (t: Tab): boolean => t.kind === 'file' && !t.diff && t.path === path && Boolean(t.deleted) === exists
+                if (!list?.some(stale)) return prev
+                return { ...prev, [projectId]: list.map((t) => (stale(t) ? { ...t, deleted: !exists } : t)) }
+              }),
+            () => {}
+          )
+        }
+      }),
+    []
+  )
+
+  // Arquivos vistos por último em cada projeto, o mais recente primeiro: abrem a lista do Ctrl+P.
+  const [recentFiles, setRecentFiles] = useState<Record<string, string[]>>({})
+  const [quickOpen, setQuickOpen] = useState(false)
+
   // O celular abriu, fechou, renomeou, suspendeu ou retomou abas: o main manda o estado e a interface se ajusta
   // sem perder o que mudou aqui desde o último save. Abas de arquivo ficam onde estão.
   useEffect(
@@ -295,7 +377,7 @@ export function App(): React.JSX.Element {
         const baseline = JSON.parse(lastSavedTabs.current) as TabRef[]
         const refs = reconcileTabRefs(snapshot.state.tabs, tabRefs(tabsRef.current), baseline)
         lastSavedTabs.current = JSON.stringify(
-          snapshot.state.tabs.map(({ id, projectId, title, titleLocked }) => ({ id, projectId, title, titleLocked }))
+          snapshot.state.tabs.map(({ id, projectId, title, titleLocked, dir }) => ({ id, projectId, title, titleLocked, ...(dir ? { dir } : {}) }))
         )
         pendingTabs.current = null
         const remote = new Map(snapshot.tabs.map((tab) => [tab.id, tab]))
@@ -314,12 +396,16 @@ export function App(): React.JSX.Element {
               titleLocked: ref.titleLocked ?? false,
               live: pendingLaunch.current.has(ref.id) || (now?.live ?? false),
               agent: now?.agent ?? null,
-              activity: now?.activity
+              activity: now?.activity,
+              ...(ref.dir ? { dir: ref.dir } : {})
             }
             ;(terminalsByProject[ref.projectId] ??= []).push(tab)
           }
           const next: TabsByProject = {}
+          // Projeto tirado da lista pelo celular leva junto as abas de arquivo dele, como o Remover da lista do PC.
+          const known = new Set(snapshot.state.projects.map((p) => p.id))
           for (const pid of new Set([...Object.keys(previous), ...Object.keys(terminalsByProject)])) {
+            if (!known.has(pid)) continue
             const terminals = terminalsByProject[pid] ?? []
             let index = 0
             const list = (previous[pid] ?? []).flatMap<Tab>((tab) =>
@@ -351,7 +437,8 @@ export function App(): React.JSX.Element {
     if (dirty) dirtyFiles.current.add(tabId)
     else dirtyFiles.current.delete(tabId)
     window.kora.setUnsaved(dirtyFiles.current.size > 0)
-    patchFile(tabId, { dirty })
+    // Editar a pré-visualização a fixa: o próximo clique na árvore não pode levar embora a edição.
+    patchFile(tabId, dirty ? { dirty, preview: false } : { dirty })
   }
 
   // Arquivo aberto não volta ao reabrir o app: fechar o programa (X para a bandeja) fecha as abas de arquivo.
@@ -513,6 +600,8 @@ export function App(): React.JSX.Element {
 
   // O spawn espera o TerminalView medir o tamanho real (onReady); até lá o pedido fica aqui.
   const pendingLaunch = useRef(new Map<string, { tab: TabRef; how: Launch }>())
+  // Abas cujo pty continuou rodando enquanto a interface recarregava; vale até o processo sair.
+  const reattached = useRef(new Set<string>())
 
   const launch = (projectId: string, tab: TabRef, how: Launch): void => {
     if (missing.has(projectId)) return setSelectedId(projectId)
@@ -553,11 +642,24 @@ export function App(): React.JSX.Element {
     launch(project.id, { id, projectId: project.id, title }, { type: choice })
   }
 
+  // "Abrir no terminal integrado": shell novo começando na pasta, com o nome dela na aba. A raiz é o terminal comum.
+  const openTerminalIn = (project: Project, dir: string): void => {
+    if (!dir) return newTab(project, 'shell')
+    if (missing.has(project.id)) return setSelectedId(project.id)
+    const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? dir
+    const same = (tabs[project.id] ?? []).filter((t) => t.kind === 'terminal' && (t.title === name || t.title.startsWith(`${name} `))).length
+    const title = same ? `${name} ${same + 1}` : name
+    const id = crypto.randomUUID()
+    const tab: Tab = { kind: 'terminal', id, title, titleLocked: false, live: true, agent: null, dir }
+    setTabs((prev) => ({ ...prev, [project.id]: [...(prev[project.id] ?? []), tab] }))
+    launch(project.id, { id, projectId: project.id, title, dir }, { type: 'shell' })
+  }
+
   const editOnOpen = useRef(new Set<string>())
 
   const resumeTab = (projectId: string, tab: Extract<Tab, { kind: 'terminal' }>, emptyShell: boolean): void => {
     const how: Launch = !emptyShell && tab.agent ? { type: 'resume', agent: tab.agent } : { type: 'shell' }
-    launch(projectId, { id: tab.id, projectId, title: tab.title }, how)
+    launch(projectId, { id: tab.id, projectId, title: tab.title, ...(tab.dir ? { dir: tab.dir } : {}) }, how)
   }
 
   const autoTitle = (tabId: string, title: string): void => {
@@ -600,62 +702,108 @@ export function App(): React.JSX.Element {
     else selectTab(project.id, ref.id)
   }
 
-  const openFile = (project: Project, path: string): void => {
-    const viewer = viewerFor(path)
-    if (viewer === 'external') {
-      void window.kora.openFile(project.id, path).catch((err: unknown) => setError(ipcErrorMessage(err)))
-      return
-    }
-    const existing = (tabs[project.id] ?? []).find((t) => t.kind === 'file' && !t.diff && t.path === path)
-    const id = existing?.id ?? `file:${project.id}:${path}`
-    if (!existing) {
-      const title = path.split(/[\\/]/).pop() ?? path
-      const tab: Tab = { kind: 'file', id, title, path, viewer, editing: viewer === 'code', dirty: false }
-      setTabs((prev) => ({ ...prev, [project.id]: [...(prev[project.id] ?? []), tab] }))
-    }
-    selectTab(project.id, id)
-  }
-
-  const openDiff = (project: Project, path: string, staged: boolean): void => {
-    const id = `diff:${staged ? 'staged' : 'working'}:${project.id}:${path}`
-    if (!(tabs[project.id] ?? []).some((t) => t.id === id)) {
-      const name = path.split(/[\\/]/).pop() ?? path
-      const title = `${name} (${staged ? 'na fila' : 'alterações'})`
-      const tab: Tab = { kind: 'file', id, title, path, viewer: 'code', editing: false, dirty: false, diff: { staged } }
-      setTabs((prev) => ({ ...prev, [project.id]: [...(prev[project.id] ?? []), tab] }))
-    }
-    selectTab(project.id, id)
-  }
-
-  const movePathInTabs = (projectId: string, from: string, to: string): void =>
+  const focusSeq = useRef(0)
+  const openFile = (project: Project, path: string, opts?: OpenFileOptions): string => {
+    const request = { projectId: project.id, path, viewer: viewerFor(path), preview: opts?.preview === true }
+    const { id } = placeFileTab(tabs[project.id] ?? [], request, isDirty)
+    const focusRequest = { n: ++focusSeq.current, focus: opts?.focus !== false }
     setTabs((prev) => ({
       ...prev,
-      [projectId]: (prev[projectId] ?? []).map((t) => {
-        if (t.kind !== 'file' || !isUnder(t.path, from)) return t
-        const path = to + t.path.slice(from.length)
-        const viewer = viewerFor(path)
-        return { ...t, path, title: path.split(/[\\/]/).pop() ?? path, viewer: viewer === 'external' ? t.viewer : viewer }
-      })
+      [project.id]: placeFileTab(prev[project.id] ?? [], request, isDirty).list.map((t) =>
+        t.id === id && t.kind === 'file' ? { ...t, focusRequest } : t
+      )
     }))
+    selectTab(project.id, id)
+    return id
+  }
+
+  // "Comparar com selecionado" da árvore: o primeiro escolhido fica à esquerda, como no VS Code.
+  const openCompare = (project: Project, left: string, right: string): void => {
+    if (left === right) return
+    const request = { projectId: project.id, left, right }
+    const { id } = placeCompareTab(tabs[project.id] ?? [], request)
+    setTabs((prev) => ({ ...prev, [project.id]: placeCompareTab(prev[project.id] ?? [], request).list }))
+    selectTab(project.id, id)
+  }
+
+  const pinTab = (tabId: string): void => patchFile(tabId, { preview: false })
+
+  const openDiff = (project: Project, path: string, staged: boolean, opts: GitDiffOpen = {}): void => {
+    const { preview = false, ...rest } = opts
+    const request = { projectId: project.id, path, target: { ...rest, staged }, preview }
+    const { id } = placeDiffTab(tabs[project.id] ?? [], request, isDirty)
+    setTabs((prev) => ({ ...prev, [project.id]: placeDiffTab(prev[project.id] ?? [], request, isDirty).list }))
+    selectTab(project.id, id)
+  }
+
+  const movePathInTabs = (projectId: string, from: string, to: string): void => {
+    setTabs((prev) => ({
+      ...prev,
+      [projectId]: (prev[projectId] ?? []).map((t) => (t.kind === 'file' ? moveFileTab(t, from, to) : t))
+    }))
+    setRecentFiles((prev) => (prev[projectId] ? { ...prev, [projectId]: moveRecentPaths(prev[projectId], from, to) } : prev))
+  }
+
+  const forgetRecent = (projectId: string, gone: readonly string[]): void =>
+    setRecentFiles((prev) => (prev[projectId] ? { ...prev, [projectId]: prev[projectId].filter((p) => !gone.includes(p)) } : prev))
 
   const hasUnsavedUnder = (projectId: string, rel: string): boolean =>
-    (tabs[projectId] ?? []).some((t) => t.kind === 'file' && isDirty(t) && isUnder(t.path, rel))
+    (tabs[projectId] ?? []).some((t) => t.kind === 'file' && isDirty(t) && tabShowsPathUnder(t, rel))
 
-  const [reveal, setReveal] = useState<{ path: string; n: number } | null>(null)
+  // show: o pedido veio de "Revelar na árvore" e o painel precisa voltar para Arquivos; abrir pelo terminal, pela busca
+  // ou pelo Ctrl+P só marca o item, sem tirar o painel da aba em que está.
+  const [reveal, setReveal] = useState<{ path: string; n: number; show?: boolean } | null>(null)
+  const [searchRequested, setSearchRequested] = useState(false)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey || e.code !== 'KeyF') return
+      // No terminal a tecla é do processo que roda nele.
+      if (document.activeElement instanceof Element && document.activeElement.closest('.xterm')) return
+      e.preventDefault()
+      e.stopPropagation()
+      setRightPanelOpen((open) => {
+        if (!open) {
+          try {
+            localStorage.setItem(RIGHT_PANEL_KEY, '1')
+          } catch {
+            // preferência só não fica lembrada
+          }
+        }
+        return true
+      })
+      setSearchRequested(true)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   // Abre o arquivo, mostra onde ele está na árvore (expandindo as pastas) e, se veio com :linha, vai até ela.
-  const openFromTerminal = (projectId: string, rel: string, line: number | null): void => {
+  // preview: clique simples num resultado da busca, como no VS Code; terminal e Ctrl+P abrem a aba fixa.
+  // column/length: a ocorrência da busca, que o editor seleciona.
+  const openFromTerminal = (projectId: string, rel: string, line: number | null, opts?: OpenAtOptions): void => {
     const project = state?.projects.find((p) => p.id === projectId)
     if (!project) return
-    openFile(project, rel)
+    const id = openFile(project, rel, opts)
     setReveal((r) => ({ path: rel, n: (r?.n ?? 0) + 1 }))
     if (line) {
       const n = Date.now()
+      const jump = {
+        line,
+        n,
+        ...(opts?.column !== undefined ? { column: opts.column } : {}),
+        ...(opts?.length !== undefined ? { length: opts.length } : {})
+      }
       setTabs((prev) => ({
         ...prev,
-        [projectId]: (prev[projectId] ?? []).map((t) => (t.kind === 'file' && t.path === rel ? { ...t, jump: { line, n } } : t))
+        [projectId]: (prev[projectId] ?? []).map((t) => (t.id === id && t.kind === 'file' ? { ...t, jump } : t))
       }))
     }
+  }
+
+  const revealInTree = (path: string): void => {
+    if (!rightPanelOpen) toggleRightPanel()
+    setReveal((r) => ({ path, n: (r?.n ?? 0) + 1, show: true }))
   }
 
   const patchFile = (id: string, patch: Partial<Extract<Tab, { kind: 'file' }>>): void => {
@@ -669,11 +817,58 @@ export function App(): React.JSX.Element {
     )
   }
 
-  // Pelo atalho a aba some sem o mouse ter apontado para ela: terminal rodando pede confirmação (Enter aceita).
-  useCloseTabShortcut(async () => {
+  const closedTabs = useRef<Record<string, ClosedFileTab[]>>({})
+
+  const reopenLastClosed = (projectId: string): void => {
+    const reopened = reopenClosed(tabsRef.current[projectId] ?? [], closedTabs.current[projectId] ?? [])
+    if (!reopened) return
+    closedTabs.current[projectId] = reopened.history
+    setTabs((prev) => ({ ...prev, [projectId]: reopened.list }))
+    selectTab(projectId, reopened.id)
+  }
+
+  // Pelo teclado vale a aba ativa do projeto, como o editor ativo no VS Code.
+  useTabShortcuts((command: TabCommand) => {
     const projectId = selectedId
-    const tab = projectId ? (tabs[projectId] ?? []).find((t) => t.id === activeTab[projectId]) : undefined
-    if (!projectId || !tab) return
+    if (!projectId) return
+    const list = tabs[projectId] ?? []
+    const tab = list.find((t) => t.id === activeTab[projectId])
+    const closeScope = (scope: CloseScope): void =>
+      void closeTabs(projectId, fileTabsToClose(tabsRef.current[projectId] ?? [], tab?.id ?? '', scope, isDirty), tab?.id)
+    switch (command) {
+      case 'close':
+        return void closeActiveTab(projectId, tab)
+      case 'closeAll':
+        return closeScope('all')
+      case 'closeSaved':
+        return closeScope('saved')
+      case 'reopenClosed':
+        return reopenLastClosed(projectId)
+      case 'nextFile':
+      case 'previousFile': {
+        const next = siblingFileTab(list, tab?.id, command === 'nextFile' ? 1 : -1)
+        if (next) selectTab(projectId, next)
+        return
+      }
+    }
+    if (tab?.kind !== 'file') return
+    const projectPath = state?.projects.find((p) => p.id === projectId)?.path ?? ''
+    switch (command) {
+      case 'keepOpen':
+        return pinTab(tab.id)
+      case 'copyPath':
+        return void copyPath(`${projectPath}\\${tab.path}`).then(() => flash('Caminho copiado'))
+      case 'copyRelativePath':
+        return void copyPath(tab.path).then(() => flash('Caminho relativo copiado'))
+      case 'revealInExplorer':
+        if (!tab.deleted) void window.kora.revealInExplorer(projectId, tab.path)
+        return
+    }
+  })
+
+  // Pelo atalho a aba some sem o mouse ter apontado para ela: terminal rodando pede confirmação (Enter aceita).
+  const closeActiveTab = async (projectId: string, tab: Tab | undefined): Promise<void> => {
+    if (!tab) return
     if (tab.kind === 'terminal' && tab.live) {
       const ok = await confirm({
         title: `Fechar o terminal "${tab.title}"?`,
@@ -685,12 +880,28 @@ export function App(): React.JSX.Element {
       if (!ok) return
     }
     await closeTab(projectId, tab.id)
-  })
+  }
 
   // Abre a edição do nome na barra de cima e na lateral, com o mesmo rascunho nos dois campos.
   useRenameTabShortcut(() => {
     const tab = selectedId ? (tabs[selectedId] ?? []).find((t) => t.id === activeTab[selectedId]) : undefined
     if (tab?.kind === 'terminal') setLinkedRename({ tabId: tab.id, title: tab.title, draft: tab.title })
+  })
+
+  const shownFile = selectedId ? (tabs[selectedId] ?? []).find((t) => t.id === activeTab[selectedId]) : undefined
+  // A aba riscada (arquivo apagado por fora) não volta para os recentes do Ctrl+P.
+  const shownFilePath = shownFile?.kind === 'file' && !shownFile.diff && !shownFile.compare && !shownFile.deleted ? shownFile.path : null
+  useEffect(() => {
+    if (!selectedId || !shownFilePath) return
+    setRecentFiles((prev) => {
+      const list = prev[selectedId] ?? []
+      if (list[0] === shownFilePath) return prev
+      return { ...prev, [selectedId]: [shownFilePath, ...list.filter((p) => p !== shownFilePath)].slice(0, 30) }
+    })
+  }, [selectedId, shownFilePath])
+
+  useQuickOpenShortcut(() => {
+    if (selectedId && !missing.has(selectedId)) setQuickOpen(true)
   })
 
   // Trocar de aba sem tirar o foco do campo (ex.: pelo celular) não dispara o blur; a edição some como a de um campo só.
@@ -699,10 +910,14 @@ export function App(): React.JSX.Element {
     setLinkedRename((r) => (r && r.tabId !== currentTabId ? null : r))
   }, [currentTabId])
 
-  const closeTab = async (projectId: string, tabId: string): Promise<void> => {
-    const list = tabs[projectId] ?? []
-    const tab = list.find((t) => t.id === tabId)
-    if (tab?.kind === 'file' && isDirty(tab)) {
+  // Várias abas de uma vez (menu "Fechar outras", "Fechar todas"...): cada arquivo não salvo passa pela mesma
+  // pergunta, mostrado na tela; Cancelar ou salvamento que falha desiste do lote inteiro. A lista é relida a cada
+  // passo porque a pergunta espera o usuário e as abas podem mudar no meio.
+  const closeTabs = async (projectId: string, ids: string[], keepActive?: string): Promise<void> => {
+    for (const tabId of ids) {
+      const tab = (tabsRef.current[projectId] ?? []).find((t) => t.id === tabId)
+      if (tab?.kind !== 'file' || !isDirty(tab)) continue
+      if (ids.length > 1) selectTab(projectId, tabId)
       const choice = await choose({
         title: `Salvar "${tab.title}" antes de fechar?`,
         message: 'Fechando sem salvar, as alterações feitas desde o último Ctrl+S são perdidas.',
@@ -713,16 +928,20 @@ export function App(): React.JSX.Element {
       // Salvamento que não aconteceu (conflito com o disco, erro) mantém a aba aberta com o aviso no editor.
       if (choice === 'confirm' && !(await fileSavers.current.get(tabId)?.())) return
     }
-    if (tab?.kind === 'terminal' && tab.live) {
-      window.kora.killTerminal(tabId)
-      terminalBus.forget(tabId)
+    const gone = new Set(ids)
+    for (const tab of tabsRef.current[projectId] ?? []) {
+      if (!gone.has(tab.id) || tab.kind !== 'terminal' || !tab.live) continue
+      window.kora.killTerminal(tab.id)
+      terminalBus.forget(tab.id)
     }
-    const remaining = list.filter((t) => t.id !== tabId)
-    setTabs((prev) => ({ ...prev, [projectId]: remaining }))
-    setActiveTab((prev) =>
-      prev[projectId] === tabId ? { ...prev, [projectId]: remaining.at(-1)?.id } : prev
-    )
+    closedTabs.current[projectId] = rememberClosed(closedTabs.current[projectId] ?? [], tabsRef.current[projectId] ?? [], ids)
+    const remaining = (tabsRef.current[projectId] ?? []).filter((t) => !gone.has(t.id))
+    const fallback = remaining.some((t) => t.id === keepActive) ? keepActive : remaining.at(-1)?.id
+    setTabs((prev) => ({ ...prev, [projectId]: (prev[projectId] ?? []).filter((t) => !gone.has(t.id)) }))
+    setActiveTab((prev) => (prev[projectId] && gone.has(prev[projectId]) ? { ...prev, [projectId]: fallback } : prev))
   }
+
+  const closeTab = (projectId: string, tabId: string): Promise<void> => closeTabs(projectId, [tabId])
 
   const openWorktree = async (path: string): Promise<void> => {
     try {
@@ -875,17 +1094,61 @@ export function App(): React.JSX.Element {
   }
 
   const tabMenuItems = (projectId: string, tab: Tab, where: TabPlace): MenuItem[] => {
-    const close: MenuItem = { label: 'Fechar aba', icon: <Icon name="fechar" />, danger: true, onSelect: () => void closeTab(projectId, tab.id) }
+    const close: MenuItem = {
+      label: 'Fechar aba',
+      icon: <Icon name="fechar" />,
+      danger: true,
+      shortcut: TAB_SHORTCUT_LABEL.close,
+      onSelect: () => void closeTab(projectId, tab.id)
+    }
     if (tab.kind === 'file') {
+      const projectPath = state?.projects.find((p) => p.id === projectId)?.path ?? ''
+      const closeScope = (scope: CloseScope): void =>
+        void closeTabs(projectId, fileTabsToClose(tabsRef.current[projectId] ?? [], tab.id, scope, isDirty), tab.id)
+      const keep: MenuItem[] = tab.preview
+        ? [{ label: 'Manter aberta', icon: <Icon name="fixar" />, shortcut: TAB_SHORTCUT_LABEL.keepOpen, onSelect: () => pinTab(tab.id) }, 'separator']
+        : []
+      const onDisk: MenuItem[] = tab.deleted
+        ? []
+        : [
+            { label: 'Revelar na árvore', icon: <Icon name="arquivo" />, onSelect: () => revealInTree(tab.path) },
+            {
+              label: 'Mostrar no Explorer',
+              icon: <Icon name="pastaAberta" />,
+              shortcut: TAB_SHORTCUT_LABEL.revealInExplorer,
+              onSelect: () => void window.kora.revealInExplorer(projectId, tab.path)
+            }
+          ]
       return [
-        { label: 'Mostrar no Explorer', icon: <Icon name="pastaAberta" />, onSelect: () => void window.kora.revealInExplorer(projectId, tab.path) },
-        { label: 'Copiar caminho relativo', icon: <Icon name="copiar" />, onSelect: () => void copyPath(tab.path) },
+        ...keep,
+        {
+          label: 'Copiar caminho',
+          icon: <Icon name="copiar" />,
+          shortcut: TAB_SHORTCUT_LABEL.copyPath,
+          onSelect: () => void copyPath(`${projectPath}\\${tab.path}`)
+        },
+        {
+          label: 'Copiar caminho relativo',
+          icon: <Icon name="copiar" />,
+          shortcut: TAB_SHORTCUT_LABEL.copyRelativePath,
+          onSelect: () => void copyPath(tab.path)
+        },
+        ...onDisk,
         'separator',
-        close
+        { label: 'Fechar', icon: <Icon name="fechar" />, shortcut: TAB_SHORTCUT_LABEL.close, onSelect: () => void closeTab(projectId, tab.id) },
+        { label: 'Fechar outras', onSelect: () => closeScope('others') },
+        { label: 'Fechar à direita', onSelect: () => closeScope('right') },
+        { label: 'Fechar salvas', shortcut: TAB_SHORTCUT_LABEL.closeSaved, onSelect: () => closeScope('saved') },
+        { label: 'Fechar todas', shortcut: TAB_SHORTCUT_LABEL.closeAll, onSelect: () => closeScope('all') }
       ]
     }
     const items: MenuItem[] = [
-      { label: 'Renomear', icon: <Icon name="editar" />, onSelect: () => setRenameRequest((r) => ({ tabId: tab.id, where, n: (r?.n ?? 0) + 1 })) }
+      {
+        label: 'Renomear',
+        icon: <Icon name="editar" />,
+        shortcut: 'F2',
+        onSelect: () => setRenameRequest((r) => ({ tabId: tab.id, where, n: (r?.n ?? 0) + 1 }))
+      }
     ]
     if (tab.live) {
       items.push({
@@ -946,6 +1209,7 @@ export function App(): React.JSX.Element {
           onCloseTab={(projectId, tabId) => void closeTab(projectId, tabId)}
           onRenameTab={(_projectId, tabId, title) => renameTab(tabId, title)}
           onTabContextMenu={(projectId, tabId, x, y) => openTabMenu(projectId, tabId, 'side', x, y)}
+          onPinTab={(_projectId, tabId) => pinTab(tabId)}
           renameRequest={renameRequest?.where === 'side' ? renameRequest : null}
           onNewTab={newTab}
           onAdd={() => void addProject()}
@@ -983,6 +1247,8 @@ export function App(): React.JSX.Element {
             projectId={selected?.id ?? ''}
             onReorder={(fromId, toId, place) => selected && reorderTab(selected.id, fromId, toId, place)}
             atWindowEdge={!(rightPanelOpen && selected)}
+            onPin={pinTab}
+            onQuickOpen={selected && !missing.has(selected.id) ? () => setQuickOpen(true) : undefined}
           />
           {error && (
             <div className="border-b bg-destructive/10 px-3 py-1.5 text-xs text-destructive">{error}</div>
@@ -994,12 +1260,39 @@ export function App(): React.JSX.Element {
             </div>
           )}
 
+          {tabMemory.notice && (
+            <div className="flex items-start justify-between gap-3 border-b bg-[#e2c08d]/10 px-3 py-1.5 text-xs text-[#895503] dark:text-[#e2c08d]">
+              <span className="min-w-0 break-words">{tabMemory.notice}</span>
+              <button type="button" className="shrink-0 underline" onClick={tabMemory.dismissNotice}>Entendi</button>
+            </div>
+          )}
+
           <div className="relative flex-1 bg-canvas">
             {Object.entries(tabs).flatMap(([projectId, list]) =>
-              list.map((tab) => {
+              list.map(guarded((tab) => projectId === selectedId && activeTab[projectId] === tab.id && !missing.has(projectId), (tab) => {
                 const visible = projectId === selectedId && activeTab[projectId] === tab.id && !missing.has(projectId)
+                // Descarregada por falta de memória: o visualizador sai da árvore e relê do disco quando a aba voltar.
+                if (tab.kind === 'file' && !visible && tabMemory.unloaded.has(tab.id)) return <div key={`${tab.id}:unloaded`} className="absolute inset-0 invisible" />
                 if (tab.kind === 'file') {
                   const projectPath = state.projects.find((p) => p.id === projectId)?.path ?? ''
+                  if (tab.compare) {
+                    return (
+                      <Suspense key={`${tab.id}:compare`} fallback={<div className="absolute inset-0 bg-canvas" />}>
+                        <CompareView
+                          projectId={projectId}
+                          projectPath={projectPath}
+                          left={tab.compare.left}
+                          right={tab.path}
+                          visible={visible}
+                          fontSize={state.settings.fileFontSize}
+                          wordWrap={state.settings.fileWordWrap}
+                          onDirtyChange={(dirty) => markDirty(tab.id, dirty)}
+                          onSaveHandle={(save) => (save ? fileSavers.current.set(tab.id, save) : fileSavers.current.delete(tab.id))}
+                          onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                        />
+                      </Suspense>
+                    )
+                  }
                   if (tab.diff) {
                     return (
                       <Suspense key={`${tab.id}:diff`} fallback={<div className="absolute inset-0 bg-canvas" />}>
@@ -1007,7 +1300,7 @@ export function App(): React.JSX.Element {
                           projectId={projectId}
                           projectPath={projectPath}
                           path={tab.path}
-                          staged={tab.diff.staged}
+                          target={tab.diff}
                           visible={visible}
                           fontSize={state.settings.fileFontSize}
                           wordWrap={state.settings.fileWordWrap}
@@ -1028,9 +1321,64 @@ export function App(): React.JSX.Element {
                       />
                     )
                   }
-                  if (tab.viewer === 'image') {
+                  if (tab.viewer === 'sheet') {
+                    const sheetMode: SheetMode = isTextSheet(tab.path) && tab.editing ? 'text' : 'sheet'
+                    const setSheetMode = (mode: SheetMode): void => patchFile(tab.id, { editing: mode === 'text' })
+                    return (
+                      <SheetTab
+                        key={`${tab.id}:sheet`}
+                        projectId={projectId}
+                        projectPath={projectPath}
+                        path={tab.path}
+                        visible={visible}
+                        mode={sheetMode}
+                        dirty={tab.dirty}
+                        jump={tab.jump}
+                        onModeChange={setSheetMode}
+                        onSave={() => void fileSavers.current.get(tab.id)?.()}
+                        onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                        editor={
+                          isTextSheet(tab.path) && (sheetMode === 'text' || tab.dirty) ? (
+                            <Suspense key={`${tab.id}:edit`} fallback={<div className="absolute inset-0 bg-canvas" />}>
+                              <CodeView
+                                projectId={projectId}
+                                projectPath={projectPath}
+                                path={tab.path}
+                                visible={visible && sheetMode === 'text'}
+                                fontSize={state.settings.fileFontSize}
+                                wordWrap={state.settings.fileWordWrap}
+                                onWordWrapChange={(on) => void window.kora.setFileWordWrap(on).then(setState)}
+                                onDirtyChange={(dirty) => markDirty(tab.id, dirty)}
+                                onSaveHandle={(save) => (save ? fileSavers.current.set(tab.id, save) : fileSavers.current.delete(tab.id))}
+                                jump={tab.jump}
+                                focusRequest={tab.focusRequest}
+                                onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                                headerExtra={<SheetModeToggle mode={sheetMode} onChange={setSheetMode} />}
+                              />
+                            </Suspense>
+                          ) : null
+                        }
+                      />
+                    )
+                  }
+                  const svgMode: 'preview' | 'edit' | null =
+                    !isSvg(tab.path) ? null : tab.viewer === 'image' ? 'preview' : tab.viewer === 'code' ? 'edit' : null
+                  if (tab.viewer === 'image' && svgMode === null) {
                     return (
                       <ImageView
+                        key={tab.id}
+                        projectId={projectId}
+                        projectPath={projectPath}
+                        path={tab.path}
+                        visible={visible}
+                        onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                        onOpenAsText={() => patchFile(tab.id, { viewer: 'code', editing: true })}
+                      />
+                    )
+                  }
+                  if (tab.viewer === 'media') {
+                    return (
+                      <MediaView
                         key={tab.id}
                         projectId={projectId}
                         projectPath={projectPath}
@@ -1040,45 +1388,97 @@ export function App(): React.JSX.Element {
                       />
                     )
                   }
-                  if (tab.viewer === 'markdown' && !tab.editing) {
+                  if (tab.viewer === 'notebook') {
                     return (
-                      <MarkdownView
-                        key={`${tab.id}:preview`}
+                      <NotebookView
+                        key={tab.id}
                         projectId={projectId}
                         projectPath={projectPath}
                         path={tab.path}
                         visible={visible}
-                        fontSize={state.settings.fileFontSize}
-                        onEdit={() => patchFile(tab.id, { editing: true })}
                         onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                        onOpenAsText={() => patchFile(tab.id, { viewer: 'code', editing: true })}
                       />
                     )
                   }
-                  return (
+                  if (tab.viewer === 'external') {
+                    return (
+                      <ExternalView
+                        key={tab.id}
+                        projectId={projectId}
+                        projectPath={projectPath}
+                        path={tab.path}
+                        visible={visible}
+                        onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                        onOpenAsText={() => patchFile(tab.id, { viewer: 'code', editing: true })}
+                      />
+                    )
+                  }
+                  const mdMode: MarkdownMode | null =
+                    tab.viewer !== 'markdown' ? null : tab.split ? 'split' : tab.editing ? 'edit' : 'preview'
+                  const setMdMode = (mode: MarkdownMode): void =>
+                    patchFile(tab.id, { editing: mode !== 'preview', split: mode === 'split' })
+                  const setSvgMode = (mode: MarkdownMode): void =>
+                    patchFile(tab.id, { viewer: mode === 'preview' ? 'image' : 'code', editing: mode !== 'preview' })
+                  const saveTab = (): void => void fileSavers.current.get(tab.id)?.()
+                  const codeView = (
                     <Suspense key={`${tab.id}:edit`} fallback={<div className="absolute inset-0 bg-canvas" />}>
                       <CodeView
                         projectId={projectId}
                         projectPath={projectPath}
                         path={tab.path}
-                        visible={visible}
+                        visible={visible && mdMode !== 'preview' && svgMode !== 'preview'}
                         fontSize={state.settings.fileFontSize}
                         wordWrap={state.settings.fileWordWrap}
                         onWordWrapChange={(on) => void window.kora.setFileWordWrap(on).then(setState)}
                         onDirtyChange={(dirty) => markDirty(tab.id, dirty)}
                         onSaveHandle={(save) => (save ? fileSavers.current.set(tab.id, save) : fileSavers.current.delete(tab.id))}
                         jump={tab.jump}
+                        focusRequest={tab.focusRequest}
                         onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
                         headerExtra={
-                          tab.viewer === 'markdown' && (
-                            <ModeToggle
-                              editing
-                              previewDisabledReason={tab.dirty ? 'Salve com Ctrl+S antes de visualizar' : undefined}
-                              onChange={(editing) => !editing && patchFile(tab.id, { editing: false })}
-                            />
+                          mdMode ? (
+                            <ModeToggle mode={mdMode} compact={mdMode === 'split'} onChange={setMdMode} />
+                          ) : (
+                            svgMode && <ModeToggle mode={svgMode} modes={SVG_MODES} onChange={setSvgMode} />
                           )
                         }
                       />
                     </Suspense>
+                  )
+                  if (svgMode !== null) {
+                    return (
+                      <SvgTab
+                        key={`${tab.id}:svg`}
+                        projectId={projectId}
+                        projectPath={projectPath}
+                        path={tab.path}
+                        visible={visible}
+                        mode={svgMode}
+                        dirty={tab.dirty}
+                        onModeChange={setSvgMode}
+                        onSave={saveTab}
+                        onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                        editor={svgMode === 'edit' || tab.dirty ? codeView : null}
+                      />
+                    )
+                  }
+                  if (mdMode === null) return codeView
+                  return (
+                    <MarkdownTab
+                      key={`${tab.id}:markdown`}
+                      projectId={projectId}
+                      projectPath={projectPath}
+                      path={tab.path}
+                      visible={visible}
+                      fontSize={state.settings.fileFontSize}
+                      mode={mdMode}
+                      dirty={tab.dirty}
+                      onModeChange={setMdMode}
+                      onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                      editor={mdMode !== 'preview' || tab.dirty ? codeView : null}
+                      onSave={saveTab}
+                    />
                   )
                 }
                 if (!tab.live) {
@@ -1104,12 +1504,13 @@ export function App(): React.JSX.Element {
                     visible={visible}
                     onTitle={(title) => autoTitle(tab.id, title)}
                     onReady={(cols, rows) => void spawnWhenReady(tab.id, cols, rows)}
+                    reattach={reattached.current.has(tab.id)}
                     fontSize={state.settings.terminalFontSize}
                     projectId={projectId}
                     onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
                   />
                 )
-              })
+              }))
             )}
 
             {selected && missing.has(selected.id) && (
@@ -1145,6 +1546,19 @@ export function App(): React.JSX.Element {
                 actions={[{ label: 'Adicionar projeto', onClick: () => void addProject() }]}
               />
             )}
+            {quickOpen && selected && !missing.has(selected.id) && (
+              <QuickOpen
+                key={selected.id}
+                projectId={selected.id}
+                recent={recentFiles[selected.id] ?? NO_RECENT}
+                onMissing={(gone) => forgetRecent(selected.id, gone)}
+                onOpen={(rel, line) => {
+                  setQuickOpen(false)
+                  openFromTerminal(selected.id, rel, line)
+                }}
+                onClose={() => setQuickOpen(false)}
+              />
+            )}
           </div>
         </main>
 
@@ -1160,8 +1574,11 @@ export function App(): React.JSX.Element {
                 )
               )
             }
-            onOpenFile={(path) => openFile(selected, path)}
-            onOpenDiff={(path, staged) => openDiff(selected, path, staged)}
+            onOpenFile={(path: string, opts?: OpenFileOptions) => openFile(selected, path, opts)}
+            onOpenAt={(rel: string, line: number | null, opts?: OpenAtOptions) => openFromTerminal(selected.id, rel, line, opts)}
+            onOpenDiff={(path: string, staged: boolean, opts?: GitDiffOpen) => openDiff(selected, path, staged, opts)}
+            onCompare={(left: string, right: string) => openCompare(selected, left, right)}
+            onOpenTerminal={(dir: string) => openTerminalIn(selected, dir)}
             commitDraft={commitDrafts[selected.id] ?? ''}
             onCommitDraftChange={(update) =>
               setCommitDrafts((drafts) => ({ ...drafts, [selected.id]: update(drafts[selected.id] ?? '') }))
@@ -1172,6 +1589,9 @@ export function App(): React.JSX.Element {
             onPathMoved={(from, to) => movePathInTabs(selected.id, from, to)}
             hasUnsavedUnder={(rel) => hasUnsavedUnder(selected.id, rel)}
             reveal={reveal}
+            onRevealShown={() => setReveal((r) => (r ? { ...r, show: false } : r))}
+            searchRequested={searchRequested}
+            onSearchShown={() => setSearchRequested(false)}
             activeAgent={activeTerminal?.agent ?? null}
             activeActivity={activeTerminal?.live ? (activeTerminal.activity ?? null) : null}
           />
@@ -1256,7 +1676,7 @@ function EmptyState(props: {
       <div className="text-sm font-medium">{props.title}</div>
       <div className="max-w-full truncate text-xs text-muted-foreground">{props.detail}</div>
       {props.note && <p className="max-w-md text-xs text-muted-foreground">{props.note}</p>}
-      <div className="mt-1 flex gap-2">
+      <div className="mt-1 flex flex-wrap justify-center gap-2">
         {props.actions.map((a, i) => (
           <Button key={a.label} variant={i === 0 ? 'primary' : 'secondary'} onClick={a.onClick}>
             {a.label}

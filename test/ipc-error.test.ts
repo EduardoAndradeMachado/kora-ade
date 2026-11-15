@@ -14,4 +14,10 @@ describe('mensagem de erro vinda do main', () => {
     expect(isNotFound(err)).toBe(true)
     expect(isNotFound(fromMain('EPERM: operation not permitted'))).toBe(false)
   })
+
+  it('tela que abria um arquivo diz qual não foi encontrado; outro erro continua igual', () => {
+    const gone = new Error(`Error invoking remote method 'fs:read': Error: ENOENT: no such file or directory, open 'C:\\proj\\src\\velho.ts'`)
+    expect(ipcErrorMessage(gone, 'src\\velho.ts')).toBe('Arquivo não encontrado: src\\velho.ts')
+    expect(ipcErrorMessage(fromMain('EBUSY: resource busy or locked'), 'src\\a.ts')).toBe('EBUSY: resource busy or locked')
+  })
 })

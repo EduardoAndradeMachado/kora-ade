@@ -1,24 +1,27 @@
 import { basename, dirname, join } from 'node:path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { homedir, hostname, release } from 'node:os'
+import { homedir, hostname, release, totalmem } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, powerSaveBlocker, protocol, safeStorage, screen, shell, Tray } from 'electron'
+import { minWindowSize } from './window-size'
 import { is } from '@electron-toolkit/utils'
 import { isReadOnly, loadState, recoveryMessage, saveState } from './store'
 import { addProject, applyLayout, forgetSessionName, mergeTabs, missingProjectIds, namedSessions, relocateProject, removeProject, renameProject, setProjectCollapsed, setTabAgent } from './projects'
-import { Terminals } from './terminals'
+import { terminalCwd, Terminals } from './terminals'
 import { MobileServer } from './mobile-server'
 import { MobileRuntime } from './mobile-runtime'
 import { createTranscriber, transcriberInstalled } from './transcriber'
 import { DESKTOP } from './terminal-sizes'
 import { Scrollbacks } from './scrollback'
-import { ConflictError, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from './files'
+import { ConflictError, copyEntries, importEntries, listDir, moveEntry, readText, resolveInside, writeText } from './files'
+import { latestSearch, listProjectFiles, normalizeSearchOptions } from './project-files'
+import { readSheetBytes } from './xlsx'
 import { AgentDetector, UNREADABLE } from './agent-detect'
 import { createRolloutFinder, FolderWatch, isClaudeTranscript } from './agent-watch'
 import { listProjectSessions, sessionArtifacts } from './sessions'
 import { dayMetrics, sessionMetrics, type MetricsSources } from './metrics'
 import { deleteOpencodeSession, newOpencodeSessionId, opencodeActivity, opencodeDataDir, opencodeDbPath } from './opencode'
-import { createEntry, openInDefaultBrowser, renameEntry } from './file-actions'
+import { createEntry, openInDefaultBrowser, renameEntry, trashEntry, treeStamp, TreeUndoStepSchema, undoTreeStep } from './file-actions'
 import { ProjectIcons } from './project-icons'
 import { savePastedImage } from './pasted-image'
 import { createUsageReader } from './usage'
@@ -31,11 +34,16 @@ import { autoUpdater } from 'electron-updater'
 import { createErrorLog, errorText } from './error-log'
 import { startUpdates, type Updates } from './updater'
 import { rememberLiveTabs, takeLiveTabs } from './resume-after-update'
+import { CRASH_RELOADS_PER_WINDOW, crashNotice, decideCrashReload } from './crash-reload'
+import { fileSizes, rendererMemoryMB, softLimitMB, startMemoryWatch } from './memory-watch'
+import type { MemoryUsage } from '../shared/open-limits'
+import { reattachPlan } from './terminal-reattach'
 import { releaseStuckDrag } from './stuck-drag'
 import type { UpdateStatus } from '../shared/update'
 import { AccountActionSchema, AdminRequestSchema, type AccountAction, type MobileStatus } from '../shared/mobile'
 import { accountClient } from './remote/account'
 import { resolveTerminalLink } from './terminal-links'
+import { nameArg, numberArg, pathArg, pathListArg, textArg } from './ipc-args'
 import {
   gitBranches,
   gitCheckout,
@@ -56,7 +64,23 @@ import {
   gitUnstage,
   gitWorktrees
 } from './git'
+import {
+  gitAbortOperation,
+  gitContinueOperation,
+  gitResolve,
+  gitStashApply,
+  gitStashDrop,
+  gitStashFiles,
+  gitStashList,
+  gitStashPush
+} from './git'
+import type { GitCheckoutMode, GitDeletionChoice, GitPullStrategy, GitStashRef } from '../shared/git-types'
+import { gitCommitAmend, gitCommitDiff, gitCommitFiles, gitFileAt, gitHeadCommit, gitLog, gitUndoLastCommit } from './git-history'
+import { gitDeleteBranch, gitPublishBranch, gitRenameBranch } from './git-branch-actions'
+import { gitAddToIgnore } from './git-ignore'
+import { gitApplyHunk, gitHunks } from './git-hunks'
 import { KORA_FILE_PRIVILEGED_SCHEMES, registerKoraFileProtocol } from './file-protocol'
+import { defaultAppFor } from './file-assoc'
 import { fileHolders, listProcesses, withCreationTime } from './processes'
 import { AlertsSchema, FILE_FONT, ProjectGroupSchema, TERMINAL_FONT, ThemePreferenceSchema, ZOOM, type KoraState } from '../shared/state'
 import { z } from 'zod'
@@ -143,6 +167,7 @@ const watchers = new ProjectWatchers((projectId, change) => {
   const gone = project !== undefined && !isDirectory(project.path)
   if (gone) watchers.unwatch(projectId)
   mainWindow?.webContents.send('fs:changed', projectId, gone ? { ...change, rescan: true } : change)
+  mobileServer?.publishFiles({ projectId, dirs: change.dirs, git: change.git, rescan: gone || change.rescan, files: change.files, allFiles: change.allFiles })
   if (gone) mobileServer?.publishState()
 })
 
@@ -235,6 +260,7 @@ let lag: ReturnType<typeof createLagMonitor> | null = null
 let updates: Updates | null = null
 // Abas que rodavam quando a atualização fechou o app; o renderer pede uma vez e reabre.
 let resumeAfterUpdate: string[] = []
+let crashReloads: number[] = []
 
 function updaterLog(line: string): void {
   try {
@@ -334,12 +360,26 @@ function titleBarOverlay(): Electron.TitleBarOverlayOptions {
   }
 }
 
+// O mínimo acompanha o zoom da interface e o monitor em que a janela está.
+function applyMinimumSize(): void {
+  if (!mainWindow) return
+  const { workArea } = screen.getDisplayMatching(mainWindow.getBounds())
+  const min = minWindowSize(state.settings.zoom, workArea)
+  mainWindow.setMinimumSize(min.width, min.height)
+}
+
+const memorySoftMB = softLimitMB(totalmem() / 1024 / 1024)
+
+function windowMemoryMB(): number | null {
+  const contents = mainWindow?.webContents
+  if (!contents || contents.isDestroyed()) return null
+  return rendererMemoryMB(app.getAppMetrics(), contents.getOSProcessId())
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    minWidth: 720,
-    minHeight: 480,
     show: false,
     title: 'Kora ADE',
     titleBarStyle: 'hidden',
@@ -356,6 +396,9 @@ function createWindow(): void {
     }
   })
 
+  applyMinimumSize()
+  // Levada para um monitor menor, a janela precisa de um mínimo que caiba nele.
+  mainWindow.on('moved', applyMinimumSize)
   mainWindow.on('ready-to-show', () => mainWindow?.show())
   // O zoom do Chromium é por origem e se perde no reload; reaplica o salvo a cada carregamento.
   mainWindow.webContents.on('did-finish-load', () => mainWindow?.webContents.setZoomFactor(state.settings.zoom))
@@ -383,17 +426,33 @@ function createWindow(): void {
     mainWindow = null
   })
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url)
+    if (/^(https?:\/\/|mailto:)/.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
-  // Um reload da interface descarta as abas; sem isso os shells (e um Claude rodando) ficariam órfãos no main.
-  // Só a navegação da página principal: iframe (o visualizador de PDF) também dispara did-start-loading, e abrir
-  // um PDF encerrava todos os terminais.
-  mainWindow.webContents.on('did-start-navigation', (details) => {
-    if (!details.isMainFrame || details.isSameDocument) return
-    terminals.killAll()
-    activities.clear()
+  // Recarregar a interface (queda, ou o reload do desenvolvimento) não encerra os terminais: os ptys vivem no main
+  // e a página nova se liga de novo a eles pelo terminal:reattach, que também encerra os que ficaram sem aba.
+  // Sem isto a janela fica em branco até alguém fechar o Kora pela bandeja. O que estava só na interface (edição
+  // não salva) se perde; a tela dos terminais vem da cópia do main.
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    if (quitting) return
+    const decision = decideCrashReload(details.reason, crashReloads, Date.now())
+    crashReloads = decision.recent
+    if (decision.action === 'ignore' || !mainWindow) return
+    recoveryNotice = crashNotice(details.reason)
+    unsaved = false
+    const running = terminals.pids().size
+    // Desistir não encerra os terminais: um agente no meio do trabalho segue até o fim, e o Abrir Kora da bandeja
+    // tenta a interface de novo (showWindow). Sair continua encerrando tudo.
+    if (decision.action === 'give-up') {
+      errorLog.record(
+        'processo',
+        `interface não recarregada: caiu ${CRASH_RELOADS_PER_WINDOW} vezes em menos de um minuto; ${running} terminal(is) seguem rodando até reabrir pela bandeja`
+      )
+      return
+    }
+    errorLog.record('processo', `recarregando a interface (${details.reason}); ${running} terminal(is) seguem rodando para reconectar`)
+    mainWindow.webContents.reload()
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -489,13 +548,16 @@ function projectRoot(id: string): string {
 function ensureTab(tab: TabRef): void {
   projectRoot(tab.projectId)
   if (!state.tabs.some((t) => t.id === tab.id)) {
-    commit({ ...state, tabs: [...state.tabs, { ...tab, titleLocked: tab.titleLocked ?? false, agent: null }] })
+    const { dir, ...ref } = tab
+    const saved = { ...ref, titleLocked: tab.titleLocked ?? false, agent: null, ...(typeof dir === 'string' && dir ? { dir } : {}) }
+    commit({ ...state, tabs: [...state.tabs, saved] })
   }
 }
 
 function launchTerminal(tab: TabRef, cols: number, rows: number, launch: Launch): void {
-  const cwd = projectRoot(tab.projectId)
+  const root = projectRoot(tab.projectId)
   ensureTab(tab)
+  const cwd = terminalCwd(root, state.tabs.find((t) => t.id === tab.id)?.dir)
   let startup: Startup | undefined
   if (launch.type === 'claude') {
     const sessionId = randomUUID()
@@ -512,8 +574,8 @@ function launchTerminal(tab: TabRef, cols: number, rows: number, launch: Launch)
     const agent = AgentSessionSchema.parse(launch.agent)
     startup = { kind: agent.kind, mode: 'resume', sessionId: agent.sessionId }
   }
-  // A interface pode achar que a aba está adormecida enquanto o pty antigo ainda vive
-  // (ex.: renderer recarregado); o pedido novo substitui o antigo em vez de falhar.
+  // A interface pode achar que a aba está adormecida enquanto o pty antigo ainda vive; o pedido novo substitui o
+  // antigo em vez de falhar.
   terminals.kill(tab.id)
   terminals.spawn(tab.id, cwd, cols, rows, startup)
 }
@@ -532,10 +594,8 @@ function setRemoteEnabled(enabled: boolean): MobileStatus {
   if (!enabled) {
     if (keepAwake !== null) powerSaveBlocker.stop(keepAwake)
     keepAwake = null
-    terminals.setMirroring(server.pairing.enabled)
     return server.stopRemote()
   }
-  terminals.setMirroring(true)
   // Longe de casa por dias: o PC suspenso some do relay até alguém voltar para acordá-lo.
   keepAwake ??= powerSaveBlocker.start('prevent-app-suspension')
   return server.startRemote(RELAY_URL, RELAY_CLIENT)
@@ -563,21 +623,10 @@ function openAtLogin(enabled?: boolean): { available: boolean; enabled: boolean 
   return { available: true, enabled: app.getLoginItemSettings().openAtLogin }
 }
 
-// Com a conexão ligada o main mantém a cópia das telas; desligada, o custo de interpretar a saída some.
 async function setMobileEnabled(enabled: boolean): Promise<MobileStatus> {
   const server = mobileServer!
-  if (!enabled) {
-    const status = await server.stop()
-    terminals.setMirroring(server.pairing.remote.enabled)
-    return status
-  }
-  terminals.setMirroring(true)
-  try {
-    return await server.start()
-  } catch (err) {
-    terminals.setMirroring(server.pairing.remote.enabled)
-    throw err
-  }
+  if (!enabled) return server.stop()
+  return server.start()
 }
 
 function registerIpc(): void {
@@ -611,6 +660,7 @@ function registerIpc(): void {
     if (next.zoom !== undefined) {
       mainWindow?.webContents.setZoomFactor(next.zoom)
       mainWindow?.setTitleBarOverlay(titleBarOverlay())
+      applyMinimumSize()
     }
     return committed
   })
@@ -669,33 +719,63 @@ function registerIpc(): void {
 
   ipcMain.handle('project:layout', (_e, layout: unknown) => commit(applyLayout(state, LayoutSchema.parse(layout))))
 
-  ipcMain.handle('fs:list', (_e, id: string, rel: string) => {
+  ipcMain.handle('fs:list', (_e, id: string, rel: unknown) => {
     const root = projectRoot(id)
-    const entries = listDir(root, rel)
+    const entries = listDir(root, pathArg(rel))
     watchers.watch(id, root)
     return entries
   })
-  ipcMain.handle('fs:read', (_e, id: string, rel: string) => readText(projectRoot(id), rel))
+  ipcMain.handle('fs:list-project', (_e, id: string) => listProjectFiles(projectRoot(id)))
+  const projectSearch = latestSearch()
+  ipcMain.handle('fs:search', (_e, id: string, query: unknown, opts: unknown) =>
+    projectSearch(projectRoot(id), textArg(query, 'o texto da busca'), normalizeSearchOptions(opts))
+  )
+  ipcMain.handle('fs:read', (_e, id: string, rel: unknown, opts?: { force?: unknown; encoding?: unknown }) =>
+    readText(projectRoot(id), pathArg(rel), { force: opts?.force === true, encoding: typeof opts?.encoding === 'string' ? opts.encoding : undefined })
+  )
+  ipcMain.handle('fs:read-sheet', (_e, id: string, rel: unknown, opts?: { force?: unknown }) =>
+    readSheetBytes(projectRoot(id), pathArg(rel), { force: opts?.force === true })
+  )
+  ipcMain.handle('memory:usage', (): MemoryUsage | null => {
+    const usedMB = windowMemoryMB()
+    return usedMB === null ? null : { usedMB, softMB: memorySoftMB }
+  })
+  ipcMain.handle('memory:file-sizes', (_e, id: string, rels: unknown) => fileSizes(projectRoot(id), pathListArg(rels)))
   ipcMain.handle(
     'fs:write',
-    (_e, id: string, rel: string, content: string, expectedMtimeMs: number): SaveResult => {
+    (_e, id: string, rel: unknown, content: unknown, expectedMtimeMs: unknown, encodingId?: unknown, opts?: { forceEncoding?: unknown }): SaveResult => {
       try {
-        return { ok: true, mtimeMs: writeText(projectRoot(id), rel, content, expectedMtimeMs) }
+        const forceEncoding = opts?.forceEncoding === true
+        return {
+          ok: true,
+          mtimeMs: writeText(projectRoot(id), pathArg(rel), textArg(content, 'o conteúdo'), numberArg(expectedMtimeMs, 'a versão do arquivo'), typeof encodingId === 'string' ? encodingId : undefined, { recreate: true, forceEncoding })
+        }
       } catch (err) {
         return { ok: false, conflict: err instanceof ConflictError, message: (err as Error).message }
       }
     }
   )
-  ipcMain.handle('fs:open', async (_e, id: string, rel: string) => {
-    const error = await shell.openPath(resolveInside(projectRoot(id), rel))
+  ipcMain.handle('fs:open', async (_e, id: string, rel: unknown) => {
+    const error = await shell.openPath(resolveInside(projectRoot(id), pathArg(rel)))
     if (error) throw new Error(error)
   })
+  ipcMain.handle('fs:info', async (_e, id: string, rel: unknown) => {
+    const file = resolveInside(projectRoot(id), pathArg(rel))
+    const info = statSync(file)
+    return { size: info.size, mtimeMs: info.mtimeMs, app: await defaultAppFor(file) }
+  })
+  ipcMain.handle('fs:exists', (_e, id: string, rel: unknown) =>
+    statSync(resolveInside(projectRoot(id), pathArg(rel)), { throwIfNoEntry: false })?.isFile() ?? false
+  )
 
   ipcMain.handle(
     'fs:create',
-    (_e, id: string, parentRel: string, name: string, kind: 'file' | 'dir'): CreateResult => {
+    async (_e, id: string, parentRel: unknown, name: unknown, kind: unknown): Promise<CreateResult> => {
       try {
-        return { ok: true, rel: createEntry(projectRoot(id), parentRel, name, kind) }
+        if (kind !== 'file' && kind !== 'dir') throw new Error('Pedido inválido: o tipo precisa ser arquivo ou pasta.')
+        const root = projectRoot(id)
+        const { rel, top } = createEntry(root, pathArg(parentRel, 'a pasta'), textArg(name, 'o nome'), kind)
+        return { ok: true, rel, top, stamp: await treeStamp(root, top) }
       } catch (err) {
         return { ok: false, message: (err as Error).message }
       }
@@ -771,22 +851,39 @@ function registerIpc(): void {
   ipcMain.handle('update:install', () => updates?.install() ?? false)
   ipcMain.handle('app:version', () => app.getVersion())
   ipcMain.handle('app:open-at-login', (_e, enabled: unknown) => openAtLogin(z.boolean().optional().parse(enabled ?? undefined)))
-  ipcMain.handle('terminal:resolve-link', (_e, id: string, text: string) => resolveTerminalLink(projectRoot(id), String(text)))
+  ipcMain.handle('terminal:resolve-link', (_e, id: string, text: string, tabId?: unknown) => {
+    const dir = typeof tabId === 'string' ? state.tabs.find((t) => t.id === tabId && t.projectId === id)?.dir : undefined
+    return resolveTerminalLink(projectRoot(id), String(text), dir)
+  })
   ipcMain.on('diag:long-task', (_e, ms: number) => lagLog(`${new Date().toISOString()} interface travada ${Math.round(Number(ms))} ms`))
   ipcMain.on('window:release-stuck-drag', () => {
     lagLog(`${new Date().toISOString()} arrasto preso na interface: cancelado sozinho`)
     releaseInput()
   })
-  ipcMain.handle('fs:move', (_e, id: string, fromRel: string, toDirRel: string) =>
-    moveEntry(projectRoot(id), String(fromRel), String(toDirRel))
+  ipcMain.handle('fs:move', (_e, id: string, fromRel: unknown, toDirRel: unknown) =>
+    moveEntry(projectRoot(id), pathArg(fromRel), pathArg(toDirRel, 'a pasta de destino'))
   )
-  ipcMain.handle('fs:import', (_e, id: string, sources: unknown, toDirRel: string) =>
-    importEntries(projectRoot(id), z.array(z.string().min(1)).parse(sources), String(toDirRel))
+  const withStamps = async (root: string, rels: string[]): Promise<{ rel: string; stamp: string }[]> => {
+    const items: { rel: string; stamp: string }[] = []
+    for (const rel of rels) items.push({ rel, stamp: await treeStamp(root, rel) })
+    return items
+  }
+  ipcMain.handle('fs:import', async (_e, id: string, sources: unknown, toDirRel: unknown) => {
+    const root = projectRoot(id)
+    return withStamps(root, await importEntries(root, z.array(z.string().min(1)).parse(sources), pathArg(toDirRel, 'a pasta de destino')))
+  })
+  ipcMain.handle('fs:copy', async (_e, id: string, rels: unknown, toDirRel: unknown) => {
+    const root = projectRoot(id)
+    return withStamps(root, await copyEntries(root, z.array(z.string().min(1)).parse(rels), pathArg(toDirRel, 'a pasta de destino')))
+  })
+  ipcMain.handle('fs:undo', (_e, id: string, step: unknown) =>
+    undoTreeStep(projectRoot(id), TreeUndoStepSchema.parse(step), (abs) => shell.trashItem(abs))
   )
-  ipcMain.handle('fs:rename', (_e, id: string, rel: string, name: string) =>
-    renameEntry(projectRoot(id), String(rel), String(name))
+  ipcMain.handle('fs:rename', (_e, id: string, rel: unknown, name: unknown) =>
+    renameEntry(projectRoot(id), pathArg(rel), textArg(name, 'o nome novo'))
   )
-  ipcMain.handle('fs:reveal', async (_e, id: string, rel: string) => {
+  ipcMain.handle('fs:reveal', async (_e, id: string, relArg: unknown) => {
+    const rel = pathArg(relArg)
     const target = resolveInside(projectRoot(id), rel)
     if (!rel || statSync(target).isDirectory()) {
       const error = await shell.openPath(target)
@@ -796,12 +893,9 @@ function registerIpc(): void {
     }
   })
   // Vai para a Lixeira em vez de apagar: um clique errado no explorador tem volta.
-  ipcMain.handle('fs:trash', async (_e, id: string, rel: string) => {
-    if (!rel) throw new Error('A pasta do projeto não pode ser excluída por aqui.')
-    await shell.trashItem(resolveInside(projectRoot(id), rel))
-  })
-  ipcMain.handle('fs:open-browser', (_e, id: string, rel: string) =>
-    openInDefaultBrowser(resolveInside(projectRoot(id), rel))
+  ipcMain.handle('fs:trash', (_e, id: string, relArg: unknown) => trashEntry(projectRoot(id), pathArg(relArg), (abs) => shell.trashItem(abs)))
+  ipcMain.handle('fs:open-browser', (_e, id: string, rel: unknown) =>
+    openInDefaultBrowser(resolveInside(projectRoot(id), pathArg(rel)))
   )
 
   ipcMain.handle('project:icon', (_e, id: string) => projectIcons.get(id, projectRoot(id)))
@@ -812,31 +906,88 @@ function registerIpc(): void {
   ipcMain.handle('git:worktrees', (_e, id: string) => gitWorktrees(projectRoot(id)))
   ipcMain.handle('git:init', (_e, id: string) => gitInit(projectRoot(id)))
   ipcMain.handle('git:remote-url', (_e, id: string) => gitRemoteUrl(projectRoot(id)))
-  ipcMain.handle('git:set-remote', (_e, id: string, url: string) => gitSetRemote(projectRoot(id), String(url)))
-  ipcMain.handle('git:create-branch', (_e, id: string, name: string, checkout: boolean) =>
-    gitCreateBranch(projectRoot(id), String(name), checkout === true)
+  ipcMain.handle('git:set-remote', (_e, id: string, url: unknown) => gitSetRemote(projectRoot(id), textArg(url, 'a URL do remoto')))
+  ipcMain.handle('git:create-branch', (_e, id: string, name: unknown, checkout: boolean) =>
+    gitCreateBranch(projectRoot(id), textArg(name, 'o nome da branch'), checkout === true)
   )
-  ipcMain.handle('git:checkout', (_e, id: string, name: string, remote: string | null) =>
-    gitCheckout(projectRoot(id), String(name), typeof remote === 'string' ? remote : null)
+  ipcMain.handle('git:checkout', (_e, id: string, name: unknown, remote: string | null, mode?: unknown) =>
+    gitCheckout(projectRoot(id), nameArg(name, 'o nome da branch'), typeof remote === 'string' ? remote : null, checkoutMode(mode))
   )
-  ipcMain.handle('git:ignored', async (_e, id: string, relPaths: string[]) =>
-    [...(await gitIgnored(projectRoot(id), Array.isArray(relPaths) ? relPaths.map(String) : []))]
-  )
-  const pathList = (paths: unknown): string[] => (Array.isArray(paths) ? paths.map(String) : [])
+  ipcMain.handle('git:ignored', async (_e, id: string, relPaths: unknown) => [...(await gitIgnored(projectRoot(id), pathListArg(relPaths)))])
+  const pathList = (paths: unknown): string[] => pathListArg(paths, 'a lista de arquivos')
+  const checkoutMode = (mode: unknown): GitCheckoutMode =>
+    mode === 'stash' || mode === 'migrate' || mode === 'force' ? mode : 'normal'
+  const pullStrategy = (strategy: unknown): GitPullStrategy => (strategy === 'merge' || strategy === 'rebase' ? strategy : 'default')
+  const stashRef = (ref: unknown): GitStashRef => {
+    const r = typeof ref === 'object' && ref !== null ? (ref as { index?: unknown; oid?: unknown }) : {}
+    return { index: Number(r.index), oid: String(r.oid) }
+  }
   ipcMain.handle('git:stage', (_e, id: string, paths: unknown) => gitStage(projectRoot(id), pathList(paths)))
   ipcMain.handle('git:unstage', (_e, id: string, paths: unknown) => gitUnstage(projectRoot(id), pathList(paths)))
   // Não rastreado descartado vai para a Lixeira, como o excluir do explorador.
   ipcMain.handle('git:discard', (_e, id: string, paths: unknown) =>
     gitDiscard(projectRoot(id), pathList(paths), (abs) => shell.trashItem(abs))
   )
-  ipcMain.handle('git:diff', (_e, id: string, rel: string, staged: boolean) => gitDiff(projectRoot(id), String(rel), staged === true))
-  ipcMain.handle('git:commit', (_e, id: string, message: string, stageAll: boolean) =>
-    gitCommit(projectRoot(id), String(message), stageAll === true)
+  ipcMain.handle('git:diff', (_e, id: string, rel: unknown, staged: boolean) => gitDiff(projectRoot(id), pathArg(rel), staged === true))
+  ipcMain.handle('git:commit', (_e, id: string, message: unknown, stageAll: boolean) =>
+    gitCommit(projectRoot(id), textArg(message, 'a mensagem do commit'), stageAll === true)
   )
-  ipcMain.handle('git:push', (_e, id: string) => gitPush(projectRoot(id)))
-  ipcMain.handle('git:pull', (_e, id: string) => gitPull(projectRoot(id)))
+  ipcMain.handle('git:push', (_e, id: string, opts?: unknown) => {
+    const lease = typeof opts === 'object' && opts !== null ? (opts as { forceWithLease?: unknown }).forceWithLease : undefined
+    return gitPush(projectRoot(id), typeof lease === 'string' ? { forceWithLease: lease } : {})
+  })
+  ipcMain.handle('git:pull', (_e, id: string, strategy?: unknown) => gitPull(projectRoot(id), pullStrategy(strategy)))
   ipcMain.handle('git:fetch', (_e, id: string) => gitFetch(projectRoot(id)))
-  ipcMain.handle('git:sync', (_e, id: string) => gitSync(projectRoot(id)))
+  ipcMain.handle('git:sync', (_e, id: string, strategy?: unknown) => gitSync(projectRoot(id), pullStrategy(strategy)))
+  ipcMain.handle('git:resolve', (_e, id: string, paths: unknown, opts: unknown) => {
+    const o = typeof opts === 'object' && opts !== null ? (opts as { force?: unknown; deletion?: unknown }) : {}
+    const deletion: GitDeletionChoice | undefined = o.deletion === 'keep' || o.deletion === 'delete' ? o.deletion : undefined
+    return gitResolve(projectRoot(id), pathList(paths), { force: o.force === true, deletion })
+  })
+  ipcMain.handle('git:abort-operation', (_e, id: string) => gitAbortOperation(projectRoot(id)))
+  ipcMain.handle('git:continue-operation', (_e, id: string, message: unknown) =>
+    gitContinueOperation(projectRoot(id), typeof message === 'string' ? message : '')
+  )
+  ipcMain.handle('git:stash-list', (_e, id: string) => gitStashList(projectRoot(id)))
+  ipcMain.handle('git:stash-push', (_e, id: string, message: unknown, includeUntracked: unknown) =>
+    gitStashPush(projectRoot(id), typeof message === 'string' ? message : '', includeUntracked === true)
+  )
+  ipcMain.handle('git:stash-apply', (_e, id: string, ref: unknown, pop: unknown) => gitStashApply(projectRoot(id), stashRef(ref), pop === true))
+  ipcMain.handle('git:stash-drop', (_e, id: string, ref: unknown) => gitStashDrop(projectRoot(id), stashRef(ref)))
+  ipcMain.handle('git:stash-files', (_e, id: string, ref: unknown) => gitStashFiles(projectRoot(id), stashRef(ref)))
+
+  const optionalText = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined)
+  ipcMain.handle('git:log', (_e, id: string, opts: unknown) => {
+    const o = (opts && typeof opts === 'object' ? opts : {}) as Record<string, unknown>
+    return gitLog(projectRoot(id), {
+      skip: typeof o.skip === 'number' ? o.skip : undefined,
+      limit: typeof o.limit === 'number' ? o.limit : undefined,
+      path: optionalText(o.path)
+    })
+  })
+  ipcMain.handle('git:commit-files', (_e, id: string, hash: unknown) => gitCommitFiles(projectRoot(id), nameArg(hash, 'o commit')))
+  ipcMain.handle('git:commit-diff', (_e, id: string, hash: unknown, rel: unknown, origPath: unknown) =>
+    gitCommitDiff(projectRoot(id), nameArg(hash, 'o commit'), pathArg(rel), optionalText(origPath))
+  )
+  ipcMain.handle('git:file-at', (_e, id: string, rev: unknown, rel: unknown) =>
+    gitFileAt(projectRoot(id), nameArg(rev, 'o commit'), pathArg(rel))
+  )
+  ipcMain.handle('git:head-commit', (_e, id: string) => gitHeadCommit(projectRoot(id)))
+  ipcMain.handle('git:amend', (_e, id: string, message: unknown) => gitCommitAmend(projectRoot(id), textArg(message, 'a mensagem do commit')))
+  ipcMain.handle('git:undo-last-commit', (_e, id: string) => gitUndoLastCommit(projectRoot(id)))
+  ipcMain.handle('git:delete-branch', (_e, id: string, name: unknown, force: unknown) =>
+    gitDeleteBranch(projectRoot(id), nameArg(name, 'o nome da branch'), force === true)
+  )
+  ipcMain.handle('git:rename-branch', (_e, id: string, from: unknown, to: unknown) =>
+    gitRenameBranch(projectRoot(id), nameArg(from, 'o nome da branch'), textArg(to, 'o nome novo da branch'))
+  )
+  ipcMain.handle('git:publish-branch', (_e, id: string, name: unknown) => gitPublishBranch(projectRoot(id), nameArg(name, 'o nome da branch')))
+  ipcMain.handle('git:add-to-ignore', (_e, id: string, paths: unknown) => gitAddToIgnore(projectRoot(id), pathList(paths)))
+  ipcMain.handle('git:hunks', (_e, id: string, rel: unknown, staged: unknown) => gitHunks(projectRoot(id), pathArg(rel), staged === true))
+  ipcMain.handle('git:apply-hunk', (_e, id: string, rel: unknown, staged: unknown, hunkId: unknown, action: unknown) => {
+    if (action !== 'stage' && action !== 'unstage' && action !== 'discard') throw new Error('Ação de trecho inválida.')
+    return gitApplyHunk(projectRoot(id), pathArg(rel), staged === true, nameArg(hunkId, 'o trecho'), action)
+  })
 
   ipcMain.handle('usage:read', () => usage.read())
   ipcMain.handle('claude-accounts:list', () => claudeAccounts.list())
@@ -958,6 +1109,14 @@ function registerIpc(): void {
     const size = mobileRuntime!.sizes.current(key)
     return { snapshot, size: size ? { id: key, ...size } : null }
   })
+  // A interface pede ao carregar: na primeira abertura não há nada vivo; depois de recarregar, os ptys que
+  // sobreviveram. Os sem aba são encerrados aqui, porque nenhuma interface vai pedi-los de novo.
+  ipcMain.handle('terminal:reattach', () => {
+    const plan = reattachPlan(terminals.pids().keys(), state.tabs)
+    for (const id of plan.orphans) terminals.kill(id)
+    if (plan.orphans.length) errorLog.record('processo', `${plan.orphans.length} terminal(is) sem aba encerrado(s) ao reconectar a interface`)
+    return plan.attach.map((id) => ({ id, activity: activities.get(id) ?? null }))
+  })
   ipcMain.on('terminal:kill', (_e, id: string) => terminals.kill(id))
   ipcMain.handle('mobile:status', () => mobileServer!.status())
   ipcMain.handle('mobile:enabled', (_e, enabled: unknown) => setMobileEnabled(z.boolean().parse(enabled)))
@@ -1046,6 +1205,8 @@ app.on('before-quit', (event) => {
 
 function showWindow(): void {
   if (!mainWindow) return
+  // A recarga automática desistiu depois de quedas seguidas: abrir pela bandeja é o pedido de tentar de novo.
+  if (mainWindow.webContents.isCrashed()) mainWindow.webContents.reload()
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
@@ -1119,8 +1280,8 @@ void app.whenReady().then(() => {
       })
       .catch(() => {})
   }, CLAUDE_ACCOUNTS_SYNC_MS)
-  // O menu padrão do Electron traz Ctrl+W (fecha a janela) e Ctrl+R (recarrega a interface e derruba os
-  // terminais); os atalhos do Kora ficam todos na interface.
+  // O menu padrão do Electron traz Ctrl+W (fecha a janela) e Ctrl+R (recarrega a interface e perde a edição não
+  // salva dos arquivos); os atalhos do Kora ficam todos na interface.
   Menu.setApplicationMenu(null)
   lag = createLagMonitor({ intervalMs: 100, thresholdMs: 300, write: lagLog })
   traceIpc()
@@ -1146,6 +1307,9 @@ void app.whenReady().then(() => {
       await claudeAccounts.switchTo(id)
       usage.forget('claude')
     },
+    trash: (abs) => shell.trashItem(abs),
+    removed: (id) => watchers.unwatch(id),
+    watch: (id, root) => watchers.watch(id, root),
     relocated: async (id, path) => {
       watchers.unwatch(id)
       await projectIcons.refresh(id, path).catch(() => null)
@@ -1173,6 +1337,9 @@ void app.whenReady().then(() => {
   setInterval(detectAgents, DETECT_FALLBACK_MS)
   agentFolders.start()
   createWindow()
+  // Antes de a janela cair por falta de memória: pede para ela descarregar abas inativas e avisar. A recarga
+  // automática do render-process-gone continua sendo a rede para quando nem isso basta.
+  startMemoryWatch({ usedMB: windowMemoryMB, send: (pressure) => mainWindow?.webContents.send('memory:pressure', pressure) }, memorySoftMB)
   createTray()
   if (mobileServer.pairing.enabled) void setMobileEnabled(true).catch((err) => console.error('[kora] conexão com o celular', err))
   if (mobileServer.pairing.remote.enabled) {

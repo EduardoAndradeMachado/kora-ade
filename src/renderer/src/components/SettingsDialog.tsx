@@ -241,7 +241,7 @@ export function SettingsPanel(props: SettingsPanelProps): React.JSX.Element {
       aria-modal="true"
       aria-label="Configurações"
       onMouseDown={(e) => e.stopPropagation()}
-      className="flex max-h-full w-full max-w-md flex-col overflow-y-auto rounded-xl border bg-card text-foreground shadow-2xl"
+      className="flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-y-auto rounded-xl border bg-card text-foreground shadow-2xl"
     >
       <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5">
         <h2 className="text-sm font-semibold">Configurações</h2>

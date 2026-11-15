@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url'
 import { net, protocol, type CustomScheme } from 'electron'
 import { KORA_FILE_SCHEME } from '../shared/file-url'
-import { KoraFileError, resolveKoraFileRequest } from './file-request'
+import { KoraFileError, rangeResponse, resolveKoraFileRequest } from './file-request'
 
 export { KORA_FILE_SCHEME, koraFileUrl, parseKoraFileUrl } from '../shared/file-url'
 export { KoraFileError, resolveKoraFileRequest } from './file-request'
@@ -26,7 +26,9 @@ export function registerKoraFileProtocol(getProjectRoot: (id: string) => string)
       return new Response((err as Error).message, { status })
     }
     try {
-      return await net.fetch(pathToFileURL(file).toString())
+      const range = request.headers.get('range')
+      const partial = range ? await rangeResponse(file, range) : null
+      return partial ?? (await net.fetch(pathToFileURL(file).toString()))
     } catch {
       return new Response('Arquivo não encontrado', { status: 404 })
     }

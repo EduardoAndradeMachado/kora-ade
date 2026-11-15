@@ -1044,6 +1044,56 @@ const MUTANTS = [
     bug: 'reabrir a janela não destrava a interface',
     find: '  mainWindow.focus()\n  releaseInput()',
     replace: '  mainWindow.focus()'
+  },
+  {
+    id: 'M95',
+    grep: 'R95',
+    file: 'src/main/index.ts',
+    bug: 'recarregar a interface (queda ou reload) volta a encerrar todos os terminais',
+    find: "  mainWindow.webContents.on('render-process-gone', (_e, details) => {\n    if (quitting) return\n",
+    replace:
+      "  mainWindow.webContents.on('did-start-navigation', (details) => {\n    if (!details.isMainFrame || details.isSameDocument) return\n    terminals.killAll()\n  })\n  mainWindow.webContents.on('render-process-gone', (_e, details) => {\n    if (quitting) return\n",
+    expect: { 'R95 ': 'failed', R95b: 'failed' }
+  },
+  {
+    id: 'M95b',
+    grep: 'R95 ',
+    file: 'src/main/terminals.ts',
+    bug: 'a foto da tela não leva as flags do teclado kitty (Shift+Enter passa a enviar depois da queda)',
+    find: 'const data = keyboardPrelude(terminal) + mirror.serialize.serialize()',
+    replace: 'const data = mirror.serialize.serialize()'
+  },
+  {
+    id: 'M95c',
+    grep: 'R95 ',
+    file: 'src/renderer/src/App.tsx',
+    bug: 'aba reconectada também escreve o histórico salvo em disco antes da foto (tela repetida)',
+    find: 'reattach={reattached.current.has(tab.id)}',
+    replace: 'reattach={false}'
+  },
+  {
+    id: 'M95d',
+    grep: 'R95 ',
+    file: 'src/main/index.ts',
+    bug: 'pty sem aba depois da reconexão não é encerrado',
+    find: '    for (const id of plan.orphans) terminals.kill(id)\n',
+    replace: ''
+  },
+  {
+    id: 'M95e',
+    grep: 'R95 ',
+    file: 'src/renderer/src/components/TerminalView.tsx',
+    bug: 'o tamanho da foto vai para o pty e o ConPTY redesenha a tela nele (linhas repetidas no histórico)',
+    find: '      if (!remoteRef.current && !atSnapshotSize) window.kora.resizeTerminal(id, cols, rows)',
+    replace: '      if (!remoteRef.current) window.kora.resizeTerminal(id, cols, rows)'
+  },
+  {
+    id: 'M95f',
+    grep: 'R95 ',
+    file: 'src/shared/terminal-replay.ts',
+    bug: 'pedaço da saída que chega depois da foto, mas que ela já traz, é escrito de novo',
+    find: '    if (sequence !== undefined && sequence <= this.shown) return\n',
+    replace: ''
   }
 ]
 

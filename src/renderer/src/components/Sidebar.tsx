@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { GROUP_NAME_MAX, type Project, type ProjectGroup } from '@shared/state'
 import { childrenOf, depthOf, descendantIds, drawOrder } from '@shared/groups'
-import { AlertBell, isDormant, TabIcon, type RenameRequest, type Tab } from '@/components/TabBar'
+import { AlertBell, fileTitleStyle, isDormant, TabIcon, type RenameRequest, type Tab } from '@/components/TabBar'
 import { NewTabMenu, type NewTabChoice } from '@/components/NewTabMenu'
 import { EditableTitle } from '@/components/EditableTitle'
 import { ContextMenu, type MenuItem } from '@/components/ContextMenu'
@@ -41,6 +41,7 @@ interface Props {
   onCloseTab(projectId: string, tabId: string): void
   onRenameTab(projectId: string, tabId: string, title: string): void
   onTabContextMenu(projectId: string, tabId: string, x: number, y: number): void
+  onPinTab(projectId: string, tabId: string): void
   renameRequest: RenameRequest | null
   onNewTab(project: Project, choice: NewTabChoice): void
   onAdd(): void
@@ -364,6 +365,7 @@ export function Sidebar(props: Props): React.JSX.Element {
             onClose={(tabId) => props.onCloseTab(project.id, tabId)}
             onRename={(tabId, title) => props.onRenameTab(project.id, tabId, title)}
             onContextMenu={(tabId, x, y) => props.onTabContextMenu(project.id, tabId, x, y)}
+            onPin={(tabId) => props.onPinTab(project.id, tabId)}
             onReorder={(fromId, toId, place) => props.onReorderTab(project.id, fromId, toId, place)}
           />
         )}
@@ -571,6 +573,7 @@ interface SideTabsProps {
   onClose(tabId: string): void
   onRename(tabId: string, title: string): void
   onContextMenu(tabId: string, x: number, y: number): void
+  onPin(tabId: string): void
   onReorder(fromId: string, toId: string, place: Place): void
 }
 
@@ -586,6 +589,7 @@ function SideTabs(props: SideTabsProps): React.JSX.Element {
             key={tab.id}
             {...drag.itemProps(tab.id)}
             onClick={() => props.onSelect(tab.id)}
+            onDoubleClick={() => tab.kind === 'file' && tab.preview && props.onPin(tab.id)}
             onAuxClick={(e) => e.button === 1 && props.onClose(tab.id)}
             onContextMenu={(e) => {
               e.preventDefault()
@@ -602,7 +606,8 @@ function SideTabs(props: SideTabsProps): React.JSX.Element {
             <EditableTitle
               value={tab.title}
               editable={tab.kind === 'terminal'}
-              className={cn('flex-1', isDormant(tab) && 'italic opacity-70')}
+              className={cn('flex-1', isDormant(tab) && 'italic opacity-70', fileTitleStyle(tab).className)}
+              tooltip={fileTitleStyle(tab).tooltip}
               onCommit={(title) => props.onRename(tab.id, title)}
               editRequest={props.renameRequest?.tabId === tab.id ? props.renameRequest.n : undefined}
               linkId={tab.id}

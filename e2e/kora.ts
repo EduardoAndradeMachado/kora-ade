@@ -422,8 +422,11 @@ export const ui = {
   barTab: (page: Page, title: string | RegExp): Locator =>
     page.locator('main > div').first().locator('div.group').filter({ hasText: title }),
   sideTab: (page: Page, title: string | RegExp): Locator => page.locator('aside nav div.ml-5').filter({ hasText: title }),
+  // Casa só o nome do item: o atalho exibido à direita ("F2", "Del") fica num <kbd> à parte.
   menuItem: (page: Page, label: string): Locator =>
-    page.locator('body > div.fixed button').filter({ hasText: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }),
+    page
+      .locator('body > div.fixed button')
+      .filter({ has: page.locator('span.flex-1', { hasText: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }) }),
   terminal: (page: Page): Locator => page.locator('.xterm-screen').filter({ visible: true }),
   visibleButton: (page: Page, name: string): Locator =>
     page.getByRole('button', { name, exact: true }).filter({ visible: true })

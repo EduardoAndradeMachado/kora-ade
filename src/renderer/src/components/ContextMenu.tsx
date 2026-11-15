@@ -2,7 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 
-export type MenuItem = { label: string; onSelect(): void; danger?: boolean; icon?: React.ReactNode } | 'separator'
+// `shortcut` só como texto ("F2", "Ctrl+K Ctrl+Shift+C"): quem monta o menu é que faz a tecla funcionar.
+// `disabled`: o item aparece apagado e não responde, como o "Colar" do VS Code sem nada copiado.
+export type MenuItem =
+  | { label: string; onSelect(): void; danger?: boolean; icon?: React.ReactNode; shortcut?: string; disabled?: boolean }
+  | 'separator'
 
 interface Props {
   x: number
@@ -54,13 +58,16 @@ export function ContextMenu({ x, y, items, onClose }: Props): React.JSX.Element 
           <button
             key={item.label}
             type="button"
+            disabled={item.disabled}
             onClick={() => {
               onClose()
               item.onSelect()
             }}
             className={cn(
-              'w-full rounded-md px-2 py-1 text-left text-xs hover:bg-secondary',
-              withIcons ? 'flex items-center gap-2 hover:[--icon-accent-idle:var(--icon-accent)]' : 'block',
+              'flex w-full items-center rounded-md px-2 py-1 text-left text-xs',
+              item.disabled ? 'cursor-default opacity-50' : 'hover:bg-secondary',
+              withIcons && !item.disabled && 'gap-2 hover:[--icon-accent-idle:var(--icon-accent)]',
+              withIcons && item.disabled && 'gap-2',
               item.danger && 'text-destructive'
             )}
           >
@@ -69,7 +76,8 @@ export function ContextMenu({ x, y, items, onClose }: Props): React.JSX.Element 
                 {item.icon}
               </span>
             )}
-            {item.label}
+            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            {item.shortcut && <kbd className="ml-auto shrink-0 pl-6 font-sans text-[11px] text-muted-foreground">{item.shortcut}</kbd>}
           </button>
         )
       )}

@@ -89,6 +89,14 @@ const BRAND = {
       <path d="M15 4v16" />
     </>
   ),
+  // Grade com a linha do cabeçalho em âmbar, como a primeira linha de rótulos da planilha.
+  planilha: (a) => (
+    <>
+      <path d="M3 9h18v-1.5a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3z" fill={a} fillOpacity=".35" stroke="none" />
+      <rect x="3" y="4.5" width="18" height="15" rx="3" />
+      <path d="M3 9h18M3 14.25h18M9 9v10.5M15 9v10.5" />
+    </>
+  ),
   fechar: () => <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />,
   // Pastas: a aba âmbar é a mesma do ícone "projeto".
   pastaAberta: (a) => (
@@ -158,6 +166,20 @@ const BRAND = {
     <>
       <path d="M15.5 8.5V6A2 2 0 0 0 13.5 4H6A2 2 0 0 0 4 6v7.5a2 2 0 0 0 2 2h2.5" stroke={a} />
       <rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2" />
+    </>
+  ),
+  recortar: (a) => (
+    <>
+      <circle cx="6.5" cy="17.5" r="2.5" />
+      <circle cx="17.5" cy="17.5" r="2.5" />
+      <path d="M8.3 15.7 17 4.5M15.7 15.7 7 4.5" stroke={a} />
+    </>
+  ),
+  colar: (a) => (
+    <>
+      <path d="M15.5 5H17a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1.5" />
+      <rect x="8.5" y="3" width="7" height="4" rx="1.2" stroke={a} />
+      <path d="M9 12h6M9 15.5h4" />
     </>
   ),
   selecionarTudo: (a) => (

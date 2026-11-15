@@ -802,9 +802,12 @@ test('R64 diálogo aberto escurece também os botões de janela (desenhados pelo
       original(options)
     }
   })
-  await page.emulateMedia({ colorScheme: 'dark' })
-  await page.emulateMedia({ colorScheme: 'light' })
   const last = () => run.app.evaluate(() => (globalThis as unknown as { __overlays: string[] }).__overlays.at(-1) ?? '')
+  // Esperar a interface desenhar o escuro antes de voltar ao claro: com o Windows no claro, as duas trocas seguidas
+  // se anulam antes do evento change do matchMedia e a interface não informa tema nenhum.
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains('dark'))).toBe(true)
+  await page.emulateMedia({ colorScheme: 'light' })
   const normal = '#f6f7f9/#15171b'
   // Fundo e símbolos claros misturados com preto a 50%, como o véu bg-black/50 dos diálogos.
   const dimmed = '#7b7c7d/#0b0c0e'
