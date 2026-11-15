@@ -35,7 +35,6 @@ async function open(program: string, cols: number): Promise<{ terminals: Termina
   let output = ''
   const terminals = new Terminals({ onData: (_id, data) => { output += data }, onExit: () => {} }, process.execPath, [script])
   opened.push(terminals)
-  terminals.setMirroring(true)
   const id = randomUUID()
   terminals.spawn(id, dir, cols, 10)
   await expect.poll(() => output.includes('PRONTO;'), { timeout: 15000 }).toBe(true)

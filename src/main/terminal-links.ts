@@ -7,18 +7,31 @@ export interface ResolvedLink {
   line: number | null
 }
 
+const insideRel = (root: string, absolute: string): string | null => {
+  const rel = relative(root, absolute)
+  return !rel || rel.startsWith('..') || isAbsolute(rel) ? null : rel
+}
+
+const isFile = async (absolute: string): Promise<boolean> => {
+  try {
+    return (await stat(absolute)).isFile()
+  } catch {
+    return false
+  }
+}
+
 // Só vira link o arquivo que existe dentro do projeto; caminho fora dele (ou pasta) fica como texto comum.
-export async function resolveTerminalLink(root: string, text: string): Promise<ResolvedLink | null> {
+// dir: pasta do terminal (relativa ao projeto). O que ele imprime é relativo a ela; o que não existir lá ainda pode
+// ser relativo à raiz (o agente costuma citar caminhos a partir dela).
+export async function resolveTerminalLink(root: string, text: string, dir?: string): Promise<ResolvedLink | null> {
   const { path, line } = splitLineSuffix(text.trim())
   if (!path) return null
   const projectRoot = resolve(root)
-  const absolute = isAbsolute(path) ? resolve(path) : resolve(projectRoot, path)
-  const rel = relative(projectRoot, absolute)
-  if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null
-  try {
-    if (!(await stat(absolute)).isFile()) return null
-  } catch {
-    return null
+  const bases = isAbsolute(path) || !dir ? [projectRoot] : [resolve(projectRoot, dir), projectRoot]
+  for (const base of bases) {
+    const absolute = resolve(base, path)
+    const rel = insideRel(projectRoot, absolute)
+    if (rel !== null && (await isFile(absolute))) return { rel, line }
   }
-  return { rel, line }
+  return null
 }

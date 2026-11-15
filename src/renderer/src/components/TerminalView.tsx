@@ -12,9 +12,11 @@ import { currentTerminalLook, onThemeChange } from '@/lib/terminal-theme'
 import { TERMINAL_FONT } from '@shared/state'
 import { cn } from '@/lib/utils'
 import { FILE_MIME } from '@/lib/drag'
+import { PATHS_MIME, terminalDropText, treeDragPaths } from '@/lib/terminal-drop'
 import { isCopiedPath } from '@/lib/copied-path'
 import { findPathCandidates } from '@shared/terminal-links'
 import { DESKTOP, type MobileDevice, type TerminalSizeEvent } from '@shared/mobile'
+import { SnapshotGate } from '@shared/terminal-replay'
 import { Button } from '@/brand/Button'
 
 const cssVar = (name: string): string =>
@@ -80,9 +82,12 @@ interface Props {
   fontSize: number
   projectId: string
   onOpenPath(rel: string, line: number | null): void
+  // O pty desta aba sobreviveu à interface recarregada: a tela vem inteira do main, e o histórico salvo em disco
+  // (de antes da queda, do mesmo processo) repetiria o que ela já tem.
+  reattach?: boolean
 }
 
-export function TerminalView({ id, visible, onTitle, onReady, fontSize: requestedFontSize, projectId, onOpenPath }: Props): React.JSX.Element {
+export function TerminalView({ id, visible, onTitle, onReady, fontSize: requestedFontSize, projectId, onOpenPath, reattach = false }: Props): React.JSX.Element {
   // Tamanho indefinido faz o xterm medir a célula errado (texto minúsculo e espaçado); nunca repassa isso.
   const fontSize = Number.isFinite(requestedFontSize) ? requestedFontSize : TERMINAL_FONT.default
   const containerRef = useRef<HTMLDivElement>(null)
@@ -95,6 +100,7 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
   onReadyRef.current = onReady
   const onOpenPathRef = useRef(onOpenPath)
   onOpenPathRef.current = onOpenPath
+  const reattachRef = useRef(reattach)
   // Celular usando o terminal: o pty está no tamanho dele e a janela só mostra, sem refazer o fit.
   const [phone, setPhone] = useState<string | null>(null)
   const phoneName = useDeviceName(phone)
@@ -185,7 +191,7 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
     const resolveCached = (text: string): Promise<{ rel: string; line: number | null } | null> => {
       const hit = resolved.get(text)
       if (hit && Date.now() - hit.at < LINK_CACHE_MS) return hit.value
-      const value = window.kora.resolveTerminalLink(projectId, text).catch(() => null)
+      const value = window.kora.resolveTerminalLink(projectId, text, id).catch(() => null)
       resolved.set(text, { at: Date.now(), value })
       return value
     }
@@ -214,16 +220,14 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
       }
     })
 
-    // Até a foto da tela chegar, a saída espera: aba aberta pelo celular já tem conteúdo que a janela não viu.
-    let hydrated = false
-    const queued: { data: string; sequence?: number }[] = []
-    const unsubscribe = terminalBus.subscribe(id, (data, sequence) => {
-      if (hydrated) term.write(data)
-      else queued.push({ data, sequence })
-    })
+    // Até a foto da tela chegar, a saída espera: aba aberta pelo celular, ou cujo processo sobreviveu à queda da
+    // interface, já tem conteúdo que esta janela não viu.
+    const gate = new SnapshotGate((data) => term.write(data))
+    const unsubscribe = terminalBus.subscribe(id, (data, sequence) => gate.push(data, sequence))
     const input = term.onData((data) => window.kora.writeTerminal(id, data))
+    let atSnapshotSize = false
     const resize = term.onResize(({ cols, rows }) => {
-      if (!remoteRef.current) window.kora.resizeTerminal(id, cols, rows)
+      if (!remoteRef.current && !atSnapshotSize) window.kora.resizeTerminal(id, cols, rows)
     })
     const title = term.onTitleChange((raw) => {
       const t = meaningfulTitle(raw)
@@ -288,13 +292,15 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
       if (disposed) return
       const snapshot = current?.snapshot ?? null
       if (current?.size && current.size.holder !== DESKTOP) applySize(current.size)
-      else if (snapshot) term.resize(snapshot.cols, snapshot.rows)
-      if (snapshot) term.write(snapshot.data)
-      for (const chunk of queued) {
-        if (!snapshot || chunk.sequence === undefined || chunk.sequence > snapshot.sequence) term.write(chunk.data)
+      else if (snapshot) {
+        // A foto é interpretada no tamanho em que foi tirada, mas esse tamanho não vai para o pty: o ConPTY
+        // redesenharia a tela nele e, com a janela já de volta ao tamanho dela, as linhas a mais iriam para o
+        // histórico repetidas. O pty recebe só o tamanho do fit logo abaixo.
+        atSnapshotSize = true
+        term.resize(snapshot.cols, snapshot.rows)
+        atSnapshotSize = false
       }
-      queued.length = 0
-      hydrated = true
+      gate.release(snapshot)
       if (snapshot && !remoteRef.current) fit.fit()
     }
     const finishRestore = (saved: string | null): void => {
@@ -307,7 +313,8 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
     }
     // O spawn espera o histórico: assim o shell novo imprime depois do divisor, não no meio dele.
     const restoreTimer = setTimeout(() => finishRestore(null), RESTORE_TIMEOUT_MS)
-    void window.kora.loadScrollback(id).then(finishRestore, () => finishRestore(null))
+    if (reattachRef.current) finishRestore(null)
+    else void window.kora.loadScrollback(id).then(finishRestore, () => finishRestore(null))
     const observer = new ResizeObserver(() => {
       if (container.offsetWidth === 0 || container.offsetHeight === 0) return
       syncSize()
@@ -381,12 +388,12 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
   // Terminal faz; vários viram caminhos separados por espaço. Claude/Codex anexam imagem a partir do caminho.
   const onDrop = (event: React.DragEvent): void => {
     const paths = event.dataTransfer.types.includes(FILE_MIME)
-      ? [event.dataTransfer.getData('text/plain')]
+      ? treeDragPaths(event.dataTransfer.getData(PATHS_MIME), event.dataTransfer.getData('text/plain'))
       : [...event.dataTransfer.files].map((file) => window.kora.pathForFile(file))
-    const pasted = paths.filter(Boolean).map((path) => (path.includes(' ') ? `"${path}"` : path))
-    if (pasted.length === 0) return
+    const pasted = terminalDropText(paths)
+    if (!pasted) return
     event.preventDefault()
-    termRef.current?.paste(`${pasted.join(' ')} `)
+    termRef.current?.paste(pasted)
     termRef.current?.focus()
   }
 

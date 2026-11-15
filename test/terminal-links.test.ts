@@ -43,6 +43,24 @@ describe('resolução no main', () => {
     expect(await resolveTerminalLink(root, join(root, 'src', 'a.ts'))).toEqual({ rel: join('src', 'a.ts'), line: null })
   })
 
+  it('terminal numa subpasta: relativo vale primeiro a partir dela, depois da raiz', async () => {
+    mkdirSync(join(root, 'pacote', 'src'), { recursive: true })
+    writeFileSync(join(root, 'pacote', 'src', 'a.ts'), 'x')
+    writeFileSync(join(root, 'pacote', 'leia.md'), 'x')
+    expect(await resolveTerminalLink(root, 'src/a.ts:3', 'pacote')).toEqual({ rel: join('pacote', 'src', 'a.ts'), line: 3 })
+    expect(await resolveTerminalLink(root, './leia.md', 'pacote')).toEqual({ rel: join('pacote', 'leia.md'), line: null })
+    expect(await resolveTerminalLink(root, '../src/a.ts', 'pacote')).toEqual({ rel: join('src', 'a.ts'), line: null })
+    expect(await resolveTerminalLink(root, 'pacote/leia.md', 'pacote')).toEqual({ rel: join('pacote', 'leia.md'), line: null })
+    expect(await resolveTerminalLink(root, 'leia.md', '')).toBeNull()
+    expect(await resolveTerminalLink(root, 'src/b.ts', 'pacote')).toBeNull()
+  })
+
+  it('pasta do terminal fora do projeto não abre caminho para fora', async () => {
+    const name = outside.split(/[\\/]/).pop()!
+    expect(await resolveTerminalLink(root, 'segredo.txt', '../' + name)).toBeNull()
+    expect(await resolveTerminalLink(root, 'segredo.txt', outside)).toBeNull()
+  })
+
   it('não vira link: arquivo inexistente, pasta, fora do projeto', async () => {
     expect(await resolveTerminalLink(root, 'src/b.ts')).toBeNull()
     expect(await resolveTerminalLink(root, 'src')).toBeNull()

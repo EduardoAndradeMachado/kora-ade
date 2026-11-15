@@ -6,6 +6,16 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { startupCommand, type AgentKind, type Startup } from '../shared/agent'
 import type { TerminalSnapshot } from '../shared/mobile'
 import { terminateIfStillRunning } from './processes'
+import { resolveInside } from './files'
+
+// Pasta inicial do terminal aberto por "Abrir no terminal integrado" (relativa ao projeto). Ela pode ter sumido
+// desde que a aba foi aberta; aí o terminal volta para a raiz do projeto em vez de a aba não abrir mais.
+// Fora do projeto não abre: o caminho vem do renderer e do estado salvo.
+export function terminalCwd(root: string, dir: string | undefined): string {
+  if (!dir) return root
+  const target = resolveInside(root, dir)
+  return existsSync(target) && statSync(target).isDirectory() ? target : root
+}
 
 // Se o Kora for aberto de dentro de outro agente ou do electron-vite, o shell herdaria esses
 // marcadores: NO_COLOR apaga as cores, CLAUDE_CODE_CHILD_SESSION faz o Claude não salvar a sessão
@@ -46,8 +56,8 @@ export interface TerminalEvents {
   onSpawn?(id: string, pid: number): void
 }
 
-// Cópia da tela no main, para o celular abrir a aba já no estado atual. Só existe com a conexão do celular
-// ligada: interpretar toda a saída custa CPU no processo principal.
+// Cópia da tela no main, de todo terminal: é dela que a interface recarregada depois de uma queda e o celular
+// tiram a tela atual. Custa a memória de mais um buffer de histórico por aba, no processo principal.
 interface Mirror {
   proc: pty.IPty
   terminal: Terminal
@@ -65,10 +75,51 @@ const CODEX_SUBMIT_DELAY_MS = 400
 const IMAGE_PASTE_GAP_MS = 250
 const SHELL_EXIT_GRACE_MS = 3000
 
+interface KittyKeyboardState {
+  flags: number
+  mainFlags: number
+  altFlags: number
+  mainStack: number[]
+  altStack: number[]
+}
+
+// A API pública do xterm não expõe as flags do protocolo de teclado kitty (o próprio SerializeAddon lê o _core
+// para a região de rolagem). Formato diferente numa versão nova do xterm: sem flags, e o teste de reconexão acusa.
+function kittyKeyboardState(terminal: Terminal): KittyKeyboardState | null {
+  const state = (terminal as unknown as { _core?: { coreService?: { kittyKeyboard?: Partial<KittyKeyboardState> } } })._core
+    ?.coreService?.kittyKeyboard
+  const isFlags = (value: unknown): value is number => typeof value === 'number'
+  const isStack = (value: unknown): value is number[] => Array.isArray(value) && value.every(isFlags)
+  if (!state || !isFlags(state.flags) || !isFlags(state.mainFlags) || !isFlags(state.altFlags)) return null
+  if (!isStack(state.mainStack) || !isStack(state.altStack)) return null
+  return state as KittyKeyboardState
+}
+
+// Empilhar guarda as flags atuais e liga as novas: começa pela base da pilha e termina nas atuais.
+function rebuildFlags(stack: number[], current: number): string {
+  const [base, ...rest] = [...stack, current]
+  return `\x1b[=${base};1u${rest.map((flags) => `\x1b[>${flags}u`).join('')}`
+}
+
+// O SerializeAddon não leva as flags do teclado kitty. Sem elas a janela reconectada volta com flags 0 e o
+// Shift+Enter do Claude Code passa a enviar a mensagem. Cada tela (normal e alternativa) tem flags e pilha
+// próprias: a alternativa é montada entrando e saindo dela no terminal ainda vazio, e a troca de tela que a foto
+// traz depois (quando a alternativa está ativa) é que a reativa.
+function keyboardPrelude(terminal: Terminal): string {
+  const state = kittyKeyboardState(terminal)
+  if (!state) return ''
+  const onAlt = terminal.buffer.active.type === 'alternate'
+  const main = { stack: state.mainStack, current: onAlt ? state.mainFlags : state.flags }
+  const alt = { stack: state.altStack, current: onAlt ? state.flags : state.altFlags }
+  let prelude = ''
+  if (alt.current || alt.stack.length) prelude += `\x1b[?1049h${rebuildFlags(alt.stack, alt.current)}\x1b[?1049l`
+  if (main.current || main.stack.length) prelude += rebuildFlags(main.stack, main.current)
+  return prelude
+}
+
 export class Terminals {
   private readonly sessions = new Map<string, pty.IPty>()
   private readonly mirrors = new Map<string, Mirror>()
-  private mirroring = false
   private sequence = 0
 
   constructor(
@@ -94,7 +145,7 @@ export class Terminals {
       env: terminalEnv(process.env)
     })
     this.sessions.set(id, proc)
-    if (this.mirroring) this.mirror(id, proc, cols, rows)
+    this.mirror(id, proc, cols, rows)
     this.events.onSpawn?.(id, proc.pid)
     proc.onData((data) => {
       const sequence = ++this.sequence
@@ -110,14 +161,16 @@ export class Terminals {
     })
   }
 
-  setMirroring(on: boolean): void {
-    this.mirroring = on
-    if (!on) for (const id of this.mirrors.keys()) this.dropMirror(id)
-    else for (const [id, proc] of this.sessions) if (!this.mirrors.has(id)) this.mirror(id, proc, proc.cols, proc.rows)
-  }
-
   private mirror(id: string, proc: pty.IPty, cols: number, rows: number): void {
-    const terminal = new Terminal({ cols, rows, scrollback: 5000, allowProposedApi: true, windowsPty: { backend: 'conpty' } })
+    // Mesmo histórico e mesmo protocolo de teclado da janela (TerminalView): a tela reconstruída é a que ela tinha.
+    const terminal = new Terminal({
+      cols,
+      rows,
+      scrollback: 5000,
+      allowProposedApi: true,
+      windowsPty: { backend: 'conpty' },
+      vtExtensions: { kittyKeyboard: true }
+    })
     const serialize = new SerializeAddon()
     terminal.loadAddon(serialize as unknown as ITerminalAddon)
     // A janela do PC e a do celular contam emoji como duas colunas (Unicode 11). Contando uma, o "vá para a
@@ -144,7 +197,8 @@ export class Terminals {
       mirror.terminal.write('', () => {
         if (!mirror.pending.delete(resolve)) return
         const { terminal } = mirror
-        resolve({ data: mirror.serialize.serialize(), sequence: mirror.sequence, cols: terminal.cols, rows: terminal.rows })
+        const data = keyboardPrelude(terminal) + mirror.serialize.serialize()
+        resolve({ data, sequence: mirror.sequence, cols: terminal.cols, rows: terminal.rows })
       })
     })
   }

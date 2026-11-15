@@ -33,7 +33,6 @@ it('a foto que o celular recebe guarda o emoji no lugar em que o PC o desenha', 
   let output = ''
   const terminals = new Terminals({ onData: (_id, data) => { output += data }, onExit: () => {} }, process.execPath, [script])
   opened.push(terminals)
-  terminals.setMirroring(true)
   const id = randomUUID()
   terminals.spawn(id, dir, 40, 5)
   await expect.poll(() => output.includes('PRONTO'), { timeout: 15000 }).toBe(true)
