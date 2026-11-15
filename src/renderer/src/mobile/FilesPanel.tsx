@@ -6,21 +6,27 @@ import { GIT_STYLE, gitMaps, gitPathKey } from '@/lib/git-decorations'
 import { api } from './api'
 import { SkeletonRows } from './Skeleton'
 import { useLongPress } from './longPress'
-import { FileActions } from './FileActions'
+import { FileActions, type EntryChange } from './FileActions'
+import { onFilesChanged, touchesDir } from './file-events'
 import { download, onDownloaded } from './downloads'
 
-const FILE_ICON: Record<ReturnType<typeof viewerFor>, IconName> = { markdown: 'arquivo', code: 'codigo', pdf: 'pdf', image: 'imagem', external: 'arquivo' }
+const FILE_ICON: Record<ReturnType<typeof viewerFor>, IconName> = { markdown: 'arquivo', code: 'codigo', pdf: 'pdf', image: 'imagem', media: 'arquivo', notebook: 'codigo', sheet: 'codigo', external: 'arquivo' }
 
 // Uma pasta por vez, com as cores do git do explorador do PC; tocar na pasta entra nela, no arquivo abre.
-export function FilesPanel({ projectId, dir, onFailed, onDir, onFile, selected, onSelect }: {
+// connection: muda a cada vez que a ligação com o PC volta; o aviso de mudança perdido no meio vira uma releitura.
+export function FilesPanel({ projectId, dir, connection, onFailed, onDir, onFile, selected, onSelect, onChanged }: {
   projectId: string
   dir: string
+  connection: number
   onFailed(): void
   onDir(dir: string): void
   onFile(path: string): void
   selected: { path: string; name: string; isDir: boolean } | null
   onSelect(entry: { path: string; name: string; isDir: boolean } | null): void
+  // Item renomeado, movido ou apagado por aqui: o rascunho e a pasta lembrada acompanham.
+  onChanged(change: EntryChange): void
 }): React.JSX.Element {
+  const [creating, setCreating] = useState<'file' | 'dir' | null>(null)
   const [listing, setListing] = useState<MobileDirectory | null>(null)
   const [gitFiles, setGitFiles] = useState<MobileGit['files']>([])
   const [error, setError] = useState<string | null>(null)
@@ -70,17 +76,47 @@ export function FilesPanel({ projectId, dir, onFailed, onDir, onFile, selected, 
   }, [projectId])
   useEffect(load, [load])
   useEffect(loadGit, [loadGit])
+  const first = useRef(true)
+  useEffect(() => {
+    if (first.current) { first.current = false; return }
+    load()
+    loadGit()
+  }, [connection])
+  // O status do git muda a cada arquivo salvo: com o agente gravando sem parar, a releitura espera a rajada passar.
+  useEffect(() => {
+    let gitTimer: ReturnType<typeof setTimeout> | undefined
+    const stop = onFilesChanged((event) => {
+      if (touchesDir(event, projectId, dir)) load()
+      if (event.projectId === projectId && (event.git || event.rescan)) {
+        clearTimeout(gitTimer)
+        gitTimer = setTimeout(loadGit, 800)
+      }
+    })
+    return () => { stop(); clearTimeout(gitTimer) }
+  }, [projectId, dir, load, loadGit])
+  const changed = (change: EntryChange, fromSheet: boolean): void => {
+    if (fromSheet) onSelect(null)
+    else setCreating(null)
+    onChanged(change)
+    load()
+    loadGit()
+    if (!fromSheet && change.kind === 'created' && !change.isDir) onFile(change.path)
+  }
+  const siblings = listing?.entries.map((entry) => ({ name: entry.name, isDir: entry.isDir })) ?? []
   const git = useMemo(() => gitMaps(gitFiles), [gitFiles])
   const parts = dir ? dir.split(/[\\/]/) : []
   return <div className={`files-panel ${loading && listing ? 'refreshing' : ''}`}>
     <nav className="files-path" aria-label="Pasta atual">
       <button onClick={() => onDir('')}>Raiz</button>
       {parts.map((part, index) => <Fragment key={index}><span aria-hidden="true">/</span><button onClick={() => onDir(parts.slice(0, index + 1).join('/'))}>{part}</button></Fragment>)}
+      <button className="icon-button files-new" aria-label="Novo arquivo" disabled={!listing} onClick={() => setCreating('file')}><Icon name="novoArquivo" /></button>
+      <button className="icon-button" aria-label="Nova pasta" disabled={!listing} onClick={() => setCreating('dir')}><Icon name="novoProjeto" /></button>
       <button className="icon-button" aria-label="Atualizar arquivos" disabled={loading} onClick={() => { load(); loadGit() }}><Icon name="atualizar" /></button>
     </nav>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status">{notice}</p>}
-    {selected && <FileActions name={selected.name} path={selected.path} directory={selected.isDir} busy={transferring} onClose={() => onSelect(null)} onAction={(action) => void transfer(action)} />}
+    {selected && <FileActions projectId={projectId} name={selected.name} path={selected.path} directory={selected.isDir} busy={transferring} siblings={siblings} onClose={() => onSelect(null)} onAction={(action) => void transfer(action)} onChanged={(change) => changed(change, true)} />}
+    {creating && <FileActions projectId={projectId} name={parts.at(-1) ?? 'Raiz do projeto'} path={dir} directory busy={false} contents={siblings} initial={creating} onClose={() => setCreating(null)} onAction={() => {}} onChanged={(change) => changed(change, false)} />}
     {!listing && !error && <SkeletonRows label="Abrindo a pasta…" row="file-row" count={9} />}
     {listing?.entries.length === 0 && <p className="empty-copy">Pasta vazia.</p>}
     {listing?.entries.map((entry) => {

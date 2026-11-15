@@ -8,12 +8,16 @@ export interface MobileRoute {
   newTab?: string
   actions?: string
   projectActions?: string
+  // Opções da categoria; id null abre a folha só para criar uma categoria nova.
+  groupActions?: { id: string | null }
   rename?: string
   menu?: import('./CopyActions').CopyMenu
   pc?: 'usage' | 'settings'
   // Arquivos do projeto: files é a pasta aberta ('' é a raiz); file, o arquivo aberto por cima dela.
   files?: string
   file?: string
+  // Linha (base 1) onde abrir o arquivo: a do link arquivo:linha tocado no terminal.
+  fileLine?: number
   fileOptions?: { path: string; name: string; isDir: boolean }
   // Métricas do projeto: a sessão de tabId (a aba de onde veio) ou, sem ela, a primeira aba de agente do projeto.
   metrics?: { tabId: string | null }

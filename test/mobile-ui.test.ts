@@ -37,7 +37,6 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     onData: (id, data, sequence) => { desktop += data; mobile.publishData(id, data, sequence) },
     onExit: () => mobile.publishState()
   })
-  terminals.setMirroring(true)
   const write = terminals.write.bind(terminals)
   terminals.write = (id, data) => { written.push({ id, data }); write(id, data) }
   const submitted: { text: string; images: string[]; files: string[] }[] = []
@@ -397,14 +396,15 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     // Suspender e fechar ficam no toque longo da lista (o clique direito, no navegador); a conversa só renomeia.
     await page.getByRole('button', { name: 'Voltar', exact: true }).click()
     await page.locator('.session-row').first().click({ button: 'right' })
-    await page.getByRole('button', { name: 'Suspender sessão', exact: true }).click()
+    // Aba de terminal comum (sem agente): encerrar e abrir de novo, não suspender/continuar conversa.
+    await page.getByRole('button', { name: 'Encerrar terminal', exact: true }).click()
     await expect.poll(() => terminals.pids().has(tab.id)).toBe(false)
     await page.locator('.session-row').first().click()
-    await browserExpect(page.getByRole('heading', { name: 'Sessão suspensa' })).toBeVisible()
-    await page.getByRole('button', { name: 'Continuar conversa', exact: true }).click()
+    await browserExpect(page.getByRole('heading', { name: 'Terminal encerrado' })).toBeVisible()
+    await page.getByRole('button', { name: 'Abrir terminal', exact: true }).click()
     await browserExpect(page.locator('.xterm-screen')).toBeVisible()
     await page.locator('.session-name').click()
-    await browserExpect(page.getByRole('dialog').getByRole('button', { name: 'Suspender sessão', exact: true })).toHaveCount(0)
+    await browserExpect(page.getByRole('dialog').getByRole('button', { name: 'Encerrar terminal', exact: true })).toHaveCount(0)
     await page.getByRole('textbox', { name: 'Nome da aba', exact: true }).fill('Sessão do celular')
     await page.getByRole('button', { name: 'Salvar nome', exact: true }).click()
     await browserExpect(page.locator('.session-name')).toHaveText('Sessão do celular')
@@ -428,7 +428,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.locator('.tree-project-name').filter({ hasText: 'Projeto de validação' }).click({ button: 'right' })
     await page.getByRole('button', { name: 'Copiar caminho', exact: true }).click()
     expect(await page.evaluate(() => (window as unknown as { __copiado: string[] }).__copiado)).toEqual([dir, 'chave-menu'])
-    await page.goBack()
+    // Copiar fecha a folha sozinho.
     await browserExpect(page.getByRole('dialog')).toHaveCount(0)
     await page.evaluate(() => { delete (window as { KoraApp?: unknown }).KoraApp })
 
@@ -446,13 +446,13 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     }
     await hold()
     await browserExpect(page.getByRole('dialog').getByRole('heading', { name: 'Sessão do celular' })).toBeVisible()
-    await page.getByRole('button', { name: 'Suspender sessão', exact: true }).click()
+    await page.getByRole('button', { name: 'Encerrar terminal', exact: true }).click()
     await browserExpect(page.getByRole('dialog')).toHaveCount(0)
     await browserExpect(page.getByRole('heading', { name: 'Seus projetos' })).toBeVisible()
-    await browserExpect(treeTab).toContainText('Suspensa')
+    await browserExpect(treeTab).toContainText('Encerrado')
     expect(terminals.pids().has(tab.id)).toBe(false)
     await hold()
-    await page.getByRole('button', { name: 'Continuar sessão', exact: true }).click()
+    await page.getByRole('button', { name: 'Abrir terminal', exact: true }).click()
     await browserExpect(treeTab).toContainText('Aberta')
     expect(terminals.pids().has(tab.id)).toBe(true)
     // Recolher no celular vale só para ele e continua assim depois de reabrir o app.
@@ -577,7 +577,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.getByRole('button', { name: 'Voltar', exact: true }).click()
     await page.locator('.tree-tab').filter({ hasText: 'Sessão do celular' }).click({ button: 'right' })
     await page.getByRole('button', { name: 'Fechar aba', exact: true }).click()
-    await browserExpect(page.getByText('Fechar esta aba? A conversa salva continua no PC.', { exact: true })).toBeVisible()
+    await browserExpect(page.getByText('Fechar este terminal? O que estiver rodando nele é encerrado.', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Fechar aba', exact: true }).click()
     await browserExpect(page.getByRole('dialog')).toHaveCount(0)
     await page.locator('.tree-project-name').filter({ hasText: 'Projeto de validação' }).click()
@@ -643,6 +643,9 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     expect(readFileSync(note, 'utf8')).toBe('o agente escreveu isto')
     await page.screenshot({ path: join(artifacts, 'arquivo-conflito-350.png') })
     await page.getByRole('button', { name: 'Salvar por cima', exact: true }).click()
+    // Gravar por cima do que o agente escreveu pede confirmação: até ela, o disco fica como está.
+    expect(readFileSync(note, 'utf8')).toBe('o agente escreveu isto')
+    await page.getByRole('button', { name: 'Confirmar e salvar', exact: true }).click()
     await browserExpect(page.locator('.file-notice[role="status"]')).toContainText('Salvo no PC.')
     expect(readFileSync(note, 'utf8')).toBe('# Título da nota\r\nlinha do PC\r\nlinha do celular!')
     // Sai sem salvar, o agente muda o arquivo, e ao voltar o rascunho volta avisando do conflito antes de salvar.
@@ -654,6 +657,7 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.locator('.file-row').filter({ hasText: 'nota.md' }).click()
     await browserExpect(page.locator('.file-notice[role="alert"]')).toContainText('mudou no PC depois delas')
     await page.getByRole('button', { name: 'Recarregar do PC', exact: true }).click()
+    await page.getByRole('button', { name: 'Descartar e recarregar', exact: true }).click()
     await browserExpect(page.locator('.markdown-view, .cm-content').first()).toContainText('o agente mudou de novo')
     expect(readFileSync(note, 'utf8')).toBe('o agente mudou de novo')
     // Editar → Ver → Editar continua com o que foi digitado, em vez de voltar ao texto de quando abriu.
@@ -680,6 +684,24 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await browserExpect(page.locator('.cm-content')).toContainText('o agente mudou de novo A B')
     await page.getByRole('button', { name: 'Salvar', exact: true }).click()
     await expect.poll(() => readFileSync(note, 'utf8')).toBe('o agente mudou de novo A B')
+    // Sem rascunho, a versão que o agente gravou vem sozinha; quem digita enquanto ela está a caminho fica com o que
+    // digitou e recebe o aviso de conflito, em vez de ver o texto trocado por baixo.
+    const reloading: import('@playwright/test').Route[] = []
+    await page.route(/\/api\/file\?/, (route) => (reloading.length === 0 ? void reloading.push(route) : route.continue()))
+    writeFileSync(note, 'versão do agente durante a leitura')
+    mobile.publishFiles({ projectId: 'p', dirs: ['docs'], git: false, rescan: false, files: [join('docs', 'nota.md')] })
+    await expect.poll(() => reloading.length).toBe(1)
+    await page.locator('.cm-content').click()
+    await page.keyboard.press('Control+End')
+    await page.keyboard.type(' C')
+    await reloading[0]!.continue()
+    await page.unroute(/\/api\/file\?/)
+    await browserExpect(page.locator('.file-notice')).toContainText('mudou no PC enquanto você editava')
+    await browserExpect(page.locator('.cm-content')).toContainText('o agente mudou de novo A B C')
+    expect(readFileSync(note, 'utf8')).toBe('versão do agente durante a leitura')
+    await page.getByRole('button', { name: 'Recarregar do PC', exact: true }).click()
+    await page.getByRole('button', { name: 'Descartar e recarregar', exact: true }).click()
+    await browserExpect(page.locator('.cm-content')).toContainText('versão do agente durante a leitura')
     await page.goBack()
     await page.locator('.file-row').filter({ hasText: 'pagina.html' }).click()
     const frame = page.frameLocator('iframe.html-view')

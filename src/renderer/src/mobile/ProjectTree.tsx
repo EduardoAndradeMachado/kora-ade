@@ -6,7 +6,7 @@ import { descendantIds } from '@shared/groups'
 import { agentLabel } from '@/components/AgentIcon'
 import { MobileProjectAvatar } from './MobileProjectAvatar'
 import { TabIcon } from './NewTabSheet'
-import { type CopyMenu } from './CopyActions'
+import { projectMatcher } from './project-search'
 import { useLongPress } from './longPress'
 
 // Abrir e recolher no celular vale só para ele e sobrevive a sair da lista e reabrir o app; o que nunca foi mexido
@@ -20,9 +20,10 @@ const savedExpanded = (): Record<string, boolean> => {
   } catch { return {} }
 }
 
-export const tabStatus = (tab: MobileTab, alert = false): string => !tab.live ? 'Suspensa' : tab.activity === 'working' ? 'Trabalhando' : alert ? 'Esperando você' : 'Aberta'
+// Terminal comum não tem conversa para suspender: parado, ele está encerrado, como diz o menu da aba.
+export const tabStatus = (tab: MobileTab, alert = false): string => !tab.live ? (tab.agent ? 'Suspensa' : 'Encerrado') : tab.activity === 'working' ? 'Trabalhando' : alert ? 'Esperando você' : 'Aberta'
 
-export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewTab, onTab, onTabActions, onProjectActions, onRelocate, onActions }: {
+export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewTab, onTab, onTabActions, onProjectActions, onRelocate, onGroupActions }: {
   state: MobileState
   alerted: ReadonlySet<string>
   search: string
@@ -33,7 +34,7 @@ export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewT
   onTab(tab: MobileTab): void
   onTabActions(tab: MobileTab): void
   onRelocate(id: string): void
-  onActions(menu: CopyMenu): void
+  onGroupActions(id: string): void
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(() => remembered ?? savedExpanded())
   useEffect(() => {
@@ -41,8 +42,8 @@ export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewT
     try { localStorage.setItem(EXPANDED_KEY, JSON.stringify(expanded)) } catch { /* sem armazenamento, vale até fechar o app */ }
   }, [expanded])
   const longPress = useLongPress()
-  const query = search.trim().toLocaleLowerCase('pt-BR')
-  const matches = (project: Project): boolean => !query || `${project.name} ${project.path}`.toLocaleLowerCase('pt-BR').includes(query) || state.tabs.some((tab) => tab.projectId === project.id && tab.title.toLocaleLowerCase('pt-BR').includes(query))
+  const query = search.trim()
+  const matches = projectMatcher(state, search)
   const projectRow = (project: Project): React.JSX.Element | null => {
     if (!matches(project)) return null
     const tabs = state.tabs.filter((tab) => tab.projectId === project.id)
@@ -77,7 +78,7 @@ export function ProjectTree({ state, alerted, search, onProject, onFiles, onNewT
     if (query && !hasMatches(group)) return null
     const open = query ? true : expanded[group.id] ?? !group.collapsed
     return <section className="tree-group" key={group.id}>
-      <button className={`group-heading ${open ? 'expanded' : ''}`} aria-expanded={open} {...longPress(() => onActions({ title: group.name, values: [{ label: 'Copiar ID da pasta', text: group.id }] }))} onClick={() => setExpanded((previous) => ({ ...previous, [group.id]: !open }))}><Icon name="expandir" /><span>{group.name}</span><span className="tree-count">{projectsIn(group.id)}</span></button>
+      <button className={`group-heading ${open ? 'expanded' : ''}`} aria-expanded={open} {...longPress(() => onGroupActions(group.id))} onClick={() => setExpanded((previous) => ({ ...previous, [group.id]: !open }))}><Icon name="expandir" /><span>{group.name}</span><span className="tree-count">{projectsIn(group.id)}</span></button>
       {open && <div className="group-content">{state.projects.filter((project) => !project.hidden && project.groupId === group.id).map(projectRow)}{state.groups.filter((child) => child.parentId === group.id).map(groupRow)}</div>}
     </section>
   }

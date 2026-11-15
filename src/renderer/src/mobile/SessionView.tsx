@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { DESKTOP, type MobileCommand, type MobileTab, type TerminalSizeEvent, type TerminalSnapshot } from '@shared/mobile'
+import { DESKTOP, SEND_TEXT_MAX, type MobileCommand, type MobileTab, type TerminalSizeEvent, type TerminalSnapshot } from '@shared/mobile'
 import { Icon } from '@/brand/icons'
 import { currentTerminalLook, onThemeChange } from '@/lib/terminal-theme'
 import { api, koraApp } from './api'
@@ -11,6 +11,7 @@ import { canRecord, discardAudio, onNativeAudio, recoverAudio, startRecording, s
 import { VoiceMeter } from './VoiceMeter'
 import { SkeletonTerminal } from './Skeleton'
 import { targetAt } from './terminalTap'
+import { firstVisibleRow } from './terminalWindow'
 
 // Toque curto e parado é toque em link; mais longo é seleção de texto, e com o dedo andando é rolagem.
 const TAP_MS = 450
@@ -65,7 +66,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   feed: React.MutableRefObject<SessionFeed>
   command(command: MobileCommand): Promise<unknown>
   onError(message: string): void
-  onOpenFile(path: string): void
+  onOpenFile(path: string, line?: number): void
   dictation: boolean
 }): React.JSX.Element {
   const openFile = useRef(onOpenFile)
@@ -153,6 +154,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
         const scale = mine ? 1 : Math.min(1, element.clientWidth / Math.max(1, screen.offsetWidth))
         term.element.style.transformOrigin = '0 0'
         term.element.style.transform = scale < 1 ? `scale(${scale})` : ''
+        schedulePlace()
       })
     }
     const applySize = (event: TerminalSizeEvent): void => {
@@ -180,19 +182,44 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     feed.current.size = applySize
 
     // O terminal é o mesmo no PC: mudar de tamanho redesenha o agente e mexe na janela do PC. Teclado e a fileira do
-    // ⋯ só encolhem a altura por um tempo, então o tamanho fica o da maior altura nesta largura e a área mostra a
-    // parte de baixo (cursor e campo do agente) recortando as linhas de cima. Largura nova (girar) redimensiona.
+    // ⋯ só encolhem a altura por um tempo, então o tamanho fica o da maior altura nesta largura e a área recorta a
+    // faixa de linhas em volta do cursor (firstVisibleRow). Largura nova (girar) redimensiona.
     const area = element.parentElement!
     let steady = { width: 0, height: 0, mount: 0 }
     let resizeTimer: ReturnType<typeof setTimeout> | undefined
+    let clipped = false
+    const placeClip = (): void => {
+      if (!clipped) return
+      const screen = term.element?.querySelector<HTMLElement>('.xterm-screen')
+      const box = screen?.getBoundingClientRect()
+      // Altura da linha como aparece, já com a redução do tamanho do PC.
+      const line = box && term.rows ? box.height / term.rows : 0
+      const inset = (steady.height - steady.mount) / 2
+      const room = area.clientHeight - 2 * inset
+      const fits = line ? Math.max(1, Math.floor(room / line)) : term.rows
+      const first = firstVisibleRow(term.buffer.active, term.rows, fits)
+      const lead = box ? box.top - element.getBoundingClientRect().top : 0
+      // No topo, a primeira linha encosta em cima; no meio ou no fim, a última da faixa encosta embaixo e a sobra
+      // mostra um pedaço da de cima, em vez de uma tira vazia.
+      const top = first === 0 ? inset - lead : inset + room - lead - (first + fits) * line
+      element.style.top = `${top}px`
+      element.style.height = `${steady.mount}px`
+    }
+    let placing = 0
+    const schedulePlace = (): void => {
+      if (!clipped || placing) return
+      placing = requestAnimationFrame(() => { placing = 0; if (!disposed) placeClip() })
+    }
+    const placeEvents = [term.onWriteParsed(schedulePlace), term.onScroll(schedulePlace), term.onResize(schedulePlace)]
     const observer = new ResizeObserver(() => {
       const width = area.clientWidth
       const height = area.clientHeight
       if (width === steady.width && height < steady.height) {
-        element.style.top = 'auto'
-        element.style.height = `${steady.mount}px`
+        clipped = true
+        placeClip()
         return
       }
+      clipped = false
       element.style.top = ''
       element.style.height = ''
       if (width === steady.width && height === steady.height) return
@@ -253,8 +280,11 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       const target = targetAt(buffer, term.cols, x, buffer.viewportY + row)
       if (!target) return
       if (target.kind === 'url') return openUrl(target.text)
-      void api<{ rel: string } | null>(`resolve-link?project=${encodeURIComponent(tab.projectId)}&text=${encodeURIComponent(target.text)}`)
-        .then((found) => { if (found && !disposed) openFile.current(found.rel) }, () => {})
+      const resolve = (text: string): Promise<{ rel: string; line: number | null } | null> =>
+        api(`resolve-link?project=${encodeURIComponent(tab.projectId)}&text=${encodeURIComponent(text)}`)
+      void resolve(target.text)
+        .then((found) => found ?? (target.alone ? resolve(target.alone) : null))
+        .then((found) => { if (found && !disposed) openFile.current(found.rel, found.line ?? undefined) }, () => {})
     }
     // O xterm chama preventDefault no toque, e aí o navegador não gera mousedown nem click: o toque é reconhecido pelos
     // eventos de ponteiro. O link OSC 8 só o xterm conhece; ele o ativa com o mouse passando por cima e clicando,
@@ -316,6 +346,8 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       disposed = true
       clearTimeout(resizeTimer)
       clearTimeout(wheelTimer)
+      cancelAnimationFrame(placing)
+      for (const event of placeEvents) event.dispose()
       element.removeEventListener('touchstart', touchStart, { capture: true })
       element.removeEventListener('touchmove', touchMove, { capture: true })
       element.removeEventListener('touchend', touchEnd, { capture: true })
@@ -454,6 +486,11 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   const submit = (): void => {
     const text = draft.trim()
     if ((!text && images.length === 0) || uploading) return
+    if (text.length > SEND_TEXT_MAX) {
+      const count = (n: number): string => n.toLocaleString('pt-BR')
+      setComposerError(`A mensagem tem ${count(text.length)} caracteres e o limite é ${count(SEND_TEXT_MAX)}. Tire ${count(text.length - SEND_TEXT_MAX)} para enviar.`)
+      return
+    }
     const sent = { text: draft, images }
     setComposerError(null)
     setSending(true)

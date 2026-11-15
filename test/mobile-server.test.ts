@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, statSync, utimesSync, writeFileSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, readFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { createServer, request, type Server } from 'node:http'
@@ -7,6 +7,7 @@ import { brotliDecompressSync, gunzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MobileServer } from '../src/main/mobile-server'
 import { MobileRuntime } from '../src/main/mobile-runtime'
+import { ProjectWatchers } from '../src/main/project-watcher'
 import { Terminals } from '../src/main/terminals'
 import { DESKTOP, type SizeChange } from '../src/main/terminal-sizes'
 import { emptyState, type KoraState } from '../src/shared/state'
@@ -22,8 +23,10 @@ import transcritor from './fixtures/transcritor-api.json'
 const servers: MobileServer[] = []
 const processes: Terminals[] = []
 const streams: AbortController[] = []
+const projectWatchers: ProjectWatchers[] = []
 afterEach(async () => {
   for (const stream of streams.splice(0)) stream.abort()
+  for (const watchers of projectWatchers.splice(0)) watchers.closeAll()
   for (const server of servers.splice(0)) await server.stop()
   for (const terminals of processes.splice(0)) terminals.killAll()
 })
@@ -47,9 +50,17 @@ interface Setup {
   switched: string[]
   // O que a tela de Configurações do PC recebeu, na ordem.
   statuses: MobileStatus[]
+  // O que foi para a Lixeira (o caminho original) e onde ficou; a Lixeira do teste é uma pasta fora do projeto.
+  trashed: { from: string; to: string }[]
+  // Projetos que o PC parou de observar por terem saído da lista.
+  unwatched: string[]
 }
 
-async function setup(transcribe?: Transcribe): Promise<Setup> {
+// O shell.trashItem só existe no Electron: aqui a Lixeira é uma pasta à parte, e o item vai para lá inteiro.
+let trashCount = 0
+const trashBin = mkdtempSync(join(tmpdir(), 'kora-lixeira-'))
+
+async function setup(transcribe?: Transcribe, initial: (dir: string) => Partial<KoraState> = () => ({})): Promise<Setup> {
   const dir = mkdtempSync(join(tmpdir(), 'kora-mobile-'))
   const claudeRoot = join(dir, 'claude-home')
   const metricSources = { claudeRoot, codexSessions: join(dir, 'sem-codex'), codexRollout: () => null, opencodeDb: join(dir, 'sem-opencode.db') }
@@ -58,11 +69,15 @@ async function setup(transcribe?: Transcribe): Promise<Setup> {
   mkdirSync(join(dir, 'android'))
   writeFileSync(join(dir, 'android', 'android.json'), '{"versionCode":7,"versionName":"0.7.0"}')
   writeFileSync(join(dir, 'android', 'kora-celular.apk'), 'PK-apk-de-teste')
-  let state: KoraState = { ...emptyState(), projects: [{ id: 'p', name: 'Projeto', path: dir }] }
+  let state: KoraState = { ...emptyState(), projects: [{ id: 'p', name: 'Projeto', path: dir }], ...initial(dir) }
   let desktop = ''
   const sizes: { id: string; change: SizeChange }[] = []
   const switched: string[] = []
   const statuses: MobileStatus[] = []
+  const trashed: { from: string; to: string }[] = []
+  const unwatched: string[] = []
+  const watchers = new ProjectWatchers((projectId, change) => server?.publishFiles({ projectId, dirs: change.dirs, git: change.git, rescan: change.rescan }), 50, 200)
+  projectWatchers.push(watchers)
   let active = 'a1'
   let server: MobileServer | null = null
   const terminals = new Terminals({
@@ -72,7 +87,6 @@ async function setup(transcribe?: Transcribe): Promise<Setup> {
     },
     onExit: () => server?.publishState()
   })
-  terminals.setMirroring(true)
   processes.push(terminals)
   const runtime: MobileRuntime = new MobileRuntime({
     state: () => state,
@@ -89,7 +103,15 @@ async function setup(transcribe?: Transcribe): Promise<Setup> {
     accounts: async () => ({ activeUnknown: false, login: null, accounts: ['a1', 'a2'].map((id) => ({ id, email: `${id}@exemplo.com`, organizationName: null, subscriptionType: 'max', refreshTokenExpiresAt: null, weekly: null, active: id === active })) }),
     switchAccount: async (id) => { switched.push(id); active = id },
     metrics: (agent, path) => sessionMetrics(metricSources, agent, path),
-    dayMetrics: (since) => dayMetrics(metricSources, since)
+    dayMetrics: (since) => dayMetrics(metricSources, since),
+    // Registra o pedido antes de mover: pedido para o que não existe também conta.
+    trash: async (abs) => {
+      const to = join(trashBin, `${++trashCount}-${basename(abs)}`)
+      trashed.push({ from: abs, to })
+      renameSync(abs, to)
+    },
+    removed: (id) => { unwatched.push(id); watchers.unwatch(id) },
+    watch: (id, root) => watchers.watch(id, root)
   })
   server = new MobileServer({ configFile: config, rendererDir: dir, androidDir: join(dir, 'android'), imageDir: join(dir, 'imagens'), fileDir: join(dir, 'anexos'), audioDir: join(dir, 'audio'), transcribe, pdfjsDir: resolve('node_modules', 'pdfjs-dist'), runtime, changed: () => {}, statusChanged: (status) => statuses.push(status), port: 0 })
   servers.push(server)
@@ -104,7 +126,7 @@ async function setup(transcribe?: Transcribe): Promise<Setup> {
     // mergeTabs só guarda o agente de aba que já existia; o PC grava o agente depois, quando a sessão começa.
     state = { ...merged, tabs: merged.tabs.map((tab) => tab.id === id && agent ? { ...tab, agent } : tab) }
   }
-  return { server, runtime, terminals, url, cookie, device, config, dir, desktop: () => desktop, sizes, addTab, claudeRoot, switched, statuses }
+  return { server, runtime, terminals, url, cookie, device, config, dir, desktop: () => desktop, sizes, addTab, claudeRoot, switched, statuses, trashed, unwatched }
 }
 
 async function action(url: string, cookie: string, command: unknown): Promise<Response> {
@@ -660,6 +682,27 @@ describe('arquivos do projeto pelo celular', () => {
     expect(JSON.stringify(await goneDir.json())).not.toContain(s.dir)
   })
 
+  it('diz a versão do arquivo aberto sem mandar o conteúdo, avisa quando ele some e passa a observar o projeto', async () => {
+    const s = await setup()
+    mkdirSync(join(s.dir, 'docs'))
+    writeFileSync(join(s.dir, 'docs', 'nota.md'), 'versão do PC')
+    const stat = (path: string, cookie = s.cookie): Promise<Response> => fetch(`${s.url}/api/file-stat?project=p&path=${encodeURIComponent(path)}`, { headers: { cookie } })
+    expect((await stat(join('docs', 'nota.md'), '')).status).toBe(401)
+    expect((await stat('..\\mobile.json')).status).toBe(400)
+
+    const stream = await events(s.url, s.cookie)
+    const first = await (await stat(join('docs', 'nota.md'))).json()
+    expect(first).toEqual({ exists: true, mtimeMs: statSync(join(s.dir, 'docs', 'nota.md')).mtimeMs, size: Buffer.byteLength('versão do PC') })
+    // Aberto por um link do terminal, sem listar a pasta: a gravação do agente chega ao celular mesmo assim.
+    writeFileSync(join(s.dir, 'docs', 'nota.md'), 'o agente mudou')
+    await expect.poll(() => stream.text(), { timeout: 5000 }).toMatch(/event: files\n/)
+    expect((await (await stat(join('docs', 'nota.md'))).json()).mtimeMs).not.toBe(first.mtimeMs)
+
+    rmSync(join(s.dir, 'docs', 'nota.md'))
+    expect(await (await stat(join('docs', 'nota.md'))).json()).toEqual({ exists: false })
+    expect(await (await stat('docs')).json(), 'pasta não é arquivo aberto').toEqual({ exists: false })
+  })
+
   it('entrega o status do git à parte da pasta, e projeto sem git volta sem status', async () => {
     const s = await setup()
     const status = async (): Promise<{ files: { path: string; status: string }[] }> => (await fetch(`${s.url}/api/git?project=p`, { headers: { cookie: s.cookie } })).json()
@@ -819,6 +862,216 @@ describe('projeto renomeado pelo celular', () => {
     expect((await action(s.url, s.cookie, { type: 'rename-project', projectId: 'p', name: '' })).status).toBe(200)
     expect(name()).toBe(basename(s.dir))
     expect((await action(s.url, s.cookie, { type: 'rename-project', projectId: 'inventado', name: 'x' })).status).toBe(400)
+  })
+})
+
+describe('conversa salva retomada pelo celular', () => {
+  it('a aba nasce com o nome da conversa e já ligada a ela, como no painel do PC', async () => {
+    const s = await setup()
+    const home = mkdtempSync(join(tmpdir(), 'kora-home-'))
+    const previous = process.env['USERPROFILE']
+    process.env['USERPROFILE'] = home
+    try {
+      const sessionId = '0d9c6a52-3c1e-4c55-9d0e-8f3b9a2e7c11'
+      const folder = claudeProjectDir(join(home, '.claude'), s.dir)
+      mkdirSync(folder, { recursive: true })
+      writeFileSync(join(folder, `${sessionId}.jsonl`), [
+        { type: 'user', message: { role: 'user', content: 'deixe a vitrine mais clara' } },
+        { type: 'ai-title', aiTitle: 'Revisar estilos da vitrine' }
+      ].map((line) => JSON.stringify(line)).join('\n') + '\n')
+      const opened = await action(s.url, s.cookie, { type: 'open-session', projectId: 'p', agent: { kind: 'claude', sessionId }, cols: 80, rows: 24 })
+      expect(opened.status).toBe(200)
+      const { tabId } = await opened.json()
+      expect(s.runtime.snapshot().tabs.find((tab) => tab.id === tabId)).toMatchObject({ title: 'Revisar estilos da vitrine', titleLocked: false, agent: { kind: 'claude', sessionId } })
+      // Tocar de novo na mesma conversa vai para a aba que já existe.
+      expect((await (await action(s.url, s.cookie, { type: 'open-session', projectId: 'p', agent: { kind: 'claude', sessionId }, cols: 80, rows: 24 })).json()).tabId).toBe(tabId)
+    } finally {
+      if (previous === undefined) delete process.env['USERPROFILE']
+      else process.env['USERPROFILE'] = previous
+    }
+  })
+})
+
+describe('lateral organizada pelo celular', () => {
+  // Três projetos de pastas reais e uma categoria, como o PC tem salvo.
+  async function organized(): Promise<Setup & { folder(id: string): string }> {
+    const root = mkdtempSync(join(tmpdir(), 'kora-lateral-'))
+    for (const name of ['q', 'r']) mkdirSync(join(root, name))
+    const s = await setup(undefined, (dir) => ({
+      groups: [{ id: 'g', name: 'Empresa' }],
+      projects: [{ id: 'p', name: 'Projeto', path: dir }, { id: 'q', name: 'Q', path: join(root, 'q') }, { id: 'r', name: 'R', path: join(root, 'r'), groupId: 'g' }]
+    }))
+    return { ...s, folder: (id) => s.runtime.snapshot().projects.find((p) => p.id === id)!.path }
+  }
+  const where = (state: Pick<KoraState, 'projects'>): string => state.projects.map((p) => `${p.id}:${p.hidden ? 'oculto' : p.groupId ?? '-'}`).join(' ')
+  // O último estado que o celular recebeu pelo fluxo de eventos, que é o mesmo que a janela do PC recebe.
+  const lastState = (text: string): Pick<KoraState, 'projects'> => JSON.parse([...text.matchAll(/event: state\ndata: (.*)\n\n/g)].at(-1)![1]!)
+
+  it('move projeto para a categoria, sobe e desce dentro dela, oculta e devolve; o PC recebe cada mudança', async () => {
+    const s = await organized()
+    const state = (): Pick<KoraState, 'projects'> => s.runtime.snapshot()
+    const stream = await events(s.url, s.cookie)
+    expect((await action(s.url, s.cookie, { type: 'place-project', projectId: 'p', section: { hidden: false, groupId: 'g' } })).status).toBe(200)
+    expect(where(state())).toBe('q:- r:g p:g')
+    await expect.poll(() => where(lastState(stream.text()))).toBe('q:- r:g p:g')
+    expect((await action(s.url, s.cookie, { type: 'move-project', projectId: 'p', delta: -1 })).status).toBe(200)
+    expect(where(state())).toBe('q:- p:g r:g')
+    // Na ponta não troca de categoria nem dá a volta.
+    expect((await action(s.url, s.cookie, { type: 'move-project', projectId: 'p', delta: -1 })).status).toBe(200)
+    expect(where(state())).toBe('q:- p:g r:g')
+    expect((await action(s.url, s.cookie, { type: 'move-project', projectId: 'p', delta: 1 })).status).toBe(200)
+    expect(where(state())).toBe('q:- r:g p:g')
+    expect((await action(s.url, s.cookie, { type: 'place-project', projectId: 'r', section: { hidden: true } })).status).toBe(200)
+    expect(where(state())).toBe('q:- p:g r:oculto')
+    expect((await action(s.url, s.cookie, { type: 'place-project', projectId: 'p', section: { hidden: false, groupId: null } })).status).toBe(200)
+    expect(where(state())).toBe('q:- p:- r:oculto')
+    await expect.poll(() => where(lastState(stream.text()))).toBe('q:- p:- r:oculto')
+
+    // Categoria que não existe e projeto desconhecido são recusados sem mexer em nada.
+    const before = JSON.stringify(state())
+    expect((await action(s.url, s.cookie, { type: 'place-project', projectId: 'q', section: { hidden: false, groupId: 'inventada' } })).status).toBe(400)
+    expect((await action(s.url, s.cookie, { type: 'place-project', projectId: 'inventado', section: { hidden: true } })).status).toBe(400)
+    expect((await action(s.url, s.cookie, { type: 'move-project', projectId: 'q', delta: 2 })).status).toBe(400)
+    expect(JSON.stringify(state())).toBe(before)
+    expect((await fetch(`${s.url}/api/action`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'move-project', projectId: 'q', delta: 1 }) })).status).toBe(401)
+  })
+
+  it('cria, renomeia, aninha, ordena, oculta e apaga categoria; apagar devolve os projetos sem tocar nas pastas', async () => {
+    const s = await organized()
+    const group = async (body: unknown): Promise<Response> => action(s.url, s.cookie, { type: 'group', action: body })
+    const created = await group({ kind: 'create', name: '  Cliente  ', parentId: 'g' })
+    expect(created.status).toBe(200)
+    const { groupId } = await created.json()
+    expect(s.runtime.snapshot().groups.find((g) => g.id === groupId)).toEqual({ id: groupId, name: 'Cliente', parentId: 'g' })
+    expect((await action(s.url, s.cookie, { type: 'place-project', projectId: 'q', section: { hidden: false, groupId } })).status).toBe(200)
+    expect((await group({ kind: 'rename', id: groupId, name: 'Cliente X' })).status).toBe(200)
+    expect(s.runtime.snapshot().groups.find((g) => g.id === groupId)?.name).toBe('Cliente X')
+    // Dentro de uma filha dela mesma, nome vazio e categoria desconhecida: recusados.
+    expect((await group({ kind: 'nest', id: 'g', parentId: groupId })).status).toBe(400)
+    expect((await group({ kind: 'rename', id: 'g', name: '   ' })).status).toBe(400)
+    expect((await group({ kind: 'hide', id: 'inventada', hidden: true })).status).toBe(400)
+    expect((await group({ kind: 'create', name: 'Órfã', parentId: 'inventada' })).status).toBe(400)
+    expect(s.runtime.snapshot().groups.map((g) => g.id)).toEqual(['g', groupId])
+
+    expect((await group({ kind: 'nest', id: groupId, parentId: null })).status).toBe(200)
+    expect(s.runtime.snapshot().groups.find((g) => g.id === groupId)?.parentId).toBeUndefined()
+    expect((await group({ kind: 'move', id: groupId, delta: -1 })).status).toBe(200)
+    expect(s.runtime.snapshot().groups.map((g) => g.id)).toEqual([groupId, 'g'])
+    expect((await group({ kind: 'hide', id: 'g', hidden: true })).status).toBe(200)
+    expect(s.runtime.snapshot().groups.find((g) => g.id === 'g')?.hidden).toBe(true)
+
+    expect((await group({ kind: 'remove', id: 'g' })).status).toBe(200)
+    expect(s.runtime.snapshot().groups.map((g) => g.id)).toEqual([groupId])
+    expect(s.runtime.snapshot().projects.map((p) => p.id).sort()).toEqual(['p', 'q', 'r'])
+    expect(s.runtime.snapshot().projects.find((p) => p.id === 'r')?.groupId).toBeUndefined()
+    expect(s.runtime.snapshot().projects.find((p) => p.id === 'q')?.groupId).toBe(groupId)
+    expect(existsSync(s.folder('r'))).toBe(true)
+  })
+
+  it('remover da lista fecha os terminais do projeto e para de observá-lo, mas a pasta e os arquivos ficam', async () => {
+    const s = await organized()
+    writeFileSync(join(s.dir, 'importante.txt'), 'não apague')
+    desktopTab(s, 't', 80, 24)
+    expect(s.terminals.pids().has('t')).toBe(true)
+    expect((await action(s.url, s.cookie, { type: 'remove-project', projectId: 'p' })).status).toBe(200)
+    expect(s.runtime.snapshot().projects.map((p) => p.id)).toEqual(['q', 'r'])
+    expect(s.runtime.snapshot().tabs).toEqual([])
+    await expect.poll(() => s.terminals.pids().has('t')).toBe(false)
+    expect(s.unwatched).toEqual(['p'])
+    expect(readFileSync(join(s.dir, 'importante.txt'), 'utf8')).toBe('não apague')
+    expect((await action(s.url, s.cookie, { type: 'remove-project', projectId: 'p' })).status).toBe(400)
+  })
+})
+
+describe('arquivos criados, renomeados, movidos, duplicados e apagados pelo celular', () => {
+  const entry = (s: Setup, body: Record<string, unknown>, cookie = s.cookie): Promise<Response> =>
+    fetch(`${s.url}/api/entry`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ projectId: 'p', ...body }) })
+  const error = async (response: Response): Promise<string> => {
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    return (await response.json()).error
+  }
+
+  it('cria arquivo e pasta com caminho aninhado e recusa nome reservado, item que já existe, .git e fora do projeto', async () => {
+    const s = await setup()
+    const outside = dirname(s.dir)
+    const made = await entry(s, { op: 'create', parent: '', name: 'src/lib/novo.ts', kind: 'file' })
+    expect(made.status).toBe(200)
+    expect(await made.json()).toEqual({ path: join('src', 'lib', 'novo.ts') })
+    expect(readFileSync(join(s.dir, 'src', 'lib', 'novo.ts'), 'utf8')).toBe('')
+    expect(await (await entry(s, { op: 'create', parent: 'src', name: 'docs', kind: 'dir' })).json()).toEqual({ path: join('src', 'docs') })
+    expect(statSync(join(s.dir, 'src', 'docs')).isDirectory()).toBe(true)
+
+    expect(await error(await entry(s, { op: 'create', parent: 'src', name: 'lib/novo.ts', kind: 'file' }))).toBe('Já existe "novo.ts" em "lib".')
+    expect(await error(await entry(s, { op: 'create', parent: '', name: 'con', kind: 'file' }))).toBe('"con" é um nome reservado do Windows.')
+    expect(await error(await entry(s, { op: 'create', parent: '', name: 'a<b', kind: 'file' }))).toMatch(/^O nome não pode conter </)
+    expect(await error(await entry(s, { op: 'create', parent: '', name: '../fora.txt', kind: 'file' }))).toBe('O caminho não pode ter "..".')
+    expect(await error(await entry(s, { op: 'create', parent: '..', name: 'fora.txt', kind: 'file' }))).toMatch(/^Caminho fora do projeto/)
+    expect(existsSync(join(outside, 'fora.txt'))).toBe(false)
+    mkdirSync(join(s.dir, '.git'))
+    expect(await error(await entry(s, { op: 'create', parent: '.git', name: 'hooks.txt', kind: 'file' }))).toBe('Não é possível criar no .git.')
+    expect(existsSync(join(s.dir, '.git', 'hooks.txt'))).toBe(false)
+    expect((await entry(s, { op: 'create', parent: '', name: 'x.txt', kind: 'file' }, '')).status).toBe(401)
+    expect(existsSync(join(s.dir, 'x.txt'))).toBe(false)
+  })
+
+  it('renomeia, move para outra pasta e duplica sem sobrescrever nada', async () => {
+    const s = await setup()
+    mkdirSync(join(s.dir, 'docs'))
+    writeFileSync(join(s.dir, 'nota.md'), 'texto da nota')
+    writeFileSync(join(s.dir, 'outra.md'), 'outra')
+    writeFileSync(join(s.dir, 'docs', 'nota-final.md'), 'já estava em docs')
+
+    expect(await error(await entry(s, { op: 'rename', path: 'nota.md', name: 'outra.md' }))).toBe('Já existe "outra.md" nessa pasta.')
+    expect(await error(await entry(s, { op: 'rename', path: 'nota.md', name: 'docs/x.md' }))).toMatch(/^O nome não pode conter \//)
+    expect(await error(await entry(s, { op: 'rename', path: 'nota.md', name: '.git' }))).toBe('Não é possível renomear para ou dentro do .git.')
+    expect(readFileSync(join(s.dir, 'outra.md'), 'utf8')).toBe('outra')
+    expect(await (await entry(s, { op: 'rename', path: 'nota.md', name: 'nota-final.md' })).json()).toEqual({ path: 'nota-final.md' })
+
+    expect(await error(await entry(s, { op: 'move', path: 'nota-final.md', to: 'docs' }))).toBe('Já existe "nota-final.md" na pasta de destino.')
+    expect(readFileSync(join(s.dir, 'docs', 'nota-final.md'), 'utf8')).toBe('já estava em docs')
+    expect(await error(await entry(s, { op: 'move', path: 'outra.md', to: '..' }))).toMatch(/^Caminho fora do projeto/)
+    expect(await error(await entry(s, { op: 'move', path: 'docs', to: 'docs' }))).toBe('Não é possível mover a pasta "docs" para dentro dela mesma.')
+    expect((await entry(s, { op: 'move', path: 'outra.md', to: 'sumiu' })).status).toBe(404)
+    expect(await (await entry(s, { op: 'move', path: 'outra.md', to: 'docs' })).json()).toEqual({ path: join('docs', 'outra.md') })
+    expect(existsSync(join(s.dir, 'outra.md'))).toBe(false)
+    expect(readFileSync(join(s.dir, 'docs', 'outra.md'), 'utf8')).toBe('outra')
+
+    expect(await (await entry(s, { op: 'duplicate', path: join('docs', 'outra.md') })).json()).toEqual({ path: join('docs', 'outra (2).md') })
+    expect(readFileSync(join(s.dir, 'docs', 'outra (2).md'), 'utf8')).toBe('outra')
+    expect(await (await entry(s, { op: 'duplicate', path: 'nota-final.md' })).json()).toEqual({ path: 'nota-final (2).md' })
+    expect(await error(await entry(s, { op: 'duplicate', path: '..' }))).toMatch(/^Caminho fora do projeto|raiz do projeto/)
+  })
+
+  it('apaga mandando para a Lixeira e recusa a raiz do projeto, o .git e o que está fora dele', async () => {
+    const s = await setup()
+    mkdirSync(join(s.dir, 'pasta'))
+    writeFileSync(join(s.dir, 'pasta', 'dentro.txt'), 'x')
+    writeFileSync(join(dirname(s.dir), 'vizinho.txt'), 'de fora')
+    mkdirSync(join(s.dir, '.git'))
+
+    expect(await (await entry(s, { op: 'trash', path: 'pasta' })).json()).toEqual({ path: '' })
+    expect(existsSync(join(s.dir, 'pasta'))).toBe(false)
+    expect(s.trashed.map((t) => t.from)).toEqual([join(s.dir, 'pasta')])
+    expect(readFileSync(join(s.trashed[0]!.to, 'dentro.txt'), 'utf8')).toBe('x')
+
+    for (const path of ['.', 'pasta/..', join('src', '..')]) {
+      expect(await error(await entry(s, { op: 'trash', path }))).toBe('A pasta do projeto não pode ser excluída por aqui.')
+    }
+    expect(await error(await entry(s, { op: 'trash', path: '.git' }))).toBe('Não é possível excluir o .git.')
+    expect(await error(await entry(s, { op: 'trash', path: '../vizinho.txt' }))).toMatch(/^Caminho fora do projeto/)
+    expect((await entry(s, { op: 'trash', path: 'sumiu.txt' })).status).toBe(404)
+    expect((await entry(s, { op: 'trash', path: '' })).status).toBe(400)
+    expect(s.trashed).toHaveLength(1)
+    expect(existsSync(s.dir) && existsSync(join(s.dir, '.git')) && existsSync(join(dirname(s.dir), 'vizinho.txt'))).toBe(true)
+  })
+
+  it('a pasta listada pelo celular passa a ser observada: o que muda no disco chega ao celular pelo fluxo de eventos', async () => {
+    const s = await setup()
+    mkdirSync(join(s.dir, 'docs'))
+    const stream = await events(s.url, s.cookie)
+    expect((await fetch(`${s.url}/api/files?project=p&path=docs`, { headers: { cookie: s.cookie } })).status).toBe(200)
+    writeFileSync(join(s.dir, 'docs', 'do-agente.md'), 'novo')
+    await expect.poll(() => stream.text(), { timeout: 5000 }).toMatch(/event: files\ndata: \{"projectId":"p","dirs":\["docs"\]/)
   })
 })
 

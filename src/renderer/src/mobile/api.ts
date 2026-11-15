@@ -53,4 +53,7 @@ export interface KoraApp {
   gravarAudioNoChat?(projeto: string, aba: string, chave: string): void
   recuperarAudio?(projeto: string, aba: string, chave: string): void
 }
+// Leitura sem cromo (PDF e imagem com o toque, ou o celular deitado): o app esconde as barras do sistema junto. Ainda
+// sem versão do app que tenha; a página chama se existir.
+export interface KoraApp { telaCheia?(ligada: boolean): void }
 export const koraApp = (): KoraApp | undefined => (window as unknown as { KoraApp?: KoraApp }).KoraApp

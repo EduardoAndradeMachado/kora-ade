@@ -351,6 +351,11 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .markdown-view table { border-collapse: collapse; display: block; overflow-x: auto; margin-bottom: 12px; font-size: 13px; }
 .markdown-view th, .markdown-view td { border: 1px solid var(--border); padding: 4px 8px; }
 .markdown-view img { max-width: 100%; }
+/* Mesmo motivo do PC (main.css): a entrelinha do texto cortaria os rótulos que o mermaid mediu fora do artigo. */
+.markdown-view .mermaid-diagram { display: flex; justify-content: center; overflow-x: auto; margin: 0 0 12px; line-height: normal; }
+.markdown-view .mermaid-diagram p { margin: 0; }
+.markdown-view .mermaid-diagram[data-stale] { opacity: .5; }
+.markdown-view .mermaid-error { margin: 0 0 4px; font-size: 12.5px; white-space: pre-wrap; color: var(--destructive); }
 .html-view { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
 .image-view { flex: 1; display: grid; place-items: center; padding: 12px; }
 /* Baixando, o botão segue nítido e gira; o 40% do botão desativado parecia quebrado. */
@@ -409,6 +414,15 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
   .chat-return { width: 36px; height: 30px; min-height: 30px; }
   .terminal-keys { padding: 3px 10px; }
   .terminal-keys button { min-height: 30px; padding: 4px 10px; }
+  /* O campo vira uma linha só: texto, anexar e enviar lado a lado. Em pé ele usa duas, que deitado tirariam do
+     terminal a altura que girar deveria dar. */
+  .terminal-mount { inset: 4px 8px; }
+  .composer { padding: 3px 10px max(4px, env(safe-area-inset-bottom)); }
+  .composer-box { flex-direction: row; flex-wrap: wrap; align-items: flex-end; padding: 2px 4px 2px 8px; border-radius: 18px; }
+  .composer-box > .composer-error, .composer-box > .composer-images, .composer-actions.dictating { flex-basis: 100%; }
+  .composer textarea { min-height: 34px; max-height: 72px; padding: 7px 4px; }
+  .composer-actions:not(.dictating) .attach-button { margin-left: 0; }
+  .attach-button, .send-button, .mic-button { width: 34px; height: 34px; min-height: 34px; }
   .file-header { min-height: 0; max-height: 60px; gap: 6px; padding: 2px 8px 2px 12px; }
   .file-title { flex-direction: row; align-items: baseline; gap: 8px; }
   .file-title strong { flex-shrink: 0; max-width: 70%; font-size: 13px; }
@@ -465,3 +479,116 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
    continua com o detalhe cinza do tokens.css). O texto secundário ao lado do ícone segue cinza. */
 :root, .dark { --icon-accent-idle: currentColor; }
 .project-search svg, .folder-filter svg, .tree-project-link svg, .group-heading svg, .folder-trail svg { color: var(--foreground); }
+/* Folhas de organização da lista e dos arquivos: aviso de erro dentro da folha, subir/descer lado a lado e o aviso
+   curto, que fica logo abaixo do cabeçalho porque as folhas abrem por baixo. */
+.sheet-title { flex: 1; min-width: 0; }
+.sheet-notice { margin: 10px 4px 0; padding: 10px 12px; border-radius: 8px; font-size: 12px; line-height: 1.45; background: color-mix(in oklab, var(--destructive) 14%, transparent); color: var(--destructive); }
+.rename-form .field-problem { color: var(--destructive); }
+.action-pair { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; }
+.action-pair .action-row { white-space: nowrap; padding-inline: 6px; }
+.action-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.section-actions { display: flex; align-items: center; gap: 2px; }
+.move-target { display: flex; flex-direction: column; gap: 8px; padding: 4px 4px 0; }
+.move-target .files-path { margin-bottom: 0; }
+.move-target .files-path button { min-height: 44px; }
+.move-folders { max-height: 40vh; overflow: auto; }
+.files-path .icon-button { width: 44px; height: 44px; min-height: 44px; }
+.files-path .icon-button + .icon-button { margin-left: 0; }
+.mobile-toast { position: fixed; left: 50%; top: calc(max(8px, env(safe-area-inset-top)) + 60px); transform: translateX(-50%); z-index: 70; display: flex; align-items: center; gap: 8px; width: max-content; max-width: calc(100vw - 32px); padding: 10px 14px; border-radius: 10px; background: var(--card); color: var(--foreground); border: 1px solid var(--input); box-shadow: 0 6px 24px #0005; font-size: 13px; line-height: 1.4; pointer-events: none; animation: fade-in .18s ease-out; }
+.mobile-toast svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--brand-amber); }
+
+/* Visualizadores do arquivo aberto (FileViewer e vizinhos). */
+.file-body { position: relative; }
+/* Código em Ver: texto comum, selecionável pelo toque longo com as alças do Android; nada de teclado. */
+.code-editor.reading .cm-content { -webkit-user-select: text; user-select: text; caret-color: transparent; }
+.copy-fab { position: absolute; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 4; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border: 1px solid var(--input); border-radius: 18px; background: var(--card); color: var(--foreground); font-size: 12px; box-shadow: 0 4px 16px rgb(0 0 0 / .25); }
+.copy-fab svg { width: 15px; height: 15px; }
+.markdown-view [data-md-line] { border-radius: 6px; transition: background-color .6s; }
+.markdown-view .md-jumped { background: color-mix(in oklab, var(--brand-amber) 18%, transparent); }
+.image-view { overflow: auto; touch-action: pan-x pan-y pinch-zoom; }
+.image-view.actual { display: block; padding: 0; }
+.image-view.actual img { max-width: none; max-height: none; }
+.video-view { flex: 1; min-height: 0; width: 100%; background: #000; }
+.external-card { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px 20px; text-align: center; }
+.external-card > svg { width: 40px; height: 40px; color: var(--brand-amber); }
+.external-card strong { max-width: 100%; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
+.external-card small { font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.external-card p { margin: 0; max-width: 320px; font-size: 12px; line-height: 1.5; color: var(--muted-foreground); }
+.external-card button { min-height: 40px; padding: 0 16px; gap: 6px; }
+.notebook-view { display: flex; flex-direction: column; gap: 12px; padding: 14px 12px 24px; -webkit-user-select: text; user-select: text; }
+.notebook-view .notebook-markdown { padding: 0; }
+.notebook-cell { display: flex; flex-direction: column; gap: 6px; }
+.notebook-prompt { font-family: var(--terminal-font-family, monospace); font-size: 10.5px; color: var(--muted-foreground); }
+.notebook-code, .notebook-output, .notebook-raw { margin: 0; overflow-x: auto; font-family: var(--terminal-font-family, monospace); font-size: 12px; line-height: 1.5; }
+.notebook-code { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.notebook-output, .notebook-raw { white-space: pre-wrap; padding: 0 2px; }
+.notebook-output.stderr { padding: 6px 8px; border-radius: 6px; background: color-mix(in oklab, var(--destructive) 12%, transparent); color: var(--destructive); }
+.notebook-image { max-width: 100%; align-self: flex-start; background: #fff; }
+.notebook-error, .diff-error { margin: 16px; font-size: 12px; }
+/* Planilha: cabeçalho preso no alto e número da linha preso à esquerda, os dois por sticky dentro da mesma rolagem. */
+.sheet-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sheet-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.sheet-search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--input); border-radius: 8px; }
+.sheet-search svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--foreground); }
+.sheet-search input { flex: 1; min-width: 0; border: 0; padding: 7px 0; background: transparent; }
+.sheet-search input:focus-visible { outline: none; }
+.sheet-search:focus-within { border-color: var(--brand-amber); }
+.sheet-count { flex-shrink: 0; font-size: 11px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.sheet-header-toggle { flex-shrink: 0; display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted-foreground); }
+.sheet-header-toggle input { accent-color: var(--brand-amber); width: 16px; height: 16px; padding: 0; }
+.sheet-scroller { position: relative; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; background: var(--background); }
+.sheet-canvas { position: relative; }
+.sheet-row { position: absolute; left: 0; height: 32px; }
+.sheet-head { position: sticky; top: 0; z-index: 2; background: var(--card); font-weight: 600; }
+.sheet-cell, .sheet-num { position: absolute; top: 0; height: 32px; padding: 0 8px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: 12px; line-height: 31px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-user-select: none; user-select: none; }
+.sheet-cell.number { text-align: right; font-variant-numeric: tabular-nums; }
+.sheet-cell.hit { background: color-mix(in oklab, var(--brand-amber) 22%, transparent); }
+.sheet-cell.selected { outline: 2px solid var(--brand-amber); outline-offset: -2px; }
+.sheet-num { position: sticky; left: 0; z-index: 1; width: 48px; padding: 0 6px; text-align: right; color: var(--muted-foreground); background: var(--card); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sheet-head .sheet-num { z-index: 3; }
+.sheet-row.jumped .sheet-cell { background: color-mix(in oklab, var(--brand-amber) 16%, transparent); }
+.sheet-empty { position: absolute; top: 40px; left: 0; right: 0; text-align: center; }
+.sheet-cell-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border-top: 1px solid var(--border); background: var(--card); flex-shrink: 0; font-size: 12px; }
+.sheet-cell-bar strong { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--brand-amber); }
+.sheet-cell-value { flex: 1; min-width: 0; max-height: 72px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+.sheet-cell-bar button:not(.icon-button) { min-height: 32px; padding: 0 10px; gap: 4px; font-size: 12px; flex-shrink: 0; }
+.sheet-cell-bar svg { width: 14px; height: 14px; }
+.sheet-tabs { display: flex; gap: 2px; overflow-x: auto; padding: 0 8px max(0px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--secondary); flex-shrink: 0; }
+.sheet-tabs button { flex-shrink: 0; min-height: 36px; padding: 0 12px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; font-size: 12px; color: var(--muted-foreground); }
+.sheet-tabs button[aria-selected="true"] { border-bottom-color: var(--brand-amber); color: var(--foreground); font-weight: 600; background: var(--background); }
+.sheet-tabs .hidden-sheet { font-style: italic; opacity: .7; }
+/* Comparar: por cima do arquivo, que fica montado embaixo com o rascunho e a rolagem. Cores do git do PC. */
+.diff-view { --diff-added: #587c0c; --diff-removed: #ad0707; position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--background); }
+.dark .diff-view { --diff-added: #81b88b; --diff-removed: #f48771; }
+.diff-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px 6px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; font-size: 12px; }
+.diff-header > span { display: flex; gap: 10px; }
+.diff-header button { min-height: 32px; padding: 0 10px; gap: 4px; font-size: 12px; }
+.diff-header button svg { width: 12px; height: 12px; }
+.diff-key.added { color: var(--diff-added); }
+.diff-key.removed { color: var(--diff-removed); }
+.diff-lines { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 24px; font-family: var(--terminal-font-family, monospace); font-size: 12px; line-height: 1.55; -webkit-user-select: text; user-select: text; }
+.diff-line { display: flex; gap: 6px; padding: 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-line.added { background: color-mix(in oklab, var(--diff-added) 14%, transparent); }
+.diff-line.removed { background: color-mix(in oklab, var(--diff-removed) 14%, transparent); }
+.diff-line.added .diff-sign { color: var(--diff-added); }
+.diff-line.removed .diff-sign { color: var(--diff-removed); }
+.diff-line.skip { justify-content: center; padding: 4px 8px; color: var(--muted-foreground); background: var(--secondary); font-family: inherit; font-size: 11px; }
+.diff-number { flex-shrink: 0; width: 34px; text-align: right; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.diff-sign { flex-shrink: 0; width: 10px; }
+.diff-text { flex: 1; min-width: 0; }
+
+/* Deitado: a página do PDF ganha a largura toda (o PdfPages tira a margem) e PDF e imagem já abrem sem o cromo;
+   o resto (planilha, HTML) fica com as faixas mais baixas. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .file-hint { padding-block: 2px; }
+  .file-hint > span { display: none; }
+  .file-hint .open-full { min-height: 28px; margin-left: auto; }
+  .sheet-toolbar { padding-block: 3px; }
+  .sheet-search input { padding-block: 4px; }
+  .sheet-cell-bar { padding-block: 3px; }
+  .sheet-cell-value { max-height: 40px; }
+  .sheet-tabs button { min-height: 30px; }
+  .copy-fab { min-height: 30px; }
+  .image-view { padding: 0; }
+  .file-notice { padding-block: 4px; }
+}

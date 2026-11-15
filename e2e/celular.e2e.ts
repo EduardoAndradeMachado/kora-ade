@@ -1,8 +1,8 @@
-import { writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CDPSession, Page } from '@playwright/test'
 import { test, expect } from './harness'
-import { MOBILE_PORT, newTab, pdfBytes, readState, starts, typeLine, ui, waitFor, type KoraRun } from './kora'
+import { MOBILE_PORT, newTab, pdfBytes, readClipboardText, readState, restoreClipboard, saveClipboard, starts, typeLine, ui, waitFor, writeState, type KoraRun, type SavedState } from './kora'
 
 // O celular de verdade é uma página no navegador; aqui ele é a mesma API HTTP, chamada direto pelo teste.
 const BASE = `http://127.0.0.1:${MOBILE_PORT}`
@@ -336,17 +336,26 @@ test('R-celular-gestos arrastar de lado: conversa → arquivos e de volta, conve
   await resize({ width: 780, height: 360 })
   await expect.poll(() => phone.evaluate(() => window.matchMedia('(orientation: landscape)').matches)).toBe(true)
   await expect(phone.locator('.mobile-header'), 'deitado, o cabeçalho do Kora sai').toBeHidden()
-  await expect(header).toBeVisible()
+  // Virar o celular é para ver mais da página: deitado, o PDF fica sem a faixa do arquivo e sem a barra, com a
+  // página na largura toda.
+  await expect(header, 'deitado, o PDF já fica sem a faixa do arquivo').toBeHidden()
+  await expect(bar).toBeHidden()
+  await expect.poll(async () => (await reading()) / await phone.evaluate(() => innerHeight), { message: 'deitado, o PDF fica com a altura quase toda' }).toBeGreaterThan(0.97)
+  const pageWidth = async (): Promise<number> => (await phone.locator('.pdf-page').first().boundingBox())!.width
+  const scrollerWidth = async (): Promise<number> => phone.locator('.pdf-scroller').evaluate((element) => element.clientWidth)
+  await expect.poll(async () => (await scrollerWidth()) - (await pageWidth()), { message: 'deitado, a página ocupa a largura quase toda' }).toBeLessThan(12)
   // Longe do clique no zoom: dois toques dentro da janela do duplo toque contariam como um duplo.
   await phone.waitForTimeout(600)
   await tap()
-  await expect(bar).toBeHidden()
-  await expect(header, 'deitado, o toque esconde também a faixa do arquivo').toBeHidden()
-  await tap()
-  await expect(header).toBeVisible()
+  await expect(header, 'deitado, o toque traz a faixa do arquivo de volta').toBeVisible()
   await expect(bar).toBeVisible()
+  await phone.waitForTimeout(600)
+  await tap()
+  await expect(bar).toBeHidden()
+  await expect(header).toBeHidden()
   await resize({ width: 360, height: 720 })
   await expect(phone.locator('.mobile-header'), 'em pé, o cabeçalho do Kora volta').toBeVisible()
+  await expect(header, 'em pé, a faixa do arquivo volta').toBeVisible()
   await drag(cdp, right)
   await expect(strip).toBeVisible()
 
@@ -413,4 +422,336 @@ test('R-celular-bandeja Kora na bandeja segue no ar: a aba continua viva para o 
   await phone(cookie, { type: 'send', tabId: tab.id, text: "Write-Output ('NA_' + 'BANDEJA')" })
   await until(async () => (await screen(cookie, tab.id)).includes('NA_BANDEJA'), 'saída do shell com a janela escondida')
   expect(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false)
+})
+
+test('R-celular-markdown Markdown que estoura o desenho no celular: aviso com Voltar e Abrir no editor, e o app segue de pé', async ({ kora }) => {
+  const env = kora.env()
+  // O lexer do marked é recursivo: citações aninhadas assim estouram a pilha ao desenhar a visualização.
+  writeFileSync(join(env.project, 'profundo.md'), `${'>'.repeat(20_000)} x\n`)
+  writeFileSync(join(env.project, 'notas.md'), '# Notas do projeto\n')
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  const { phone } = await openPhone(run, cookie, { width: 360, height: 720 })
+
+  await phone.getByRole('button', { name: 'Arquivos de proj-teste' }).click()
+  await phone.locator('.file-row').filter({ hasText: 'profundo.md' }).click()
+  const alert = phone.getByRole('alert').filter({ hasText: 'Não foi possível mostrar este arquivo' })
+  await expect(alert).toContainText('Maximum call stack size exceeded')
+  await alert.getByRole('button', { name: 'Abrir no editor' }).click()
+  await expect(phone.locator('.code-editor')).toBeVisible()
+  await expect(alert).toHaveCount(0)
+
+  await phone.getByRole('button', { name: 'Voltar' }).first().click()
+  await phone.locator('.file-row').filter({ hasText: 'notas.md' }).click()
+  await expect(phone.locator('.markdown-view h1')).toHaveText('Notas do projeto')
+})
+
+test('R-celular-organizar projeto movido de categoria pelo celular aparece na categoria da lateral do PC; remover da lista deixa a pasta', async ({ kora }) => {
+  const env = kora.env()
+  const outro = join(env.root, 'outro')
+  mkdirSync(outro)
+  writeFileSync(join(outro, 'fica.txt'), 'a pasta não pode sumir')
+  writeState(env, {
+    version: 2,
+    projects: [{ id: 'p1', name: 'proj-teste', path: env.project }, { id: 'p2', name: 'outro', path: outro }],
+    tabs: [],
+    groups: [{ id: 'g1', name: 'Empresa' }]
+  } as SavedState)
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  const { phone } = await openPhone(run, cookie, { width: 360, height: 720 })
+  const saved = (): SavedState & { projects: { id: string; groupId?: string }[] } => readState(env) as never
+  const pcGroup = run.page.locator('[data-group-row]').filter({ hasText: 'Empresa' }).locator('xpath=..')
+
+  // Toque longo no projeto (o menu do sistema chega como contextmenu, igual no Chrome do Android).
+  await phone.locator('.tree-project-name').filter({ hasText: 'outro' }).click({ button: 'right' })
+  const sheet = phone.getByRole('dialog', { name: 'outro' })
+  await sheet.getByRole('button', { name: 'Mover para categoria' }).click()
+  await phone.screenshot({ path: 'e2e/.results/celular-mover-categoria.png' })
+  await sheet.getByRole('button', { name: 'Empresa' }).click()
+  await expect(sheet).toHaveCount(0)
+  await expect(phone.getByRole('status').filter({ hasText: 'Projeto movido para Empresa.' })).toBeVisible()
+  await waitFor(() => saved().projects.find((p) => p.id === 'p2')?.groupId === 'g1', 'projeto na categoria no estado do PC')
+  await expect(pcGroup.locator('[data-project-row]').filter({ hasText: 'outro' })).toBeVisible()
+  await expect(phone.locator('.tree-group').filter({ hasText: 'Empresa' }).locator('.tree-project-name').filter({ hasText: 'outro' })).toBeVisible()
+
+  // A categoria nova criada pelo celular também aparece no PC.
+  await phone.getByRole('button', { name: 'Nova categoria' }).click()
+  await phone.getByLabel('Nome da categoria').fill('Clientes')
+  await phone.getByRole('button', { name: 'Criar categoria' }).click()
+  await expect(run.page.locator('[data-group-row]').filter({ hasText: 'Clientes' })).toBeVisible()
+
+  await phone.locator('.tree-project-name').filter({ hasText: 'outro' }).click({ button: 'right' })
+  await sheet.getByRole('button', { name: 'Remover da lista' }).click()
+  await expect(sheet).toContainText('A pasta e os arquivos continuam no PC')
+  await phone.screenshot({ path: 'e2e/.results/celular-remover-projeto.png' })
+  await sheet.getByRole('button', { name: 'Remover da lista' }).click()
+  await expect(run.page.locator('[data-project-row]').filter({ hasText: 'outro' })).toHaveCount(0)
+  await waitFor(() => !saved().projects.some((p) => p.id === 'p2'), 'projeto fora do estado do PC')
+  expect(existsSync(join(outro, 'fica.txt'))).toBe(true)
+})
+
+test('R-celular-arquivos arquivo criado e apagado pelo celular confere no disco, e a lista do celular acompanha o que o PC grava', async ({ kora }) => {
+  const env = kora.env()
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  const { phone } = await openPhone(run, cookie, { width: 360, height: 720 })
+  const row = (name: string) => phone.locator('.file-row').filter({ hasText: name })
+
+  await phone.getByRole('button', { name: 'Arquivos de proj-teste' }).click()
+  await phone.getByRole('button', { name: 'Novo arquivo' }).click()
+  const field = phone.getByLabel('Nome do arquivo')
+  await field.fill('con')
+  await expect(phone.getByRole('alert').filter({ hasText: 'nome reservado do Windows' })).toBeVisible()
+  await field.fill('docs/nota.md')
+  await phone.screenshot({ path: 'e2e/.results/celular-novo-arquivo.png' })
+  await phone.getByRole('button', { name: 'Criar arquivo' }).click()
+  await waitFor(() => existsSync(join(env.project, 'docs', 'nota.md')), 'arquivo criado no disco do PC')
+  await expect(phone.locator('.file-title')).toContainText('nota.md')
+  await phone.getByRole('button', { name: 'Voltar' }).first().click()
+  await row('docs').click()
+  await expect(row('nota.md')).toBeVisible()
+
+  await row('nota.md').click({ button: 'right' })
+  const sheet = phone.getByRole('dialog', { name: 'Opções de nota.md' })
+  await sheet.getByRole('button', { name: 'Excluir' }).click()
+  await expect(sheet).toContainText('Lixeira do Windows')
+  await sheet.getByRole('button', { name: 'Mover para a Lixeira' }).click()
+  await waitFor(() => !existsSync(join(env.project, 'docs', 'nota.md')), 'arquivo fora do disco do PC')
+  await expect(row('nota.md')).toHaveCount(0)
+
+  // Gravado no PC (pelo agente, pelo editor): aparece na pasta aberta no celular sem tocar em atualizar.
+  writeFileSync(join(env.project, 'docs', 'do-pc.md'), '# veio do PC\n')
+  await expect(row('do-pc.md')).toBeVisible({ timeout: 10_000 })
+})
+
+test('R-celular-busca busca sem acento acha pela categoria; copiar caminho fecha a folha com um aviso só; sem conexão a nova aba avisa', async ({ kora }) => {
+  const env = kora.env()
+  const outro = join(env.root, 'vitrine')
+  mkdirSync(outro)
+  writeState(env, {
+    version: 2,
+    projects: [{ id: 'p1', name: 'proj-teste', path: env.project }, { id: 'p2', name: 'vitrine', path: outro, groupId: 'g1' }],
+    tabs: [],
+    groups: [{ id: 'g1', name: 'Educação' }]
+  } as SavedState)
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  const { phone } = await openPhone(run, cookie, { width: 350, height: 700 })
+  const project = (name: string) => phone.locator('.tree-project-name').filter({ hasText: name })
+
+  // A lupa do cabeçalho leva ao campo; "educacao" acha o projeto da categoria "Educação".
+  await phone.getByRole('button', { name: 'Buscar projetos' }).click()
+  await expect(phone.getByLabel('Buscar projetos, abas e categorias')).toBeFocused()
+  await phone.keyboard.type('EDUCACAO')
+  await expect(project('vitrine')).toBeVisible()
+  await expect(project('proj-teste')).toHaveCount(0)
+  await phone.getByLabel('Buscar projetos, abas e categorias').fill('')
+
+  const saved = await saveClipboard(run)
+  try {
+    await project('vitrine').click({ button: 'right' })
+    await phone.getByRole('dialog', { name: 'vitrine' }).getByRole('button', { name: 'Copiar caminho' }).click()
+    await expect(phone.getByRole('dialog')).toHaveCount(0)
+    await expect(phone.locator('.mobile-toast')).toHaveText('Caminho copiado.')
+    await expect(phone.getByText('Caminho copiado.')).toHaveCount(1)
+    expect(await readClipboardText(run)).toBe(outro)
+  } finally {
+    await restoreClipboard(run, saved)
+  }
+
+  // O PC desliga a conexão do celular: a folha de nova aba diz por que as opções não respondem.
+  await run.page.evaluate(() => window.kora.setMobileEnabled(false))
+  await expect(phone.locator('.connection-dot')).not.toHaveClass(/online/)
+  await phone.getByRole('button', { name: 'Nova conversa em proj-teste' }).click()
+  const sheet = phone.getByRole('dialog', { name: 'proj-teste' })
+  await expect(sheet.getByRole('alert')).toContainText('Sem conexão com o PC')
+  await expect(sheet.getByRole('button', { name: /Terminal/ })).toBeDisabled()
+  await phone.screenshot({ path: 'e2e/.results/celular-nova-aba-sem-conexao.png' })
+})
+
+// A página do projeto tenta de tudo para sair da moldura: ler e mexer na página do Kora, ler o cookie do celular e
+// chamar a API do PC. Cada tentativa escreve o resultado na própria página, que o teste lê pela moldura.
+const ESCAPE = `<script>
+  var alcance = 'bloqueado'
+  try { alcance = 'alcançou: ' + parent.document.title; parent.document.body.setAttribute('data-invadido', '1') } catch (e) {}
+  document.getElementById('alcance').textContent = alcance
+  try { document.getElementById('cookie').textContent = 'cookie: ' + document.cookie } catch (e) { document.getElementById('cookie').textContent = 'cookie bloqueado' }
+  fetch('/api/state', { credentials: 'include' }).then(function (r) { document.getElementById('api').textContent = 'api ' + r.status }, function () { document.getElementById('api').textContent = 'api bloqueada' })
+</script>`
+const page = (title: string): string => `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="estilo.css"></head><body><h1 id="titulo">${title}</h1><p id="alcance">?</p><p id="cookie">?</p><p id="api">?</p>${ESCAPE}</body></html>`
+
+test('R-celular-html HTML do projeto abre desenhado e isolado: o script roda só na moldura, sem alcançar a página, o cookie nem a API do Kora; e acompanha o PC', async ({ kora }) => {
+  const env = kora.env()
+  mkdirSync(join(env.project, 'site'))
+  writeFileSync(join(env.project, 'site', 'estilo.css'), 'h1 { color: rgb(1, 2, 3); }')
+  writeFileSync(join(env.project, 'site', 'pagina.html'), page('Página do projeto'))
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  const { phone } = await openPhone(run, cookie, { width: 360, height: 720 })
+  const row = (name: string) => phone.locator('.file-row').filter({ hasText: name })
+
+  await phone.getByRole('button', { name: 'Arquivos de proj-teste' }).click()
+  await row('site').click()
+  await row('pagina.html').click()
+  const frame = phone.frameLocator('iframe.html-view')
+  await expect(frame.locator('#titulo')).toHaveText('Página do projeto')
+  await expect(frame.locator('#titulo'), 'o CSS ao lado do HTML vem pelo link de leitura').toHaveCSS('color', 'rgb(1, 2, 3)')
+  await expect(frame.locator('#alcance'), 'o script não lê a página do Kora').toHaveText('bloqueado')
+  await expect(frame.locator('#cookie'), 'nem o cookie do pareamento').toHaveText(/^(cookie bloqueado|cookie: )$/)
+  await expect(frame.locator('#api'), 'nem chega à API do PC').toHaveText(/^api (bloqueada|401|403)$/)
+  expect(await phone.evaluate(() => document.body.dataset['invadido']), 'a página do Kora fica intacta').toBeUndefined()
+  await phone.screenshot({ path: 'e2e/.results/celular-html.png' })
+
+  // O agente regrava a página com ela aberta e sem nada por salvar no celular: a moldura mostra a versão nova sozinha.
+  writeFileSync(join(env.project, 'site', 'pagina.html'), page('Versão nova do agente'))
+  await expect(frame.locator('#titulo')).toHaveText('Versão nova do agente', { timeout: 10_000 })
+  await expect(phone.getByRole('status').filter({ hasText: 'Atualizado com a versão do PC' })).toBeVisible()
+  await expect(frame.locator('#alcance')).toHaveText('bloqueado')
+})
+
+test('R-celular-planilha CSV abre como planilha: cabeçalho e número da linha presos ao rolar nos dois sentidos, e busca sem acento', async ({ kora }) => {
+  const env = kora.env()
+  const header = ['Código', 'Produto', 'Descrição', 'Preço', 'Estoque', 'Fornecedor', 'Cidade', 'Observação']
+  const rows = Array.from({ length: 400 }, (_, i) => [String(i + 1), i === 249 ? 'Maçã Fuji' : `Produto ${i + 1}`, 'descrição bem comprida '.repeat(3), `${i + 1},50`, String(i * 3), `Fornecedor ${i % 7}`, 'São Paulo', 'nada'])
+  writeFileSync(join(env.project, 'dados.csv'), [header, ...rows].map((r) => r.join(';')).join('\r\n'))
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  const { phone } = await openPhone(run, cookie, { width: 360, height: 720 })
+
+  await phone.getByRole('button', { name: 'Arquivos de proj-teste' }).click()
+  await phone.locator('.file-row').filter({ hasText: 'dados.csv' }).click()
+  const grid = phone.getByRole('grid', { name: 'Planilha' })
+  const head = grid.locator('.sheet-head')
+  await expect(head.getByRole('columnheader', { name: 'Produto' }), 'o ; do CSV brasileiro é detectado e a 1ª linha vira cabeçalho').toBeVisible()
+  await expect(phone.locator('.sheet-count')).toHaveText('400 linhas')
+  await grid.evaluate((element) => { element.scrollTop = 4000; element.scrollLeft = 400 })
+  await expect(grid.getByRole('rowheader').filter({ hasText: /^130$/ })).toBeVisible()
+  const gridBox = (await grid.boundingBox())!
+  expect((await head.boundingBox())!.y, 'o cabeçalho fica no alto da grade ao rolar para baixo').toBeCloseTo(gridBox.y, 0)
+  expect((await grid.getByRole('rowheader').filter({ hasText: /^130$/ }).boundingBox())!.x, 'o número da linha fica na borda da grade ao rolar de lado').toBeCloseTo(gridBox.x, 0)
+  expect(await grid.evaluate((element) => element.scrollLeft), 'a grade rola de lado').toBeGreaterThan(300)
+  await phone.screenshot({ path: 'e2e/.results/celular-planilha.png' })
+
+  await phone.getByRole('textbox', { name: 'Buscar na planilha' }).fill('maca')
+  await expect(phone.locator('.sheet-count'), 'a busca ignora acento e caixa').toHaveText('1 de 400')
+  await expect(grid.getByRole('gridcell', { name: 'Maçã Fuji' })).toBeVisible()
+  await expect(grid.getByRole('rowheader')).toHaveText(['251'])
+  await grid.getByRole('gridcell', { name: 'Maçã Fuji' }).click()
+  await expect(phone.locator('.sheet-cell-bar')).toContainText('B251')
+  await expect(phone.locator('.sheet-cell-bar')).toContainText('Maçã Fuji')
+})
+
+test('R-celular-mudou-no-pc arquivo aberto acompanha o PC: sem rascunho recarrega sozinho; com rascunho avisa na hora, compara e só descarta ou grava por cima confirmando; apagado no PC avisa', async ({ kora }) => {
+  const env = kora.env()
+  const file = join(env.project, 'notas.txt')
+  writeFileSync(file, 'linha 1\nlinha 2\nlinha 3\n')
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  const { phone } = await openPhone(run, cookie, { width: 360, height: 720 })
+  const content = phone.locator('.cm-content')
+  const conflict = phone.getByRole('alert').filter({ hasText: 'O arquivo mudou no PC enquanto você editava' })
+  const save = phone.getByRole('button', { name: 'Salvar', exact: true })
+  const type = async (text: string): Promise<void> => {
+    await content.click()
+    await phone.keyboard.press('Control+End')
+    await phone.keyboard.type(text)
+  }
+
+  await phone.getByRole('button', { name: 'Arquivos de proj-teste' }).click()
+  await phone.locator('.file-row').filter({ hasText: 'notas.txt' }).click()
+  await expect(content).toContainText('linha 2')
+  await expect(content, 'código abre em Ver: sem campo editável, o toque não abre o teclado').toHaveAttribute('contenteditable', 'false')
+
+  writeFileSync(file, 'linha 1\nlinha 2 do agente\nlinha 3\n')
+  await expect(content, 'sem rascunho, a versão do PC vem sozinha').toContainText('linha 2 do agente', { timeout: 10_000 })
+  await expect(phone.getByRole('status').filter({ hasText: 'Atualizado com a versão do PC' })).toBeVisible()
+
+  await phone.getByRole('button', { name: 'Editar', exact: true }).click()
+  await expect(content).toHaveAttribute('contenteditable', 'true')
+  await type('minha linha')
+  await expect(save).toBeVisible()
+  writeFileSync(file, 'linha 1\nlinha 2 do agente de novo\nlinha 3\n')
+  await expect(conflict, 'com rascunho, o aviso vem na hora, sem esperar o Salvar').toBeVisible({ timeout: 10_000 })
+  await expect(content, 'o rascunho fica na tela').toContainText('minha linha')
+
+  await conflict.getByRole('button', { name: 'Comparar' }).click()
+  const diff = phone.getByRole('region', { name: 'Comparação com o PC' })
+  await expect(diff.locator('.diff-line.removed')).toContainText(['linha 2 do agente de novo'])
+  await expect(diff.locator('.diff-line.added')).toContainText(['linha 2 do agente', 'minha linha'])
+  await phone.screenshot({ path: 'e2e/.results/celular-comparar.png' })
+  await diff.getByRole('button', { name: 'Fechar comparação' }).click()
+  await expect(diff).toHaveCount(0)
+
+  await conflict.getByRole('button', { name: 'Salvar por cima' }).click()
+  await expect(phone.getByRole('alert')).toContainText('Gravar a sua versão por cima')
+  await phone.waitForTimeout(300)
+  expect(readFileSync(file, 'utf8'), 'nada é gravado antes de confirmar').toBe('linha 1\nlinha 2 do agente de novo\nlinha 3\n')
+  await phone.getByRole('button', { name: 'Confirmar e salvar' }).click()
+  await waitFor(() => readFileSync(file, 'utf8') === 'linha 1\nlinha 2 do agente\nlinha 3\nminha linha', 'rascunho gravado por cima no PC')
+  await expect(save).toHaveCount(0)
+
+  await type(' e mais')
+  writeFileSync(file, 'versão final do PC\n')
+  await expect(conflict).toBeVisible({ timeout: 10_000 })
+  await conflict.getByRole('button', { name: 'Recarregar do PC' }).click()
+  await phone.getByRole('button', { name: 'Cancelar' }).click()
+  await expect(content, 'cancelar não descarta nada').toContainText('minha linha e mais')
+  await conflict.getByRole('button', { name: 'Recarregar do PC' }).click()
+  await phone.getByRole('button', { name: 'Descartar e recarregar' }).click()
+  await expect(content).toContainText('versão final do PC')
+  await expect(content).not.toContainText('minha linha')
+  await expect(save).toHaveCount(0)
+  expect(readFileSync(file, 'utf8')).toBe('versão final do PC\n')
+
+  rmSync(file)
+  await expect(phone.getByRole('alert').filter({ hasText: 'apagado ou renomeado no PC' })).toBeVisible({ timeout: 10_000 })
+  await expect(content, 'o que estava na tela fica').toContainText('versão final do PC')
+})
+
+// O toque em `arquivo:42` no terminal entra no histórico do celular como a rota do arquivo com a linha (fileLine);
+// aqui a rota entra pelo mesmo caminho (pushState + popstate do useMobileNavigation), sem depender do toque no terminal.
+async function openAtLine(phone: Page, file: string, line: number): Promise<void> {
+  await phone.evaluate(({ file, line }) => {
+    const current = history.state.koraMobile
+    history.pushState({ koraMobile: { route: { ...current.route, file, fileLine: line }, depth: current.depth + 1 } }, '', location.pathname)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, { file, line })
+}
+
+test('R-celular-linha arquivo:linha do terminal abre na linha: código rola e destaca a linha, Markdown vai ao bloco dela, CSV à linha da planilha', async ({ kora }) => {
+  const env = kora.env()
+  writeFileSync(join(env.project, 'longo.ts'), Array.from({ length: 300 }, (_, i) => `const linha${i + 1} = ${i + 1}`).join('\n'))
+  writeFileSync(join(env.project, 'guia.md'), Array.from({ length: 60 }, (_, i) => `## Seção ${i + 1}\n\nTexto da seção ${i + 1}.\n`).join('\n'))
+  writeFileSync(join(env.project, 'tabela.csv'), ['nome,valor', ...Array.from({ length: 500 }, (_, i) => `item ${i + 1},${i}`)].join('\n'))
+  const run = await kora.launch(env)
+  const { cookie } = await pairPhone(run)
+  const { phone } = await openPhone(run, cookie, { width: 360, height: 720 })
+  await phone.getByRole('button', { name: 'Arquivos de proj-teste' }).click()
+  await expect(phone.locator('.file-row').first()).toBeVisible()
+  const inView = async (selector: string): Promise<boolean> => phone.locator(selector).first().evaluate((element) => {
+    const box = element.getBoundingClientRect()
+    return box.height > 0 && box.top >= 0 && box.bottom <= innerHeight
+  })
+
+  await openAtLine(phone, 'longo.ts', 240)
+  const jumped = phone.locator('.cm-jump-line')
+  await expect(jumped, 'a linha pedida fica destacada').toHaveText('const linha240 = 240')
+  expect(await inView('.cm-jump-line'), 'e rolada até a tela').toBe(true)
+  await expect(phone.locator('.cm-content')).toHaveAttribute('contenteditable', 'false')
+
+  await phone.goBack()
+  // Cada seção ocupa 4 linhas (título, vazia, texto, vazia): a 201 é "## Seção 51", a 202 a vazia depois dele e a
+  // 203 o texto. Linha que não começa bloco cai no bloco de antes dela.
+  await openAtLine(phone, 'guia.md', 202)
+  const block = phone.locator('.markdown-view .md-jumped')
+  await expect(block, 'Markdown: o bloco onde a linha cai').toHaveText('Seção 51')
+  expect(await inView('.markdown-view .md-jumped')).toBe(true)
+
+  await phone.goBack()
+  await openAtLine(phone, 'tabela.csv', 400)
+  const row = phone.locator('.sheet-row.jumped')
+  await expect(row.getByRole('rowheader'), 'CSV: a linha 400 do arquivo é a linha 400 da planilha').toHaveText('400')
+  await expect(row.getByRole('gridcell').first()).toHaveText('item 399')
+  expect(await inView('.sheet-row.jumped')).toBe(true)
 })

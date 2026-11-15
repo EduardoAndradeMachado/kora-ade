@@ -9,7 +9,7 @@ import { promisify } from 'node:util'
 import { brotliCompress, constants as zlibConstants, gzip } from 'node:zlib'
 import QRCode from 'qrcode'
 import { z } from 'zod'
-import { DeviceNameSchema, FileSaveSchema, FolderCreateSchema, MobileCommandSchema, type MobilePairing, type MobileStatus, type TerminalSizeEvent } from '../shared/mobile'
+import { DeviceNameSchema, EntryActionSchema, FileSaveSchema, FolderCreateSchema, MobileCommandSchema, type MobileFilesEvent, type MobilePairing, type MobileStatus, type TerminalSizeEvent } from '../shared/mobile'
 import { MobilePairingStore } from './mobile-pairing'
 import { MAX_PASTED_IMAGE_BYTES, savePastedImage } from './pasted-image'
 import { MAX_PASTED_FILE_BYTES, savePastedFile } from './pasted-file'
@@ -400,6 +400,11 @@ export class MobileServer {
     for (const client of this.clients) if (this.options.runtime.viewing(client.device, id)) sendEvent(client.response, 'terminal', { id, data, sequence })
   }
 
+  // Aviso do observador de pastas do PC (project-watcher): a lista de arquivos aberta no celular relê a pasta que mudou.
+  publishFiles(event: MobileFilesEvent): void {
+    for (const client of this.clients) sendEvent(client.response, 'files', event)
+  }
+
   publishSize(event: TerminalSizeEvent): void {
     for (const client of this.clients) sendEvent(client.response, 'size', event)
   }
@@ -674,6 +679,9 @@ export class MobileServer {
           this.options.runtime.filePath(project, path)
           return json(response, 200, { raw: this.rawLink(project, path, device) })
         }
+        if (url.pathname === '/api/file-stat' && request.method === 'GET') {
+          return json(response, 200, this.options.runtime.fileStat(url.searchParams.get('project') ?? '', url.searchParams.get('path') ?? ''))
+        }
         if (url.pathname === '/api/file' && request.method === 'POST') {
           // O JSON pode dobrar o tamanho do texto (aspas, barras e quebras de linha escapadas).
           const save = FileSaveSchema.parse(await this.body(request, 14 * 1024 * 1024))
@@ -683,6 +691,9 @@ export class MobileServer {
             if (error instanceof ConflictError) return json(response, 409, { error: 'O arquivo mudou no PC depois que você abriu.', conflict: true })
             throw error
           }
+        }
+        if (url.pathname === '/api/entry' && request.method === 'POST') {
+          return json(response, 200, await this.options.runtime.entry(EntryActionSchema.parse(await this.body(request))))
         }
         // O app registra o certificado dele no pareamento que já existe (feito pela rede local, com o cookie), para depois
         // entrar pelo relay sem parear de novo.

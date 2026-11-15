@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { AgentSessionSchema, type AgentActivity } from './agent'
-import type { Alerts, KoraState, SavedTab } from './state'
+import { GROUP_NAME_MAX, type Alerts, type KoraState, type SavedTab } from './state'
 import type { AgentUsage } from './usage-types'
 import type { ClaudeAccountsView } from './claude-accounts'
 import type { FileEntry } from './ipc'
@@ -8,6 +8,23 @@ import type { GitFile } from './git-types'
 
 const id = z.string().min(1).max(100)
 const size = { cols: z.number().int().min(20).max(500), rows: z.number().int().min(5).max(200) }
+const delta = z.union([z.literal(-1), z.literal(1)])
+// Maior mensagem que o celular manda de uma vez: o campo confere antes de enviar e diz quanto passou.
+export const SEND_TEXT_MAX = 32768
+const groupName = z.string().trim().min(1).max(GROUP_NAME_MAX)
+// Organização da lateral pelo celular: o PC aplica cada pedido sobre o estado dele com as mesmas funções da lateral
+// (shared/groups, shared/arrange) e confere com o applyLayout. O celular não manda a lista inteira: uma mudança feita no
+// PC no mesmo instante não é desfeita por um retrato atrasado.
+const GroupCommandSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('create'), name: groupName, parentId: id.nullable() }),
+  z.object({ kind: z.literal('rename'), id, name: groupName }),
+  z.object({ kind: z.literal('hide'), id, hidden: z.boolean() }),
+  z.object({ kind: z.literal('nest'), id, parentId: id.nullable() }),
+  z.object({ kind: z.literal('move'), id, delta }),
+  z.object({ kind: z.literal('remove'), id })
+])
+export type GroupCommand = z.infer<typeof GroupCommandSchema>
+const SectionSchema = z.union([z.object({ hidden: z.literal(true) }), z.object({ hidden: z.literal(false), groupId: id.nullable() })])
 export const MobileCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('add-project'), path: z.string().trim().min(1).max(4096) }),
   z.object({ type: z.literal('relocate-project'), projectId: id, path: z.string().trim().min(1).max(4096) }),
@@ -20,7 +37,7 @@ export const MobileCommandSchema = z.discriminatedUnion('type', [
   // images: caminhos devolvidos por /api/image; cada um vai numa colagem só dele (Terminals.submit).
   // files: caminhos devolvidos por /api/attachment; vão no fim do texto, para o agente ler pelo caminho.
   z.object({
-    type: z.literal('send'), tabId: id, text: z.string().max(32768),
+    type: z.literal('send'), tabId: id, text: z.string().max(SEND_TEXT_MAX),
     images: z.array(z.string().min(1).max(4096)).max(10).default([]),
     files: z.array(z.string().min(1).max(4096)).max(10).default([])
   }).refine((command) => command.text.trim() !== '' || command.images.length > 0 || command.files.length > 0, 'Escreva uma mensagem ou anexe um arquivo.'),
@@ -30,6 +47,11 @@ export const MobileCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('rename'), tabId: id, title: z.string().trim().min(1).max(100) }),
   // Nome vazio volta ao nome da pasta, como no PC.
   z.object({ type: z.literal('rename-project'), projectId: id, name: z.string().max(200) }),
+  z.object({ type: z.literal('place-project'), projectId: id, section: SectionSchema }),
+  z.object({ type: z.literal('move-project'), projectId: id, delta }),
+  // Só tira da lista do Kora (e fecha as abas dele); a pasta no disco não é tocada.
+  z.object({ type: z.literal('remove-project'), projectId: id }),
+  z.object({ type: z.literal('group'), action: GroupCommandSchema }),
   z.object({ type: z.literal('switch-account'), accountId: id }),
   z.object({ type: z.literal('alerts'), alerts: z.object({ sound: z.boolean(), windowsNotification: z.boolean() }) })
 ])
@@ -55,6 +77,12 @@ export interface MobileUsage { usage: AgentUsage[]; accounts: ClaudeAccountsView
 // o git status do projeto inteiro leva centenas de ms, e a pasta não precisa esperar por ele.
 export interface MobileDirectory { path: string; entries: FileEntry[] }
 export interface MobileGit { files: GitFile[] }
+// Mudança no disco vista pelo PC: dirs são as pastas (relativas, '' é a raiz) que ganharam ou perderam itens; git, o
+// status mudou; rescan, não dá para saber o que mudou e tudo precisa ser relido. files: os arquivos gravados, criados
+// ou renomeados (o arquivo aberto no celular confere se é ele); allFiles, rajada grande demais para listar.
+export interface MobileFilesEvent { projectId: string; dirs: string[]; git: boolean; rescan: boolean; files?: string[]; allFiles?: boolean }
+// O arquivo aberto no celular, como está no PC agora: ele confere se mudou (ou sumiu) sem baixar o conteúdo.
+export type MobileFileStat = { exists: true; mtimeMs: number; size: number } | { exists: false }
 // Um pouco acima do limite de leitura (5 MB), para um arquivo no limite ainda poder crescer ao ser editado.
 export const FileSaveSchema = z.object({ projectId: id, path: z.string().max(4096), content: z.string().max(6 * 1024 * 1024), mtimeMs: z.number() })
 export interface MobileFolders {
@@ -63,6 +91,21 @@ export interface MobileFolders {
   folders: { name: string; path: string }[]
   shortcuts: { name: string; path: string }[]
 }
+// Arquivos e pastas do projeto pelo celular, com as funções do explorador do PC (file-actions, files): o PC confere
+// nome, caminho fora do projeto, .git e item que já existe, com as mesmas mensagens. Caminhos relativos ao projeto.
+const entryPath = z.string().max(4096)
+export const EntryActionSchema = z.discriminatedUnion('op', [
+  // name aceita "a/b/c.ts": as pastas que faltam nascem junto, como no PC.
+  z.object({ op: z.literal('create'), projectId: id, parent: entryPath, name: z.string().max(4096), kind: z.enum(['file', 'dir']) }),
+  z.object({ op: z.literal('rename'), projectId: id, path: entryPath.min(1), name: z.string().max(255) }),
+  z.object({ op: z.literal('move'), projectId: id, path: entryPath.min(1), to: entryPath }),
+  z.object({ op: z.literal('duplicate'), projectId: id, path: entryPath.min(1) }),
+  // Vai para a Lixeira do Windows, como o Excluir do explorador do PC.
+  z.object({ op: z.literal('trash'), projectId: id, path: entryPath.min(1) })
+])
+export type EntryAction = z.infer<typeof EntryActionSchema>
+// path: onde o item ficou (o criado, o renomeado, o movido ou a cópia); vazio depois de ir para a Lixeira.
+export interface EntryResult { path: string }
 // O nome é conferido no PC (validateEntryName), com a mesma mensagem que o explorador do PC mostra.
 export const FolderCreateSchema = z.object({ parent: z.string().min(1).max(4096), name: z.string().max(255) })
 export interface DesktopSessionState { state: KoraState; tabs: MobileTab[] }

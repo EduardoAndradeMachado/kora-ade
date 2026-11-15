@@ -6,6 +6,7 @@ import { SkeletonPage } from './Skeleton'
 // A página abre na largura da tela; a pinça, o duplo toque e os botões mudam o zoom sem tirar do lugar o ponto sob os
 // dedos. Só as páginas perto da tela ocupam memória, e recarregar (o agente gerou o PDF de novo) volta ao mesmo lugar.
 const GAP = 14
+const COMPACT_GAP = 4
 const NEAR = '600px 0px'
 const CSS_PER_POINT = 96 / 72
 const MIN_ZOOM = 0.25
@@ -30,7 +31,10 @@ const failure = (error: unknown): string =>
   error instanceof Error && error.name === 'PasswordException' ? 'o PDF é protegido por senha.' : error instanceof Error ? error.message : String(error)
 
 // onError: o PDF não abriu (rede caiu no meio, link vencido); quem mostra decide se tenta de novo.
-export function PdfPages({ url, controls, onTap, onError }: { url: string; controls: boolean; onTap(): void; onError?(): void }): React.JSX.Element {
+// compact: celular deitado, com pouca altura: a margem em volta da página quase some e ela ganha a largura toda.
+// page: a página pedida pelo `arquivo.pdf:3` do terminal (o PDF não tem linhas; o número vale como página).
+export function PdfPages({ url, controls, compact = false, page = null, onTap, onError }: { url: string; controls: boolean; compact?: boolean; page?: number | null; onTap(): void; onError?(): void }): React.JSX.Element {
+  const gap = compact ? COMPACT_GAP : GAP
   const [state, setState] = useState<DocState>({ kind: 'loading' })
   const onErrorRef = useRef(onError)
   onErrorRef.current = onError
@@ -47,7 +51,10 @@ export function PdfPages({ url, controls, onTap, onError }: { url: string; contr
   useEffect(() => () => clearTimeout(tapTimer.current), [])
 
   const points = state.kind === 'ready' ? state.points : 0
-  const fit = points && width > GAP * 2 ? clampZoom((width - GAP * 2) / (points * CSS_PER_POINT)) : 1
+  // width já desconta o padding da rolagem; em pé a página ainda deixa uma margem do mesmo tamanho dos lados, e
+  // deitado vai até o padding.
+  const margin = compact ? 0 : gap * 2
+  const fit = points && width > margin ? clampZoom((width - margin) / (points * CSS_PER_POINT)) : 1
   const scale = zoom === 'fit' ? fit : zoom
   const pageWidth = Math.round(points * CSS_PER_POINT * scale)
   const scaleRef = useRef(scale)
@@ -125,19 +132,35 @@ export function PdfPages({ url, controls, onTap, onError }: { url: string; contr
     element.scrollTop = held.fy * element.scrollHeight
   }, [state, width])
 
+  // Pedido de página atendido uma vez: recarregar o PDF ou mudar o zoom depois não volta a ela.
+  const wanted = useRef<number | null>(page)
+  const asked = useRef(page)
+  if (asked.current !== page) {
+    asked.current = page
+    wanted.current = page
+  }
+  useLayoutEffect(() => {
+    const element = scrollerRef.current
+    const target = wanted.current
+    if (state.kind !== 'ready' || !element || width === 0 || target === null || target < 1 || target > state.doc.numPages) return
+    wanted.current = null
+    const pageElement = element.querySelectorAll<HTMLElement>('.pdf-page')[target - 1]
+    if (pageElement) element.scrollTop = pageElement.offsetTop - gap
+  }, [state, width, page, gap])
+
   // A página da vez é a que ocupa o meio da tela: no celular a rolagem é longa e o número evita se perder.
   useEffect(() => {
     if (!scroller || state.kind !== 'ready') return
     const update = (): void => {
       const middle = scroller.getBoundingClientRect().top + scroller.clientHeight / 2
       const pages = [...scroller.querySelectorAll<HTMLElement>('.pdf-page')]
-      const index = pages.findIndex((page) => page.getBoundingClientRect().bottom + GAP / 2 >= middle)
+      const index = pages.findIndex((page) => page.getBoundingClientRect().bottom + gap / 2 >= middle)
       setCurrent(index < 0 ? pages.length : index + 1)
     }
     update()
     scroller.addEventListener('scroll', update, { passive: true })
     return () => scroller.removeEventListener('scroll', update)
-  }, [scroller, state, pageWidth])
+  }, [scroller, state, pageWidth, gap])
 
   // passive: false para a pinça não virar rolagem; um dedo só continua rolando a página normalmente.
   useEffect(() => {
@@ -180,9 +203,9 @@ export function PdfPages({ url, controls, onTap, onError }: { url: string; contr
   }
 
   return <div className="pdf-view">
-    <div className="pdf-scroller" ref={(element) => { scrollerRef.current = element; setScroller(element) }} style={{ padding: GAP }} onClick={tap} onDoubleClick={toggleZoom}>
+    <div className="pdf-scroller" ref={(element) => { scrollerRef.current = element; setScroller(element) }} style={{ padding: gap }} onClick={tap} onDoubleClick={toggleZoom}>
       {state.kind === 'loading' ? <SkeletonPage label="Abrindo o PDF…" /> : width > 0 && (
-        <div className="pdf-pages" style={{ gap: GAP }} aria-label={`PDF com ${state.doc.numPages} ${state.doc.numPages === 1 ? 'página' : 'páginas'}`}>
+        <div className="pdf-pages" style={{ gap }} aria-label={`PDF com ${state.doc.numPages} ${state.doc.numPages === 1 ? 'página' : 'páginas'}`}>
           {Array.from({ length: state.doc.numPages }, (_, index) => <PdfPage key={index} doc={state.doc} number={index + 1} width={pageWidth} ratio={state.ratio} root={scroller} />)}
         </div>
       )}
