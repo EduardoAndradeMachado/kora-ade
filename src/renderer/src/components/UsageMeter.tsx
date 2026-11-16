@@ -146,7 +146,9 @@ function UsageCard({ usage, now, anchor }: { usage: AgentUsage; now: number; anc
   )
 }
 
-export function CompactUsage({ usage, now }: { usage: AgentUsage[]; now: number }): React.JSX.Element {
+// cellHover: cada agente com o próprio destaque, quando o clique nele abre o painel já no agente (PC). No celular o
+// rodapé inteiro é um botão só.
+export function CompactUsage({ usage, now, cellHover = false }: { usage: AgentUsage[]; now: number; cellHover?: boolean }): React.JSX.Element {
   const [hovered, setHovered] = useState<{ agent: AgentUsage['agent']; anchor: DOMRect } | null>(null)
   const timer = useRef<number | undefined>(undefined)
 
@@ -198,7 +200,8 @@ export function CompactUsage({ usage, now }: { usage: AgentUsage[]; now: number 
           onPointerEnter={enter(u.agent)}
           onPointerLeave={leave}
           onPointerDown={dismiss}
-          className="flex min-w-0 items-center gap-1"
+          // Margem negativa: o destaque cresce para dentro do vão sem roubar largura da linha.
+          className={cn('flex min-w-0 items-center gap-1', cellHover && '-mx-1 rounded px-1 py-0.5 hover:bg-secondary hover:text-foreground')}
         >
           <CompactAgent usage={u} now={now} alone={usage.length === 1} bar={usage.length < 4} />
         </span>
@@ -213,48 +216,76 @@ export function claudeWeekly(claude: AgentUsage): WeeklyUsage | null {
   return weekly ? { usedPercent: weekly.usedPercent, resetsAt: weekly.resetsAt, recordedAt: claude.updatedAt } : null
 }
 
-function AgentDetail({ usage, now, onRefresh }: { usage: AgentUsage; now: number; onRefresh(): void }): React.JSX.Element {
+// O layout detalhado de sempre, colapsável: fechado fica só o cabeçalho. O clique em qualquer ponto do bloco abre ou
+// fecha; o nome é o botão do teclado e o clique dele sobe até o bloco.
+function AgentDetail({
+  usage,
+  now,
+  open,
+  onToggle,
+  onRefresh
+}: {
+  usage: AgentUsage
+  now: number
+  open: boolean
+  onToggle(): void
+  onRefresh(): void
+}): React.JSX.Element {
   return (
-    <section className="flex flex-col gap-2">
+    <section
+      data-usage-agent={usage.agent}
+      onClick={onToggle}
+      className="-m-1.5 flex cursor-pointer flex-col gap-2 rounded-md p-1.5 hover:bg-secondary/50"
+    >
       <header className="flex items-center gap-2">
         <AgentIcon kind={usage.agent} className="size-3.5" />
-        <span className="text-xs font-medium">{agentLabel(usage.agent)}</span>
+        <button type="button" aria-expanded={open} className="text-xs font-medium">
+          {agentLabel(usage.agent)}
+        </button>
         {usage.agent === 'claude' ? (
-          <ClaudeAccountSwitcher now={now} liveWeekly={claudeWeekly(usage)} onSwitched={onRefresh} />
-        ) : (
-          (usage.account ?? usage.plan) && (
-            <span className="ml-auto truncate px-1.5 text-[11px] text-muted-foreground">{usage.account ?? usage.plan}</span>
-          )
-        )}
-      </header>
-      {usage.error && (
-        <p className="flex items-start gap-1.5 text-[11px] text-destructive">
-          <Icon name="alerta" className="mt-px size-3" />
-          <span>{usage.error}</span>
-        </p>
-      )}
-      {usage.windows.map((w) => (
-        <div key={w.label} className="flex flex-col gap-1">
-          <div className="flex items-baseline justify-between gap-2 text-xs">
-            <span className="truncate">{w.label}</span>
-            <span className={cn('shrink-0 tabular-nums', percentTone(w.usedPercent))}>
-              {Math.round(w.usedPercent)}% usado
-            </span>
+          // Trocar de conta não abre nem fecha o bloco.
+          <div className="ml-auto flex min-w-0 cursor-default" onClick={(e) => e.stopPropagation()}>
+            <ClaudeAccountSwitcher now={now} liveWeekly={claudeWeekly(usage)} onSwitched={onRefresh} />
           </div>
-          <Bar percent={w.usedPercent} className="h-1.5 w-full" />
-          <span className="text-[11px] text-muted-foreground">
-            {w.resetsAt === null
-              ? 'Sem reset pendente'
-              : `Reseta ${formatResetIn(w.resetsAt - now)} · ${formatResetAt(w.resetsAt, now)}`}
-          </span>
-        </div>
-      ))}
-      <span className="text-[11px] text-muted-foreground">
-        Dado de {formatResetAt(usage.updatedAt, now)}
-        {usage.nextCheckAt !== undefined && usage.nextCheckAt > now && (
-          <span data-next-check> · próxima consulta {formatResetAt(usage.nextCheckAt, now)}</span>
+        ) : (usage.account ?? usage.plan) ? (
+          <span className="ml-auto truncate px-1.5 text-[11px] text-muted-foreground">{usage.account ?? usage.plan}</span>
+        ) : (
+          <span className="ml-auto" />
         )}
-      </span>
+        <Icon name={open ? 'setaCima' : 'setaBaixo'} className="size-3 shrink-0 text-muted-foreground" />
+      </header>
+      {open && (
+        <>
+          {usage.error && (
+            <p className="flex items-start gap-1.5 text-[11px] text-destructive">
+              <Icon name="alerta" className="mt-px size-3" />
+              <span>{usage.error}</span>
+            </p>
+          )}
+          {usage.windows.map((w) => (
+            <div key={w.label} className="flex flex-col gap-1">
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <span className="truncate">{w.label}</span>
+                <span className={cn('shrink-0 tabular-nums', percentTone(w.usedPercent))}>
+                  {Math.round(w.usedPercent)}% usado
+                </span>
+              </div>
+              <Bar percent={w.usedPercent} className="h-1.5 w-full" />
+              <span className="text-[11px] text-muted-foreground">
+                {w.resetsAt === null
+                  ? 'Sem reset pendente'
+                  : `Reseta ${formatResetIn(w.resetsAt - now)} · ${formatResetAt(w.resetsAt, now)}`}
+              </span>
+            </div>
+          ))}
+          <span className="text-[11px] text-muted-foreground">
+            Dado de {formatResetAt(usage.updatedAt, now)}
+            {usage.nextCheckAt !== undefined && usage.nextCheckAt > now && (
+              <span data-next-check> · próxima consulta {formatResetAt(usage.nextCheckAt, now)}</span>
+            )}
+          </span>
+        </>
+      )}
     </section>
   )
 }
@@ -263,9 +294,18 @@ export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
   const now = useNow()
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [anchor, setAnchor] = useState<{ left: number; bottom: number; maxHeight: number } | null>(null)
+  const [expanded, setExpanded] = useState<AgentUsage['agent'] | null>(null)
 
-  const toggle = (): void => {
-    if (anchor) return setAnchor(null)
+  // Clique num agente do rodapé abre o painel já nele; com o painel aberto, outro agente troca o expandido e o mesmo
+  // fecha. Clique fora dos agentes abre com todos fechados.
+  const toggle = (e: React.MouseEvent): void => {
+    const cell = (e.target as HTMLElement).closest<HTMLElement>('[data-usage-cell]')
+    const agent = (cell?.dataset['usageCell'] ?? null) as AgentUsage['agent'] | null
+    if (anchor) {
+      if (agent && agent !== expanded) return setExpanded(agent)
+      return setAnchor(null)
+    }
+    setExpanded(agent)
     const r = triggerRef.current!.getBoundingClientRect()
     // Abre para cima (o medidor fica no rodapé) e não passa da borda direita em janelas estreitas.
     setAnchor({
@@ -303,12 +343,15 @@ export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
         aria-expanded={anchor !== null}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={toggle}
-        className="flex w-full min-w-0 flex-col gap-0.5 rounded-md px-1.5 py-1 text-left text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+        className={cn(
+          'flex w-full min-w-0 flex-col gap-0.5 rounded-md px-1.5 py-1 text-left text-[11px] text-muted-foreground',
+          usage.length === 0 && 'hover:bg-secondary hover:text-foreground'
+        )}
       >
         {usage.length === 0 ? (
           <span>Uso dos agentes indisponível</span>
         ) : (
-          <CompactUsage usage={usage} now={now} />
+          <CompactUsage usage={usage} now={now} cellHover />
         )}
       </button>
       {anchor &&
@@ -337,7 +380,14 @@ export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
             ) : (
               usage.map((u, i) => (
                 <div key={u.agent} className={cn(i > 0 && 'border-t pt-3')}>
-                  <AgentDetail usage={u} now={now} onRefresh={onRefresh} />
+                  <AgentDetail
+                    usage={u}
+                    now={now}
+                    // Um agente só já vem aberto: não há o que esconder.
+                    open={usage.length === 1 || expanded === u.agent}
+                    onToggle={() => setExpanded(expanded === u.agent ? null : u.agent)}
+                    onRefresh={onRefresh}
+                  />
                 </div>
               ))
             )}
