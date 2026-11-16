@@ -91,7 +91,8 @@ export function TabIcon({ tab, selected, className }: { tab: Tab; selected: bool
       </span>
     )
   }
-  return <Icon name="terminal" active={selected && !isDormant(tab)} className={cn('size-3.5', dim, className)} />
+  // Terminal vivo em destaque mesmo sem estar selecionado: só assim ele não se confunde com um adormecido.
+  return <Icon name="terminal" active={!isDormant(tab)} className={cn('size-3.5', dim, className)} />
 }
 
 // Trabalhando: o braço âmbar do símbolo dando voltas em torno do ícone, como no carregamento da identidade.
