@@ -75,6 +75,8 @@ const CODEX_SUBMIT_DELAY_MS = 400
 // Tempo para o agente ler o arquivo colado e trocar o caminho por [Image #n] antes da próxima colagem.
 const IMAGE_PASTE_GAP_MS = 250
 const SHELL_EXIT_GRACE_MS = 3000
+// Tempo na altura uma linha menor: o bastante para o ConPTY avisar o programa da mudança antes de voltar.
+const REDRAW_NUDGE_MS = 150
 
 interface KittyKeyboardState {
   flags: number
@@ -122,6 +124,7 @@ export class Terminals {
   private readonly sessions = new Map<string, pty.IPty>()
   private readonly mirrors = new Map<string, Mirror>()
   private sequence = 0
+  private readonly sizes = new Map<string, { cols: number; rows: number }>()
 
   constructor(
     private readonly events: TerminalEvents,
@@ -146,6 +149,7 @@ export class Terminals {
       env: terminalEnv(process.env)
     })
     this.sessions.set(id, proc)
+    this.sizes.set(id, { cols, rows })
     this.mirror(id, proc, cols, rows)
     this.events.onSpawn?.(id, proc.pid)
     proc.onData((data) => {
@@ -182,6 +186,7 @@ export class Terminals {
   }
 
   private dropMirror(id: string): void {
+    this.sizes.delete(id)
     const mirror = this.mirrors.get(id)
     if (!mirror) return
     this.mirrors.delete(id)
@@ -243,6 +248,27 @@ export class Terminals {
 
   resize(id: string, cols: number, rows: number): void {
     if (cols <= 0 || rows <= 0) return
+    this.sizes.set(id, { cols, rows })
+    this.resizeNow(id, cols, rows)
+  }
+
+  // Reabrir no mesmo tamanho não muda nada no pty, e a tela embaralhada continua. Mudar a altura em uma linha e
+  // voltar faz o Claude, o Codex e o OpenCode redesenharem a tela inteira. A volta usa o último tamanho pedido, para
+  // não desfazer uma troca de dono que chegue no meio.
+  redraw(id: string): void {
+    const proc = this.sessions.get(id)
+    const mirror = this.mirrors.get(id)
+    if (!proc || !mirror) return
+    const { cols, rows } = mirror.terminal
+    this.resizeNow(id, cols, rows > 1 ? rows - 1 : rows + 1)
+    setTimeout(() => {
+      if (this.sessions.get(id) !== proc) return
+      const size = this.sizes.get(id) ?? { cols, rows }
+      this.resizeNow(id, size.cols, size.rows)
+    }, REDRAW_NUDGE_MS)
+  }
+
+  private resizeNow(id: string, cols: number, rows: number): void {
     this.sessions.get(id)?.resize(cols, rows)
     this.mirrors.get(id)?.terminal.resize(cols, rows)
   }

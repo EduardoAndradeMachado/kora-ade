@@ -26,6 +26,7 @@ const PROCESS_TESTS = [
   'test/remote-mobile-server.test.ts',
   'test/resume-after-update.test.ts',
   'test/terminal-mirror.test.ts',
+  'test/terminal-redraw.test.ts',
   'test/terminals.test.ts',
   'test/terminal-submit.test.ts'
 ]

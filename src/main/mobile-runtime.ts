@@ -369,6 +369,10 @@ export class MobileRuntime {
         this.apply(tab.id, this.sizes.take(tab.id, device))
         this.host.terminals.write(tab.id, command.data)
         return {}
+      case 'redraw':
+        this.live(tab.id)
+        this.host.terminals.redraw(tab.id)
+        return {}
       case 'send':
         this.live(tab.id)
         this.apply(tab.id, this.sizes.take(tab.id, device))

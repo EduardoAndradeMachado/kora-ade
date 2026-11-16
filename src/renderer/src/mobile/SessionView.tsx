@@ -34,6 +34,8 @@ const KEYS: [string, string][] = [
   ['→', '\x1b[C'],
   ['Enter', '\r']
 ]
+// O agente leva um instante para redesenhar depois da mudança de altura; a foto pedida antes viria velha.
+const REDRAW_SETTLE_MS = 700
 // Úteis, mas não de toda hora: ficam no ⋯ para a barra não crescer.
 const MORE_KEYS: [string, string][] = [
   ['Ctrl+C', '\x03'],
@@ -81,6 +83,8 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   // Erro de imagem ou de envio aparece no campo, onde a pessoa agiu, e não no aviso do topo.
   const [composerError, setComposerError] = useState<string | null>(null)
   const [moreKeys, setMoreKeys] = useState(false)
+  // Cada Redesenhar refaz o terminal daqui com uma foto nova do PC, depois de o agente redesenhar a tela.
+  const [redraws, setRedraws] = useState(0)
   const [voice, setVoice] = useState<'idle' | 'recording' | 'saved' | 'transcribing'>('idle')
   const audioDraft = useRef<{ base64: string; mime: string } | null>(null)
   const recoveryAllowed = useRef(true)
@@ -362,7 +366,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       term.dispose()
       void command({ type: 'detach', tabId: tab.id }).catch(() => {})
     }
-  }, [tab.id, live, connected, connection, device, feed, command, onError])
+  }, [tab.id, live, connected, connection, device, feed, command, onError, redraws])
 
   useEffect(() => {
     if (draft || images.length > 0) drafts.set(tab.id, { text: draft, images })
@@ -456,6 +460,12 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   const keys = (data: string): void => {
     void send({ type: 'keys', tabId: tab.id, data }).catch((error: Error) => onError(error.message))
   }
+  const redraw = (): void => {
+    setMoreKeys(false)
+    void send({ type: 'redraw', tabId: tab.id })
+      .then(() => new Promise((resolve) => setTimeout(resolve, REDRAW_SETTLE_MS)))
+      .then(() => setRedraws((count) => count + 1), (error: Error) => onError(error.message))
+  }
   // Igual ao Ctrl+V com print no PC: a imagem vira arquivo no PC e o caminho vai na mensagem, que o Claude e o
   // Codex anexam.
   const attach = async (files: File[]): Promise<void> => {
@@ -523,6 +533,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     </div>
     {moreKeys && <nav className="terminal-keys more-keys" aria-label="Mais teclas do terminal">
       {MORE_KEYS.map(([label, data]) => <button disabled={!connected} key={label} onClick={() => keys(data)}>{label}</button>)}
+      <button disabled={!connected} onClick={redraw}>Redesenhar</button>
     </nav>}
     <nav className="terminal-keys" aria-label="Teclas do terminal">
       {KEYS.map(([label, data]) => <button disabled={!connected} key={label} onClick={() => keys(data)}>{label}</button>)}

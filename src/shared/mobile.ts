@@ -34,6 +34,7 @@ export const MobileCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('detach'), tabId: id }),
   z.object({ type: z.literal('resize'), tabId: id, ...size }),
   z.object({ type: z.literal('keys'), tabId: id, data: z.string().min(1).max(64) }),
+  z.object({ type: z.literal('redraw'), tabId: id }),
   // images: caminhos devolvidos por /api/image; cada um vai numa colagem só dele (Terminals.submit).
   // files: caminhos devolvidos por /api/attachment; vão no fim do texto, para o agente ler pelo caminho.
   z.object({
