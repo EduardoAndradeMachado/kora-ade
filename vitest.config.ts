@@ -9,6 +9,7 @@ const RELAY_TESTS = ['test/relay-accounts.test.ts', 'test/relay-service.test.ts'
 // por vez, para um não atrasar o outro.
 const PROCESS_TESTS = [
   'test/agent.test.ts',
+  'test/agent-antigravity.test.ts',
   'test/file-holders.test.ts',
   'test/git.test.ts',
   'test/git-conflicts.test.ts',
