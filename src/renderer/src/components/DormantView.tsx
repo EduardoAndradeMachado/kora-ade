@@ -88,7 +88,7 @@ export function DormantView(props: Props): React.JSX.Element {
             }}
           >
             <div className="flex gap-1">
-              {(['claude', 'codex', 'opencode'] as const).map((k) => (
+              {(['claude', 'codex', 'opencode', 'antigravity'] as const).map((k) => (
                 <button
                   key={k}
                   type="button"

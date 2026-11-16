@@ -220,6 +220,7 @@ async function responsesOf<A extends Accumulator & { snapshot(id: string): Sessi
 }
 
 export async function sessionMetrics(sources: MetricsSources, agent: AgentRef, projectPath: string): Promise<SessionMetrics> {
+  if (agent.kind === 'antigravity') throw new Error('O Kora ainda não lê as métricas do Antigravity.')
   if (agent.kind === 'opencode') return opencodeMetrics(sources.opencodeDb, agent.sessionId)
   if (agent.kind === 'claude') {
     const file = await claudeTranscript(sources.claudeRoot, projectPath, agent.sessionId)

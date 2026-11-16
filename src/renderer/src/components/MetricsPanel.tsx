@@ -482,7 +482,7 @@ export function MetricsPanel({ projectId, agent, activity, source = DESKTOP_SOUR
   const sessionId = agent?.sessionId
 
   const loadSession = useCallback(() => {
-    if (!kind || !sessionId) return
+    if (!kind || !sessionId || kind === 'antigravity') return
     source.session(projectId, { kind, sessionId }).then(
       (m) => {
         // Resposta atrasada da sessão anterior (troca de aba no meio da leitura) não sobrescreve a atual.
@@ -564,6 +564,8 @@ export function MetricsPanel({ projectId, agent, activity, source = DESKTOP_SOUR
             <p className="px-3 py-3 text-xs text-muted-foreground">
               Selecione uma aba do Claude, do Codex ou do OpenCode. A aba do Codex só ganha sessão depois da primeira mensagem.
             </p>
+          ) : agent.kind === 'antigravity' ? (
+            <p className="px-3 py-3 text-xs text-muted-foreground">O Kora ainda não lê tokens e custo das conversas do Antigravity.</p>
           ) : metrics ? (
             <SessionView m={metrics} />
           ) : (

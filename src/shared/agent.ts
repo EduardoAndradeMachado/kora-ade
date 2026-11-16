@@ -1,12 +1,12 @@
 import { z } from 'zod'
 
-// Claude usa UUID v4 e o Codex UUID v7; os dois cabem no formato canônico.
+// Claude e agy usam UUID v4 e o Codex UUID v7; todos cabem no formato canônico.
 export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 // O OpenCode usa IDs próprios (ses_...). A CLI aceita retomar ou criar uma conversa com o ID informado;
 // restringimos ao alfabeto seguro porque ele vai direto na linha de comando.
 export const OPENCODE_SESSION_ID = /^ses[0-9a-z_-]{1,128}$/i
 
-export const AgentKindSchema = z.enum(['claude', 'codex', 'opencode'])
+export const AgentKindSchema = z.enum(['claude', 'codex', 'opencode', 'antigravity'])
 export type AgentKind = z.infer<typeof AgentKindSchema>
 
 export function validSessionId(kind: AgentKind, sessionId: string): boolean {
@@ -38,11 +38,10 @@ export type AgentActivity = 'working' | 'waiting'
 
 export type Startup =
   | { kind: 'claude'; mode: 'new'; sessionId: string }
-  | { kind: 'claude' | 'codex'; mode: 'resume'; sessionId: string }
-  | { kind: 'codex'; mode: 'new' }
+  | { kind: 'claude' | 'codex' | 'antigravity'; mode: 'resume'; sessionId: string }
+  // Codex e agy não aceitam criar a conversa com um ID escolhido: o vínculo vem da detecção, pelo lock da conversa.
+  | { kind: 'codex' | 'antigravity'; mode: 'new' }
   | { kind: 'opencode'; mode: 'new' | 'resume'; sessionId: string }
-  // O agy não aceita criar a conversa com um ID escolhido: a aba abre sem vínculo e volta como terminal.
-  | { kind: 'antigravity'; mode: 'new' }
 
 // Retorna o comando que o PowerShell roda ao abrir a aba. O ID vai direto na linha de comando,
 // então só passa se tiver o formato do agente.
@@ -54,7 +53,7 @@ export function startupCommand(startup: Startup): string {
     if (startup.mode === 'new') return `claude --session-id ${startup.sessionId}`
     return `claude --resume ${startup.sessionId}`
   }
-  if (startup.kind === 'antigravity') return 'agy'
+  if (startup.kind === 'antigravity') return startup.mode === 'new' ? 'agy' : `agy --conversation ${startup.sessionId}`
   if (startup.kind === 'opencode') {
     // --standalone: o servidor do OpenCode fica dentro da árvore da aba (e do Job Object do Kora),
     // em vez de compartilhar o serviço de segundo plano com o OpenCode aberto fora dele.

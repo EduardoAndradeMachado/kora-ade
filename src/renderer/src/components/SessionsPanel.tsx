@@ -106,7 +106,7 @@ export function SessionsPanel({ projectId, reloadKey, openSessions, onOpen, onPi
       {notice && <p className="px-3 pb-2 text-xs text-destructive">{notice}</p>}
       {sessions.length === 0 && (
         <p className="px-3 py-2 text-xs text-muted-foreground">
-          Nenhuma conversa do Claude, do Codex ou do OpenCode nesta pasta ainda.
+          Nenhuma conversa do Claude, do Codex, do OpenCode ou do Antigravity nesta pasta ainda.
         </p>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
@@ -141,18 +141,21 @@ export function SessionsPanel({ projectId, reloadKey, openSessions, onOpen, onPi
                   >
                     <Icon name="fixar" className="size-3.5" />
                   </button>
-                  <button
-                    type="button"
-                    data-tip="Apagar conversa"
-                    aria-label="Apagar conversa"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      void remove(s)
-                    }}
-                    className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-destructive"
-                  >
-                    <Icon name="excluir" className="size-3.5" />
-                  </button>
+                  {/* O agy guarda a conversa em vários lugares; apagar só parte deixaria lixo nele. */}
+                  {s.kind !== 'antigravity' && (
+                    <button
+                      type="button"
+                      data-tip="Apagar conversa"
+                      aria-label="Apagar conversa"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void remove(s)
+                      }}
+                      className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-destructive"
+                    >
+                      <Icon name="excluir" className="size-3.5" />
+                    </button>
+                  )}
                 </div>
               )}
             </div>

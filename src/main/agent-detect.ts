@@ -5,6 +5,15 @@ import { claudeActivity, claudeTurnEnded, codexActivity, readTail } from './agen
 import { descendants, type ProcInfo } from './processes'
 import { claudeProjectDir } from './sessions'
 
+// O agy segura presence/<conversa>.lock enquanto a conversa está carregada; os arquivos ficam depois que ele sai.
+// Subagentes do agy não ganham lock: só a conversa principal.
+export interface AntigravitySources {
+  presenceLocks(): { id: string; file: string; birthMs: number }[]
+  conversation(id: string): { subagent: boolean; activity: AgentActivity | null } | null
+  // Quem segura qualquer um dos arquivos, numa consulta só.
+  holders(files: string[]): number[]
+}
+
 export interface DetectorSources {
   claudeSessionsDir: string
   codexLocksDir: string
@@ -13,6 +22,8 @@ export interface DetectorSources {
   lockHolders(file: string): number[]
   // Rollout (~/.codex/sessions/.../rollout-*-<threadId>.jsonl) da conversa, de onde sai o estado do Codex.
   codexRollout(threadId: string): string | null
+  antigravity?: AntigravitySources
+  now?(): number
 }
 
 export interface DerivedName {
@@ -98,11 +109,18 @@ export function codexLocks(dir: string): CodexLock[] {
   }
 }
 
+// Busca completa pelos locks do agy custa ~30 ms: no máximo uma a cada este intervalo por processo sem conversa achada.
+export const AGY_SCAN_GAP_MS = 3_000
+// O lock de uma conversa nova nasce uns 2 s depois do processo; a folga cobre relógio e criação lenta.
+const AGY_FRESH_SLACK_MS = 5_000
+
 export class AgentDetector {
   constructor(private readonly sources: DetectorSources) {}
 
   private readonly subagentThreads = new Map<string, boolean>()
   private readonly derivedNames = new Map<number, DerivedName>()
+  private readonly agyByPid = new Map<number, { id: string; file: string; createdMs: number | null }>()
+  private readonly agyLastScan = new Map<number, number>()
 
   // O subagente do Codex roda dentro do processo que o criou, com conversa e lock próprios e mais novos que os da
   // conversa principal. A aba fica com a principal: é ela que o "Continuar" retoma e é nela que você responde.
@@ -125,9 +143,9 @@ export class AgentDetector {
 
   // UNREADABLE para a aba cujo agente não deu para ler nesta volta: quem chama mantém o que sabia dela.
   // A aba é do agente mais de fora: um Codex que o Claude roda como ferramenta (o code review dele, por exemplo) é filho
-  // do Claude e não troca a aba, e vice-versa. O OpenCode conta como agente de fora, mesmo sem ser detectado aqui (a aba
-  // dele já nasce vinculada): Claude ou Codex que ele roda como subagente não tomam a aba. Entre agentes lado a lado no
-  // terminal, vale o mais novo.
+  // do Claude e não troca a aba, e vice-versa. OpenCode e agy contam como agentes de fora mesmo antes de ter conversa
+  // achada (a aba do OpenCode já nasce vinculada; o agy cria o lock uns segundos depois de abrir): Claude ou Codex que
+  // eles rodam como subagente não tomam a aba. Entre agentes lado a lado no terminal, vale o mais novo.
   detect(shellPids: Map<string, number>): Map<string, Detected | typeof UNREADABLE> {
     const all = this.sources.listProcesses()
     // O Windows reaproveita pid: o nome de um Claude que já saiu não pode ir parar no próximo processo com o mesmo número.
@@ -135,18 +153,30 @@ export class AgentDetector {
     if (all.length > 0) {
       const alive = new Set(all.map((p) => p.pid))
       for (const pid of this.derivedNames.keys()) if (!alive.has(pid)) this.derivedNames.delete(pid)
+      for (const pid of this.agyByPid.keys()) if (!alive.has(pid)) this.agyByPid.delete(pid)
+      for (const pid of this.agyLastScan.keys()) if (!alive.has(pid)) this.agyLastScan.delete(pid)
     }
     const parentOf = new Map(all.map((p) => [p.pid, p.ppid]))
     const codex = this.codexThreadsByPid()
     const found = new Map<string, Detected | typeof UNREADABLE>()
 
+    let agyLocks: ReturnType<AntigravitySources['presenceLocks']> | null = null
+    const locks = (): ReturnType<AntigravitySources['presenceLocks']> => (agyLocks ??= this.sources.antigravity?.presenceLocks() ?? [])
+
     for (const [tabId, shellPid] of shellPids) {
       const agents = new Map<number, { detected: Detected; proc: ProcInfo }>()
-      const opencode = new Set<number>()
+      // OpenCode e agy: agentes de fora mesmo sem conversa achada (o OpenCode não é detectado aqui; o agy, antes do lock).
+      const outer = new Set<number>()
+      const agyProcs: ProcInfo[] = []
       let unreadable = false
       for (const proc of descendants(shellPid, all)) {
         if (isOpencode(proc)) {
-          opencode.add(proc.pid)
+          outer.add(proc.pid)
+          continue
+        }
+        if (isAgy(proc)) {
+          outer.add(proc.pid)
+          agyProcs.push(proc)
           continue
         }
         const lock = codex.get(proc.pid)
@@ -157,9 +187,19 @@ export class AgentDetector {
         if (!detected || detected === UNREADABLE) continue
         agents.set(proc.pid, { detected, proc })
       }
+      const isAgent = (pid: number): boolean => agents.has(pid) || outer.has(pid)
+      // Um agy rodado por outro agente (o Claude chamando agy -p, por exemplo) não é procurado: a busca custa e não toma a aba.
+      for (const proc of agyProcs) {
+        if (insideAnother(proc.pid, shellPid, parentOf, isAgent)) continue
+        const id = this.agyConversationOf(proc, locks)
+        if (!id) continue
+        const state = this.sources.antigravity?.conversation(id)
+        if (state?.subagent) continue
+        agents.set(proc.pid, { detected: { agent: { kind: 'antigravity', sessionId: id }, activity: state?.activity ?? null }, proc })
+      }
       let latest: { detected: Detected; createdMs: number } | null = null
       for (const { detected, proc } of agents.values()) {
-        if (insideAnother(proc.pid, shellPid, parentOf, (pid) => agents.has(pid) || opencode.has(pid))) continue
+        if (insideAnother(proc.pid, shellPid, parentOf, isAgent)) continue
         const createdMs = this.sources.creationTime(proc) ?? 0
         if (!latest || createdMs >= latest.createdMs) latest = { detected, createdMs }
       }
@@ -167,6 +207,38 @@ export class AgentDetector {
       else if (unreadable) found.set(tabId, UNREADABLE)
     }
     return found
+  }
+
+  // Conversa cujo lock o processo segura. Do mais barato ao mais caro: a já conhecida (1 consulta), os locks nascidos
+  // depois do processo (conversa nova), e por fim todos de uma vez com busca binária (~5 consultas em grupo).
+  private agyConversationOf(proc: ProcInfo, locks: () => ReturnType<AntigravitySources['presenceLocks']>): string | null {
+    const agy = this.sources.antigravity
+    if (!agy) return null
+    const createdMs = this.sources.creationTime(proc)
+    const held = (files: string[]): boolean => agy.holders(files).includes(proc.pid)
+    const remember = (lock: { id: string; file: string }): string => {
+      this.agyByPid.set(proc.pid, { id: lock.id, file: lock.file, createdMs })
+      this.agyLastScan.delete(proc.pid)
+      return lock.id
+    }
+    const known = this.agyByPid.get(proc.pid)
+    if (known && known.createdMs === createdMs && held([known.file])) return known.id
+    this.agyByPid.delete(proc.pid)
+
+    const all = locks()
+    const fresh = createdMs === null ? [] : all.filter((l) => l.birthMs >= createdMs - AGY_FRESH_SLACK_MS).sort((a, b) => b.birthMs - a.birthMs)
+    for (const lock of fresh) if (held([lock.file])) return remember(lock)
+
+    const now = this.sources.now?.() ?? Date.now()
+    if (now - (this.agyLastScan.get(proc.pid) ?? -Infinity) < AGY_SCAN_GAP_MS) return null
+    this.agyLastScan.set(proc.pid, now)
+    let group = all.filter((l) => !fresh.includes(l))
+    if (!held(group.map((l) => l.file))) return null
+    while (group.length > 1) {
+      const half = group.slice(0, Math.ceil(group.length / 2))
+      group = held(half.map((l) => l.file)) ? half : group.slice(half.length)
+    }
+    return group[0] && held([group[0].file]) ? remember(group[0]) : null
   }
 
   // null enquanto o rollout não existe ou a primeira linha ainda está sendo gravada.
@@ -197,6 +269,7 @@ export class AgentDetector {
 }
 
 const isOpencode = (proc: ProcInfo): boolean => proc.name.toLowerCase() === 'opencode.exe'
+const isAgy = (proc: ProcInfo): boolean => proc.name.toLowerCase() === 'agy.exe'
 
 function insideAnother(pid: number, shellPid: number, parentOf: Map<number, number>, isAgent: (pid: number) => boolean): boolean {
   const seen = new Set<number>([pid])

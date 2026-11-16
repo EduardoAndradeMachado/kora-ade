@@ -26,6 +26,7 @@ import { ProjectIcons } from './project-icons'
 import { savePastedImage } from './pasted-image'
 import { createUsageReader } from './usage'
 import { antigravitySource } from './antigravity'
+import { agyPresenceDir, agyPresenceLocks, agyRoot, readAgyConversation } from './antigravity-conversations'
 import { ClaudeAccounts } from './claude-accounts'
 import { KillOnCloseJob } from './job-object'
 import { ProcessRegistry, type Survivor } from './process-registry'
@@ -82,7 +83,7 @@ import { gitAddToIgnore } from './git-ignore'
 import { gitApplyHunk, gitHunks } from './git-hunks'
 import { KORA_FILE_PRIVILEGED_SCHEMES, registerKoraFileProtocol } from './file-protocol'
 import { defaultAppFor } from './file-assoc'
-import { fileHolders, listProcesses, withCreationTime } from './processes'
+import { fileHolders, filesHolders, listProcesses, withCreationTime } from './processes'
 import { AlertsSchema, FILE_FONT, ProjectGroupSchema, TERMINAL_FONT, ThemePreferenceSchema, ZOOM, type KoraState } from '../shared/state'
 import { z } from 'zod'
 import { AgentRefSchema, AgentSessionSchema, type AgentActivity, type AgentSession, type Startup } from '../shared/agent'
@@ -179,7 +180,8 @@ const agentDirs = {
   codexRollouts: join(homedir(), '.codex', 'sessions'),
   claudeProjects: join(homedir(), '.claude', 'projects'),
   // Banco do OpenCode v2: conversas e estado dos turnos. Lido só para títulos, datas e atividade.
-  opencodeDb: opencodeDbPath()
+  opencodeDb: opencodeDbPath(),
+  agyRoot: agyRoot()
 }
 const codexRollout = createRolloutFinder(agentDirs.codexRollouts)
 const detector = new AgentDetector({
@@ -188,7 +190,12 @@ const detector = new AgentDetector({
   listProcesses,
   creationTime: (p) => withCreationTime(p).createdMs,
   lockHolders: fileHolders,
-  codexRollout
+  codexRollout,
+  antigravity: {
+    presenceLocks: () => agyPresenceLocks(agentDirs.agyRoot),
+    conversation: (id) => readAgyConversation(agentDirs.agyRoot, id),
+    holders: filesHolders
+  }
 })
 const metricsSources: MetricsSources = {
   claudeRoot: join(homedir(), '.claude'),
@@ -213,7 +220,11 @@ const agentFolders = new FolderWatch(
               name === basename(agentDirs.opencodeDb) || name.startsWith(`${basename(agentDirs.opencodeDb)}-`)
           }
         ]
-      : [])
+      : []),
+    // O agy cria presence/<conversa>.lock ao abrir uma conversa e grava os passos do turno no WAL do banco dela.
+    // Só o -wal: a leitura do Kora toca o -shm, e vigiá-lo faria a detecção disparar a si mesma.
+    { dir: agyPresenceDir(agentDirs.agyRoot), recursive: false },
+    { dir: join(agentDirs.agyRoot, 'conversations'), recursive: false, accept: (name: string) => name.endsWith('.db-wal') }
   ],
   () => scheduleDetect()
 )
@@ -1039,7 +1050,8 @@ function registerIpc(): void {
         join(homedir(), '.claude'),
         join(homedir(), '.codex'),
         projectRoot(projectId),
-        agentDirs.opencodeDb
+        agentDirs.opencodeDb,
+        agentDirs.agyRoot
       )
     )
   )
@@ -1059,6 +1071,8 @@ function registerIpc(): void {
       commit(forgetSessionName(state, { kind, sessionId }))
       return
     }
+    // O agy guarda a conversa em vários lugares (banco, índice, presença, artefatos): apagar só parte deixaria lixo nele.
+    if (kind === 'antigravity') throw new Error('Conversas do Antigravity se apagam pelo próprio agy.')
     const files = await sessionArtifacts(kind, sessionId, projectRoot(projectId), {
       claudeRoot: join(homedir(), '.claude'),
       codexRoot: join(homedir(), '.codex')

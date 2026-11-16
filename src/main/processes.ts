@@ -113,13 +113,18 @@ const RmEndSession = rstrtmgr.func('uint32 __stdcall RmEndSession(uint32)')
 const ERROR_MORE_DATA = 234
 
 // Pergunta ao Windows (Restart Manager) quais processos estão com o arquivo aberto.
-export function fileHolders(file: string): number[] {
+export const fileHolders = (file: string): number[] => filesHolders([file])
+
+// Uma sessão só para vários arquivos: quem segura qualquer um deles. Custa perto de uma consulta de arquivo único
+// (~30 ms para 30 arquivos contra ~7 ms cada um separado).
+export function filesHolders(files: string[]): number[] {
+  if (files.length === 0) return []
   const handle = [0]
   const key = Buffer.alloc(66)
   if (RmStartSession(handle, 0, key) !== 0) return []
   const session = handle[0]!
   try {
-    if (RmRegisterResources(session, 1, [file], 0, null, 0, null) !== 0) return []
+    if (RmRegisterResources(session, files.length, files, 0, null, 0, null) !== 0) return []
     let capacity = 4
     for (let attempt = 0; attempt < 3; attempt++) {
       const needed = [0]
