@@ -6,8 +6,10 @@ import type { MobileTab } from '@shared/mobile'
 
 export type NewTabKind = 'claude' | 'codex' | 'opencode' | 'shell'
 
-// Fixar uma sessão pelo ID fica só no PC: no celular as conversas salvas já aparecem na tela do projeto.
-const CHOICES = OPTIONS.filter((option): option is typeof option & { choice: NewTabKind } => option.choice !== 'existing')
+// Fixar uma sessão pelo ID e o Antigravity ficam só no PC: no celular as conversas salvas já aparecem na tela do
+// projeto, e o protocolo do celular só cria estes tipos.
+const MOBILE_KINDS: readonly string[] = ['claude', 'codex', 'opencode', 'shell'] satisfies NewTabKind[]
+const CHOICES = OPTIONS.filter((option): option is typeof option & { choice: NewTabKind } => MOBILE_KINDS.includes(option.choice))
 
 // alert: a sessão parou enquanto você não olhava; o sininho fica no lugar do modelo até a conversa ser aberta.
 export function TabIcon({ tab, alert = false }: { tab: MobileTab; alert?: boolean }): React.JSX.Element {

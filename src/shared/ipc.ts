@@ -116,6 +116,7 @@ export type Launch =
   | { type: 'claude' }
   | { type: 'codex' }
   | { type: 'opencode' }
+  | { type: 'antigravity' }
   | { type: 'resume'; agent: AgentSession }
 
 export interface SessionSummary {

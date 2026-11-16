@@ -96,6 +96,7 @@ const DEFAULT_TITLE: Record<NewTabChoice, string> = {
   claude: 'Claude',
   codex: 'Codex',
   opencode: 'OpenCode',
+  antigravity: 'Antigravity',
   existing: 'Sessão fixada'
 }
 

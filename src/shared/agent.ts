@@ -41,6 +41,8 @@ export type Startup =
   | { kind: 'claude' | 'codex'; mode: 'resume'; sessionId: string }
   | { kind: 'codex'; mode: 'new' }
   | { kind: 'opencode'; mode: 'new' | 'resume'; sessionId: string }
+  // O agy não aceita criar a conversa com um ID escolhido: a aba abre sem vínculo e volta como terminal.
+  | { kind: 'antigravity'; mode: 'new' }
 
 // Retorna o comando que o PowerShell roda ao abrir a aba. O ID vai direto na linha de comando,
 // então só passa se tiver o formato do agente.
@@ -52,6 +54,7 @@ export function startupCommand(startup: Startup): string {
     if (startup.mode === 'new') return `claude --session-id ${startup.sessionId}`
     return `claude --resume ${startup.sessionId}`
   }
+  if (startup.kind === 'antigravity') return 'agy'
   if (startup.kind === 'opencode') {
     // --standalone: o servidor do OpenCode fica dentro da árvore da aba (e do Job Object do Kora),
     // em vez de compartilhar o serviço de segundo plano com o OpenCode aberto fora dele.

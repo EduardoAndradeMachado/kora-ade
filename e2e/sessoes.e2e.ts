@@ -31,11 +31,11 @@ async function openClaude(run: { page: import('@playwright/test').Page }, env: K
   return { start, sessionId }
 }
 
-test('R3 botão + oferece Claude, Codex, OpenCode, Terminal e Sessão existente', async ({ kora }) => {
+test('R3 botão + oferece Claude, Codex, OpenCode, Antigravity, Terminal e Sessão existente', async ({ kora }) => {
   const run = await kora.launch(kora.env())
   await ui.tabBar(run.page).locator(tip('Nova aba')).click()
   const labels = await run.page.locator('body > div.fixed button span.font-medium').allTextContents()
-  expect(labels).toEqual(['Claude', 'Codex', 'OpenCode', 'Terminal', 'Sessão existente'])
+  expect(labels).toEqual(['Claude', 'Codex', 'OpenCode', 'Antigravity', 'Terminal', 'Sessão existente'])
   await run.page.keyboard.press('Escape')
 
   // O + da linha do projeto na lateral (aparece no hover) abre o mesmo menu.
@@ -43,7 +43,7 @@ test('R3 botão + oferece Claude, Codex, OpenCode, Terminal e Sessão existente'
   await row.hover()
   await row.locator(tip('Nova aba')).click()
   const sideLabels = await run.page.locator('body > div.fixed button span.font-medium').allTextContents()
-  expect(sideLabels).toEqual(['Claude', 'Codex', 'OpenCode', 'Terminal', 'Sessão existente'])
+  expect(sideLabels).toEqual(['Claude', 'Codex', 'OpenCode', 'Antigravity', 'Terminal', 'Sessão existente'])
 })
 
 test('R4 aba Claude nova lança claude --session-id <uuid> e o estado salvo guarda esse uuid', async ({ kora }) => {

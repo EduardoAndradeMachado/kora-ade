@@ -572,6 +572,8 @@ function launchTerminal(tab: TabRef, cols: number, rows: number, launch: Launch)
     const sessionId = newOpencodeSessionId()
     startup = { kind: 'opencode', mode: 'new', sessionId }
     bindAgent(tab.id, { kind: 'opencode', sessionId })
+  } else if (launch.type === 'antigravity') {
+    startup = { kind: 'antigravity', mode: 'new' }
   } else if (launch.type === 'resume') {
     const agent = AgentSessionSchema.parse(launch.agent)
     startup = { kind: agent.kind, mode: 'resume', sessionId: agent.sessionId }
