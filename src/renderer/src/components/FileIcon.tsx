@@ -1,23 +1,10 @@
 import { cn } from '@/lib/utils'
 
-// Folha do ícone "arquivo" da identidade (grade de 24, traço 1,75) com um sinal dentro que diz o tipo. O contorno
-// segue a cor do texto; só o sinal leva a cor da categoria, discreta, com par claro/escuro como as letras do git.
+// Folha do ícone "arquivo" da identidade (grade de 24, traço 1,75) com um sinal dentro que diz o tipo. Contorno na
+// cor do texto e sinal no cinza do detalhe inativo, sem cor por categoria: o tipo se lê pela forma. A cor do git fica
+// no nome do arquivo, não no ícone.
 const STROKE = 1.75
 const PAGE = 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'
-
-type Tint = 'blue' | 'yellow' | 'green' | 'cyan' | 'orange' | 'red' | 'purple' | 'neutral'
-
-const TINT: Record<Tint, string> = {
-  blue: 'text-[#3b74b8] dark:text-[#6fa3d8]',
-  yellow: 'text-[#97730f] dark:text-[#d6b552]',
-  green: 'text-[#4b8239] dark:text-[#8bbf78]',
-  cyan: 'text-[#17808e] dark:text-[#5bbac6]',
-  orange: 'text-[#ad5f27] dark:text-[#dd9159]',
-  red: 'text-[#a84545] dark:text-[#dc7878]',
-  purple: 'text-[#7556a3] dark:text-[#a688d2]',
-  // Sem categoria marcante: o mesmo cinza do detalhe inativo dos outros ícones.
-  neutral: 'text-[var(--icon-accent-idle)]'
-}
 
 const GLYPH = {
   texto: <path d="M8.5 13h7M8.5 16.5h4.5" />,
@@ -112,67 +99,58 @@ const GLYPH = {
 } satisfies Record<string, React.JSX.Element>
 
 type Glyph = keyof typeof GLYPH
-type Kind = [Glyph, Tint]
 
-const BY_EXT = new Map<string, Kind>()
-const add = (kind: Kind, exts: string): void => {
+const BY_EXT = new Map<string, Glyph>()
+const add = (kind: Glyph, exts: string): void => {
   for (const ext of exts.split(' ')) BY_EXT.set(ext, kind)
 }
-add(['codigo', 'blue'], 'ts tsx mts cts c h cpp cc cxx hpp hh lua r')
-add(['codigo', 'yellow'], 'js jsx mjs cjs')
-add(['codigo', 'green'], 'py pyw pyi vue')
-add(['codigo', 'cyan'], 'go dart')
-add(['codigo', 'orange'], 'rs swift svelte zig')
-add(['codigo', 'red'], 'java rb scala erb')
-add(['codigo', 'purple'], 'kt kts cs php ex exs fs')
-add(['codigo', 'neutral'], 'vb pl asm')
-add(['html', 'orange'], 'html htm xhtml')
-add(['dados', 'yellow'], 'json jsonc json5 geojson')
-add(['dados', 'neutral'], 'xml')
-add(['markdown', 'blue'], 'md markdown mdx')
-add(['texto', 'neutral'], 'txt log rtf')
-add(['imagem', 'green'], 'png jpg jpeg gif webp svg ico bmp avif tif tiff heic psd')
-add(['pdf', 'red'], 'pdf')
-add(['video', 'purple'], 'mp4 webm mov mkv avi m4v')
-add(['audio', 'purple'], 'mp3 wav ogg flac m4a aac opus')
-add(['planilha', 'green'], 'xls xlsx xlsm ods csv tsv')
-add(['documento', 'blue'], 'doc docx odt pages')
-add(['apresentacao', 'orange'], 'ppt pptx odp')
-add(['compactado', 'yellow'], 'zip 7z rar gz tgz tar bz2 xz zst')
-add(['config', 'neutral'], 'yml yaml toml ini cfg conf config properties editorconfig prettierrc eslintrc npmrc nvmrc babelrc')
-add(['segredo', 'yellow'], 'env pem key crt cer p12 pfx')
-add(['terminal', 'green'], 'sh bash zsh fish ps1 psm1 bat cmd')
-add(['estilo', 'purple'], 'css scss sass less styl')
-add(['fonte', 'neutral'], 'ttf otf woff woff2 eot')
-add(['banco', 'cyan'], 'sqlite sqlite3 db sql')
-add(['binario', 'neutral'], 'exe dll msi bin so dylib wasm class o obj apk')
-add(['trava', 'neutral'], 'lock')
-add(['notebook', 'orange'], 'ipynb')
+add('codigo', 'ts tsx mts cts c h cpp cc cxx hpp hh lua r js jsx mjs cjs py pyw pyi vue go dart rs swift svelte zig java rb scala erb kt kts cs php ex exs fs vb pl asm')
+add('html', 'html htm xhtml')
+add('dados', 'json jsonc json5 geojson xml')
+add('markdown', 'md markdown mdx')
+add('texto', 'txt log rtf')
+add('imagem', 'png jpg jpeg gif webp svg ico bmp avif tif tiff heic psd')
+add('pdf', 'pdf')
+add('video', 'mp4 webm mov mkv avi m4v')
+add('audio', 'mp3 wav ogg flac m4a aac opus')
+add('planilha', 'xls xlsx xlsm ods csv tsv')
+add('documento', 'doc docx odt pages')
+add('apresentacao', 'ppt pptx odp')
+add('compactado', 'zip 7z rar gz tgz tar bz2 xz zst')
+add('config', 'yml yaml toml ini cfg conf config properties editorconfig prettierrc eslintrc npmrc nvmrc babelrc')
+add('segredo', 'env pem key crt cer p12 pfx')
+add('terminal', 'sh bash zsh fish ps1 psm1 bat cmd')
+add('estilo', 'css scss sass less styl')
+add('fonte', 'ttf otf woff woff2 eot')
+add('banco', 'sqlite sqlite3 db sql')
+add('binario', 'exe dll msi bin so dylib wasm class o obj apk')
+add('trava', 'lock')
+add('notebook', 'ipynb')
 
-const BY_NAME = new Map<string, Kind>(Object.entries({
-  '.gitignore': ['git', 'orange'],
-  '.gitattributes': ['git', 'orange'],
-  '.gitmodules': ['git', 'orange'],
-  '.gitkeep': ['git', 'orange'],
-  'package-lock.json': ['trava', 'neutral'],
-  'pnpm-lock.yaml': ['trava', 'neutral'],
-  dockerfile: ['config', 'blue'],
-  makefile: ['terminal', 'neutral'],
-  license: ['texto', 'neutral']
-} satisfies Record<string, Kind>))
+const BY_NAME = new Map<string, Glyph>(Object.entries({
+  '.gitignore': 'git',
+  '.gitattributes': 'git',
+  '.gitmodules': 'git',
+  '.gitkeep': 'git',
+  'package-lock.json': 'trava',
+  'pnpm-lock.yaml': 'trava',
+  dockerfile: 'config',
+  makefile: 'terminal',
+  license: 'texto'
+} satisfies Record<string, Glyph>))
 
-export function fileKindFor(name: string): Kind {
+export function fileKindFor(name: string): Glyph {
   const lower = name.toLowerCase()
   const named = BY_NAME.get(lower)
   if (named) return named
   // .env.local, .env.production: o que vem depois do primeiro ponto não muda o que o arquivo é.
-  if (lower === '.env' || lower.startsWith('.env.')) return ['segredo', 'yellow']
+  if (lower === '.env' || lower.startsWith('.env.')) return 'segredo'
   const dot = lower.lastIndexOf('.')
-  return (dot >= 0 && BY_EXT.get(lower.slice(dot + 1))) || ['texto', 'neutral']
+  return (dot >= 0 && BY_EXT.get(lower.slice(dot + 1))) || 'texto'
 }
 
 export function FileIcon({ name, className }: { name: string; className?: string }): React.JSX.Element {
-  const [glyph, tint] = fileKindFor(name)
+  const glyph = fileKindFor(name)
   return (
     <svg
       viewBox="0 0 24 24"
@@ -183,11 +161,11 @@ export function FileIcon({ name, className }: { name: string; className?: string
       strokeLinejoin="round"
       aria-hidden="true"
       data-file-icon={glyph}
-      className={cn('size-4 shrink-0', className)}
+      className={cn('size-4 shrink-0 text-foreground', className)}
     >
       <path d={PAGE} />
       <path d="M14 3v5h5" />
-      <g className={TINT[tint]}>{GLYPH[glyph]}</g>
+      <g className="text-[var(--icon-accent-idle)]">{GLYPH[glyph]}</g>
     </svg>
   )
 }
