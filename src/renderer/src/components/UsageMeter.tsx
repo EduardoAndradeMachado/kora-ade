@@ -55,9 +55,10 @@ const HOVER_DELAY_MS = 350
 const HOVER_GRACE_MS = 80
 const MARGIN = 8
 
-// Uma célula por agente com a janela mais apertada; o "reseta em" só cabe quando há um agente sozinho na linha.
+// Uma célula por agente com a janela mais apertada; o "reseta em" só cabe quando há um agente sozinho na linha, e a
+// barra só até três: com quatro ela encolhe a ponto de não dizer nada e o percentual fica sozinho.
 // Erro com janelas antigas vira um ponto sobre o ícone: um alerta a mais por célula estoura os três na lateral.
-function CompactAgent({ usage, now, alone }: { usage: AgentUsage; now: number; alone: boolean }): React.JSX.Element {
+function CompactAgent({ usage, now, alone, bar }: { usage: AgentUsage; now: number; alone: boolean; bar: boolean }): React.JSX.Element {
   const tight = mostConstrained(usage.windows)
   return (
     <>
@@ -69,7 +70,7 @@ function CompactAgent({ usage, now, alone }: { usage: AgentUsage; now: number; a
       </span>
       {tight ? (
         <>
-          <Bar percent={tight.usedPercent} className={cn('h-1 bg-foreground/10', alone ? 'w-8 shrink-0' : 'w-6 min-w-2 shrink')} />
+          {bar && <Bar percent={tight.usedPercent} className={cn('h-1 bg-foreground/10', alone ? 'w-8 shrink-0' : 'w-6 min-w-2 shrink')} />}
           <span className={cn('shrink-0 tabular-nums', isCritical(tight.usedPercent) && 'text-destructive')}>
             {Math.round(tight.usedPercent)}%
           </span>
@@ -195,7 +196,7 @@ export function CompactUsage({ usage, now }: { usage: AgentUsage[]; now: number 
           onPointerDown={dismiss}
           className="flex min-w-0 items-center gap-1"
         >
-          <CompactAgent usage={u} now={now} alone={usage.length === 1} />
+          <CompactAgent usage={u} now={now} alone={usage.length === 1} bar={usage.length < 4} />
         </span>
       ))}
       {card && <UsageCard usage={card} now={now} anchor={hovered.anchor} />}
@@ -328,7 +329,7 @@ export function UsageMeter({ usage, onRefresh }: Props): React.JSX.Element {
               </button>
             </div>
             {usage.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Nenhum dado de uso do Claude Code, do Codex nem do OpenCode Go nesta máquina.</p>
+              <p className="text-xs text-muted-foreground">Nenhum dado de uso do Claude Code, do Codex, do OpenCode Go nem do Antigravity nesta máquina.</p>
             ) : (
               usage.map((u, i) => (
                 <div key={u.agent} className={cn(i > 0 && 'border-t pt-3')}>

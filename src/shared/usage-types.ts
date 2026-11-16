@@ -6,7 +6,7 @@ export interface UsageWindow {
   windowMinutes: number | null
 }
 
-export type UsageAgent = 'claude' | 'codex' | 'opencode'
+export type UsageAgent = 'claude' | 'codex' | 'opencode' | 'antigravity'
 
 export interface AgentUsage {
   agent: UsageAgent

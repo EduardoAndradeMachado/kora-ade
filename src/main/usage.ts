@@ -12,6 +12,8 @@ export const CODEX_MIN_INTERVAL_MS = MINUTE
 export const CLAUDE_MIN_INTERVAL_MS = 5 * MINUTE
 // Sem histórico de 429 do opencode.ai: um meio-termo até ele mostrar o limite dele.
 export const OPENCODE_MIN_INTERVAL_MS = 2 * MINUTE
+// O próprio agy recarrega a cota a cada poucos minutos; consultar mais que ele não traz dado novo.
+export const ANTIGRAVITY_MIN_INTERVAL_MS = 2 * MINUTE
 export const BACKOFF_START_MS = 10 * MINUTE
 export const BACKOFF_MAX_MS = 60 * MINUTE
 
@@ -259,8 +261,8 @@ const CodexAuthSchema = z.object({
     .nullish()
 })
 
-// O e-mail vem do id_token (JWT) que o próprio Codex guardou; só para mostrar, então a assinatura não é conferida.
-function codexEmail(idToken: string | null | undefined): string | null {
+// O e-mail vem do id_token (JWT) que o próprio agente guardou; só para mostrar, então a assinatura não é conferida.
+function jwtEmail(idToken: string | null | undefined): string | null {
   const payload = idToken?.split('.')[1]
   if (!payload) return null
   try {
@@ -365,7 +367,7 @@ async function readCodexAuth(
     return {
       accessToken: parsed.data.tokens.access_token,
       accountId: parsed.data.tokens.account_id ?? null,
-      email: codexEmail(parsed.data.tokens.id_token)
+      email: jwtEmail(parsed.data.tokens.id_token)
     }
   } catch {
     return null
@@ -719,6 +721,146 @@ export async function readOpencodeUsage(
   }
 }
 
+// ───────────────────────────── Antigravity (agy) ─────────────────────────────
+
+// Único destino do token do agy. Mesmo endpoint e mesmo host que o /usage do agy consulta.
+export const ANTIGRAVITY_USAGE_URL = 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary'
+const ANTIGRAVITY_SOURCE = 'cloudcode-pa.googleapis.com (retrieveUserQuotaSummary)'
+
+export interface AntigravitySource {
+  readCredential(): string | null
+  version(): Promise<string | null>
+}
+
+const AntigravityCredentialSchema = z.object({
+  token: z.object({ access_token: z.string().min(1), expiry: z.string().nullish() }),
+  id_token: z.string().nullish()
+})
+
+const AntigravityBucketSchema = z.object({
+  window: z.string().nullish(),
+  // Do oneof `remaining`: ausente quando o bucket é medido em quantidade, não em fração.
+  remainingFraction: z.number().nullish(),
+  resetTime: z.string().nullish(),
+  disabled: z.boolean().nullish()
+})
+
+const AntigravityGroupSchema = z.object({ displayName: z.string().nullish(), buckets: z.array(z.unknown()).nullish() })
+
+const AntigravityUsageSchema = z.object({ groups: z.array(z.unknown()) })
+
+function antigravityWindowMinutes(window: string): number | null {
+  if (window === 'weekly') return 10080
+  if (window === 'daily') return 1440
+  const hours = /^(\d+)h$/.exec(window)
+  return hours ? Number(hours[1]) * 60 : null
+}
+
+const antigravityGroupName = (name: string): string => name.replace(/\s+models?$/i, '').replace(/\band\b/g, 'e').trim()
+
+/** Converte a resposta de retrieveUserQuotaSummary; lança UsageFormatError se nada nela for reconhecível. */
+export function parseAntigravityUsage(json: unknown, now: number): UsageWindow[] {
+  const parsed = AntigravityUsageSchema.safeParse(json)
+  if (!parsed.success) throw new UsageFormatError('Resposta de uso do Antigravity em formato desconhecido')
+  const windows: UsageWindow[] = []
+  for (const rawGroup of parsed.data.groups) {
+    const group = AntigravityGroupSchema.safeParse(rawGroup)
+    if (!group.success) continue
+    const name = antigravityGroupName(group.data.displayName ?? '')
+    const groupWindows: UsageWindow[] = []
+    for (const rawBucket of group.data.buckets ?? []) {
+      const bucket = AntigravityBucketSchema.safeParse(rawBucket)
+      if (!bucket.success || bucket.data.disabled || bucket.data.remainingFraction == null || !bucket.data.window) continue
+      const minutes = antigravityWindowMinutes(bucket.data.window)
+      const base = minutes === null ? bucket.data.window : windowLabel(minutes)
+      const used = (1 - bucket.data.remainingFraction) * 100
+      groupWindows.push(normalizeWindow(name ? `${base} · ${name}` : base, used, epochMs(bucket.data.resetTime), minutes, now))
+    }
+    // Janela curta primeiro, como no Claude e no Codex; a ordem dos grupos é a do agy (Gemini primeiro).
+    windows.push(...groupWindows.sort((a, b) => (a.windowMinutes ?? Infinity) - (b.windowMinutes ?? Infinity)))
+  }
+  if (windows.length === 0) throw new UsageFormatError('Resposta de uso do Antigravity sem nenhuma janela reconhecível')
+  return windows
+}
+
+/**
+ * Única função que envia o token do agy para a rede: POST em ANTIGRAVITY_USAGE_URL com `Authorization: Bearer`.
+ * O User-Agent é o do CLI: sem ele o servidor recusa, e com uma versão antiga omite o grupo Gemini.
+ * `redirect: 'error'` impede que um redirecionamento leve o token a outro host.
+ */
+export async function fetchAntigravityUsageJson(accessToken: string, version: string, fetchImpl: typeof fetch = fetch): Promise<unknown> {
+  const res = await fetchImpl(ANTIGRAVITY_USAGE_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'User-Agent': `antigravity/cli/${version} (aidev_client; os_type=windows; arch=amd64; auth_method=consumer)`
+    },
+    body: '{}',
+    redirect: 'error',
+    signal: AbortSignal.timeout(USAGE_TIMEOUT_MS)
+  })
+  if (!res.ok) throw new UsageHttpError(res.status, parseRetryAfter(res.headers.get('retry-after'), Date.now()))
+  try {
+    return await res.json()
+  } catch {
+    throw new UsageFormatError('Resposta de uso do Antigravity não veio em JSON')
+  }
+}
+
+function antigravityErrorMessage(err: unknown): string {
+  if (err instanceof UsageFormatError) return err.message
+  if (err instanceof UsageHttpError) {
+    if (err.status === 401) return 'Login do Antigravity recusado (HTTP 401); abra o agy para renovar'
+    if (err.status === 403) return 'Consulta de uso do Antigravity recusada (HTTP 403)'
+    if (err.status === 429) return 'Consultas de uso do Antigravity temporariamente limitadas (HTTP 429)'
+    return `cloudcode-pa.googleapis.com respondeu HTTP ${err.status}`
+  }
+  // Só o nome do erro: a mensagem de falhas de rede não é nossa e não vale arriscar que carregue cabeçalhos.
+  const name = err instanceof Error ? err.name : 'erro'
+  return `Sem resposta de cloudcode-pa.googleapis.com (${name})`
+}
+
+/**
+ * null quando o agy não tem login nesta máquina. Não renovamos o token (dura 1 h): só o agy aberto renova, e com ele
+ * fechado há mais tempo fica a última leitura com o aviso.
+ */
+export async function readAntigravityUsage(
+  source: AntigravitySource,
+  now = Date.now(),
+  deps: { fetch?: typeof fetch } = {}
+): Promise<UsageRead | null> {
+  const raw = source.readCredential()
+  if (raw === null) return null
+  const fail = (error: string): UsageRead => ({ agent: 'antigravity', windows: [], updatedAt: now, source: ANTIGRAVITY_SOURCE, error })
+  let credential: z.infer<typeof AntigravityCredentialSchema>
+  try {
+    const parsed = AntigravityCredentialSchema.safeParse(JSON.parse(raw))
+    if (!parsed.success) return fail('Login do agy em formato desconhecido')
+    credential = parsed.data
+  } catch {
+    return fail('Login do agy em formato desconhecido')
+  }
+  const email = jwtEmail(credential.id_token)
+  const account = email ? { account: email } : {}
+  // Data zero do Go (ano 1) é token sem validade.
+  const expiry = epochMs(credential.token.expiry)
+  if (expiry !== null && expiry > 0 && expiry <= now) {
+    return { ...fail('Uso indisponível: o login do agy venceu; abra o agy para renovar'), ...account, credentialsExpired: true }
+  }
+  const version = await source.version()
+  if (!version) return { ...fail('Não foi possível saber a versão do agy instalada'), ...account }
+  try {
+    const windows = parseAntigravityUsage(await fetchAntigravityUsageJson(credential.token.access_token, version, deps.fetch), now)
+    return { agent: 'antigravity', windows, updatedAt: now, source: ANTIGRAVITY_SOURCE, ...account }
+  } catch (err) {
+    const failed: UsageRead = { ...fail(antigravityErrorMessage(err)), ...account }
+    if (err instanceof UsageHttpError && err.status === 429) failed.rateLimited = { retryAfterMs: err.retryAfterMs }
+    return failed
+  }
+}
+
 // ───────────────────────────── Leitor com throttle ─────────────────────────────
 
 export interface CachedSlot {
@@ -737,6 +879,7 @@ export interface UsageReaderDeps {
   claudeRoot: string
   codexRoot: string
   opencode?: OpencodeSource
+  antigravity?: AntigravitySource
   fetch?: typeof fetch
   now?: () => number
   cache?: UsageCache
@@ -751,7 +894,8 @@ interface Slot extends CachedSlot {
 const INTERVAL: Record<AgentUsage['agent'], number> = {
   claude: CLAUDE_MIN_INTERVAL_MS,
   codex: CODEX_MIN_INTERVAL_MS,
-  opencode: OPENCODE_MIN_INTERVAL_MS
+  opencode: OPENCODE_MIN_INTERVAL_MS,
+  antigravity: ANTIGRAVITY_MIN_INTERVAL_MS
 }
 
 export function backoffMs(failures: number, retryAfterMs: number | null): number {
@@ -760,7 +904,7 @@ export function backoffMs(failures: number, retryAfterMs: number | null): number
 }
 
 /**
- * Cada agente é consultado no máximo 1x por intervalo (5 min o Claude, 1 min o Codex, 2 min o OpenCode Go), por mais que a UI peça,
+ * Cada agente é consultado no máximo 1x por intervalo (5 min o Claude, 1 min o Codex, 2 min o OpenCode Go e o Antigravity), por mais que a UI peça,
  * inclusive o botão de atualizar; chamadas simultâneas compartilham a mesma consulta. Depois de um 429 a próxima
  * consulta respeita o Retry-After ou recua de 10 min até 1 h. Token vencido não consome o intervalo de consulta.
  * Se uma consulta falhar, as janelas anteriores
@@ -770,7 +914,7 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
   const now = deps.now ?? Date.now
   let slots: Map<string, Slot> | null = null
   // Consulta que estava no ar quando o login trocou é da conta anterior: chega, mas não vai para o cache.
-  const epochs: Record<AgentUsage['agent'], number> = { claude: 0, codex: 0, opencode: 0 }
+  const epochs: Record<AgentUsage['agent'], number> = { claude: 0, codex: 0, opencode: 0, antigravity: 0 }
   const loaded = (): Map<string, Slot> => {
     if (slots) return slots
     slots = new Map()
@@ -835,7 +979,10 @@ export function createUsageReader(deps: UsageReaderDeps): { read(): Promise<Agen
       const results = await Promise.all([
         throttled('claude', () => readClaudeUsage(deps.claudeRoot, { fetch: deps.fetch, now: now(), onUsage: deps.onClaudeUsage })),
         throttled('codex', () => readCodexUsage(deps.codexRoot, now(), { fetch: deps.fetch })),
-        throttled('opencode', async () => (deps.opencode ? readOpencodeUsage(deps.opencode, now(), { fetch: deps.fetch }) : null))
+        throttled('opencode', async () => (deps.opencode ? readOpencodeUsage(deps.opencode, now(), { fetch: deps.fetch }) : null)),
+        throttled('antigravity', async () =>
+          deps.antigravity ? readAntigravityUsage(deps.antigravity, now(), { fetch: deps.fetch }) : null
+        )
       ])
       return results.filter((r): r is AgentUsage => r !== null)
     },

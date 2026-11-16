@@ -36,7 +36,8 @@ qual sessão do Claude ou do Codex está rodando nela, e fechar o computador nã
 - **Git:** branch atual, locais, remotas e worktrees; criar e trocar branch; iniciar repositório e vincular ao GitHub.
 - **Terminal feito para agentes:** colar um print com Ctrl+V vira o caminho do arquivo; arrastar um arquivo do
   explorador cola o caminho; Ctrl+clique em `src/app.ts:42` abre o arquivo na linha.
-- **Limites de uso** do Claude e do Codex (janela de 5 h, semanal e horário do reset) no rodapé.
+- **Limites de uso** do Claude, do Codex, do OpenCode Go e do Antigravity (janela de 5 h, semanal e horário do
+  reset; no Antigravity, por grupo de modelos) no rodapé.
 - Tema claro e escuro, zoom da interface e do texto do terminal separados, fecha para a bandeja e se atualiza sozinho.
 
 ## Instalação

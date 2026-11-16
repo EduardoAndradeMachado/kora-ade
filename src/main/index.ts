@@ -25,6 +25,7 @@ import { createEntry, openInDefaultBrowser, renameEntry, trashEntry, treeStamp, 
 import { ProjectIcons } from './project-icons'
 import { savePastedImage } from './pasted-image'
 import { createUsageReader } from './usage'
+import { antigravitySource } from './antigravity'
 import { ClaudeAccounts } from './claude-accounts'
 import { KillOnCloseJob } from './job-object'
 import { ProcessRegistry, type Survivor } from './process-registry'
@@ -98,6 +99,7 @@ const usage = createUsageReader({
   claudeRoot: join(homedir(), '.claude'),
   codexRoot: join(homedir(), '.codex'),
   opencode: { dbFile: opencodeDbPath(), dataDir: opencodeDataDir() },
+  antigravity: antigravitySource,
   cache: {
     load: () => JSON.parse(readFileSync(usageCacheFile(), 'utf8')),
     save: (slots) => writeFileSync(usageCacheFile(), JSON.stringify(slots), 'utf8')
