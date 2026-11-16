@@ -117,7 +117,8 @@ describe('listagem das conversas do agy por projeto', () => {
     const indexed = agy.conversation({ meta: META_MAIN, steps: [userInput, FINAL_RESPONSE], mtime: new Date('2026-11-10T10:00:00Z') })
     const open = agy.conversation({ meta: metaFor(projectUri, null), steps: [userInput] })
     const subagent = agy.conversation({ meta: META_SUB, steps: [userInput] })
-    const empty = agy.conversation({ meta: metaFor(projectUri, null) })
+    // Aberta e fechada sem nenhum pedido: nada a retomar.
+    agy.conversation({ meta: metaFor(projectUri, null) })
     const internal = agy.conversation({ meta: metaFor(projectUri, null), steps: [userInput] })
     const elsewhere = agy.conversation({ meta: metaFor('file:///C:/Outro', null), steps: [userInput] })
     writeFileSync(
