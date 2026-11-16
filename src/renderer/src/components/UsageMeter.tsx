@@ -2,7 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { AgentUsage, UsageWindow } from '@shared/usage-types'
 import type { WeeklyUsage } from '@shared/claude-accounts'
-import { formatResetAt, formatResetIn, isCritical, mostConstrained } from '@shared/usage-format'
+import { formatResetAt, formatResetIn, isCritical, isWarning, mostConstrained } from '@shared/usage-format'
 import { Icon } from '@/brand/icons'
 import { cn } from '@/lib/utils'
 import { AgentIcon, agentLabel } from './AgentIcon'
@@ -47,6 +47,10 @@ export function Bar({ percent, className }: { percent: number; className?: strin
   )
 }
 
+// Número do uso: na cor do texto até 50%, âmbar acima disso e vermelho acima de 80%.
+const percentTone = (usedPercent: number): string =>
+  isCritical(usedPercent) ? 'text-destructive' : isWarning(usedPercent) ? 'text-[var(--brand-amber)]' : 'text-foreground'
+
 const resetIn = (w: UsageWindow, now: number): string =>
   w.resetsAt === null ? 'sem reset pendente' : `reseta ${formatResetIn(w.resetsAt - now)}`
 
@@ -71,7 +75,7 @@ function CompactAgent({ usage, now, alone, bar }: { usage: AgentUsage; now: numb
       {tight ? (
         <>
           {bar && <Bar percent={tight.usedPercent} className={cn('h-1 bg-foreground/10', alone ? 'w-8 shrink-0' : 'w-6 min-w-2 shrink')} />}
-          <span className={cn('shrink-0 tabular-nums', isCritical(tight.usedPercent) && 'text-destructive')}>
+          <span className={cn('shrink-0 tabular-nums', percentTone(tight.usedPercent))}>
             {Math.round(tight.usedPercent)}%
           </span>
           {alone && <span className="truncate">· {resetIn(tight, now)}</span>}
@@ -107,7 +111,7 @@ function UsageCard({ usage, now, anchor }: { usage: AgentUsage; now: number; anc
       role="tooltip"
       data-usage-card={usage.agent}
       style={place ?? { left: -9999, top: 0 }}
-      className="pointer-events-none fixed z-[70] w-max max-w-[min(20rem,calc(100vw-16px))] rounded-lg border bg-card px-3 py-2.5 text-xs text-card-foreground shadow-xl"
+      className="pointer-events-none fixed z-[70] w-max max-w-[min(26rem,calc(100vw-16px))] rounded-lg border bg-card px-3 py-2.5 text-xs text-card-foreground shadow-xl"
     >
       <div className="flex items-center gap-2 whitespace-nowrap">
         <AgentIcon kind={usage.agent} className="size-3.5 shrink-0" />
@@ -122,7 +126,7 @@ function UsageCard({ usage, now, anchor }: { usage: AgentUsage; now: number; anc
             <Fragment key={w.label}>
               <span className={w === tight ? 'text-foreground' : 'text-muted-foreground'}>{w.label}</span>
               <Bar percent={w.usedPercent} className="h-1 w-14 bg-foreground/10" />
-              <span className={cn('text-right font-medium tabular-nums', isCritical(w.usedPercent) && 'text-destructive')}>
+              <span className={cn('text-right font-medium tabular-nums', percentTone(w.usedPercent))}>
                 {Math.round(w.usedPercent)}%
               </span>
               <span className="text-[11px] text-muted-foreground">{resetIn(w, now)}</span>
@@ -233,7 +237,7 @@ function AgentDetail({ usage, now, onRefresh }: { usage: AgentUsage; now: number
         <div key={w.label} className="flex flex-col gap-1">
           <div className="flex items-baseline justify-between gap-2 text-xs">
             <span className="truncate">{w.label}</span>
-            <span className={cn('shrink-0 tabular-nums', isCritical(w.usedPercent) && 'text-destructive')}>
+            <span className={cn('shrink-0 tabular-nums', percentTone(w.usedPercent))}>
               {Math.round(w.usedPercent)}% usado
             </span>
           </div>

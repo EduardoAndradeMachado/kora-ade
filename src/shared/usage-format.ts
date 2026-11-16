@@ -5,8 +5,10 @@ const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
 export const CRITICAL_PERCENT = 80
+export const WARNING_PERCENT = 50
 
 export const isCritical = (usedPercent: number): boolean => usedPercent > CRITICAL_PERCENT
+export const isWarning = (usedPercent: number): boolean => usedPercent > WARNING_PERCENT && !isCritical(usedPercent)
 
 export function windowLabel(minutes: number | null): string {
   if (minutes === null) return 'Janela'
