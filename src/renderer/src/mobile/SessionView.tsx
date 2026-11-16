@@ -57,6 +57,24 @@ const MIN_ROWS = 5
 interface Attached { path: string; preview: string; name?: string }
 // A tela da conversa desmonta ao abrir os arquivos ou outra aba; o que estava escrito em cada aba espera a volta.
 const drafts = new Map<string, { text: string; images: Attached[] }>()
+// O texto também fica no aparelho: o Android pode recarregar a página enquanto o seletor de imagem está na frente, e
+// o Map vai junto. A imagem não: a miniatura é um endereço da página que morreu.
+const DRAFT_TEXT_KEY = 'kora-rascunhos'
+function storedDraftTexts(): Record<string, string> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(DRAFT_TEXT_KEY) ?? '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, string> : {}
+  } catch { return {} }
+}
+function storeDraftText(tabId: string, text: string): void {
+  try {
+    const all = storedDraftTexts()
+    if (text) all[tabId] = text
+    else if (tabId in all) delete all[tabId]
+    else return
+    localStorage.setItem(DRAFT_TEXT_KEY, JSON.stringify(all))
+  } catch { /* sem armazenamento, o rascunho dura até a página fechar */ }
+}
 
 // O terminal do celular só mostra: as respostas automáticas do terminal (consulta de cor, de teclado) já vêm
 // da janela do PC, e uma segunda resposta chegaria ao programa como se fosse digitada.
@@ -76,7 +94,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   const [holder, setHolder] = useState<string | null>(tab.holder)
   // Até o histórico do PC chegar, o terminal mostra o esqueleto em vez de uma tela vazia.
   const [hydrating, setHydrating] = useState(true)
-  const [draft, setDraft] = useState(() => drafts.get(tab.id)?.text ?? '')
+  const [draft, setDraft] = useState(() => drafts.get(tab.id)?.text ?? storedDraftTexts()[tab.id] ?? '')
   const [sending, setSending] = useState(false)
   const [images, setImages] = useState<Attached[]>(() => drafts.get(tab.id)?.images ?? [])
   const [uploading, setUploading] = useState(0)
@@ -371,6 +389,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   useEffect(() => {
     if (draft || images.length > 0) drafts.set(tab.id, { text: draft, images })
     else drafts.delete(tab.id)
+    storeDraftText(tab.id, draft)
   }, [tab.id, draft, images])
 
   // O campo cresce com o texto até 140 px (o max-height do CSS); depois rola por dentro.
@@ -513,7 +532,10 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     const pictures = images.filter((item) => item.name === undefined).map((item) => pathForPrompt(item.path))
     void send({ type: 'send', tabId: tab.id, text, images: pictures, files })
       .catch((error: Error) => {
-        if (!drafts.has(tab.id)) drafts.set(tab.id, sent)
+        if (!drafts.has(tab.id)) {
+          drafts.set(tab.id, sent)
+          if (!storedDraftTexts()[tab.id]) storeDraftText(tab.id, sent.text)
+        }
         setDraft((current) => current || sent.text)
         setImages((current) => (current.length > 0 ? current : sent.images))
         setComposerError(error.message)

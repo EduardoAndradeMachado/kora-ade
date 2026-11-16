@@ -58,6 +58,25 @@ let homeScroll = 0
 // Tamanho provisório para abrir o processo; a tela da sessão manda o tamanho real assim que monta.
 const START_SIZE = { cols: 60, rows: 30 }
 
+
+const OPEN_CHAT_KEY = 'kora-conversa-aberta'
+// Passado disso, abrir o app é começar de novo pela lista, não voltar de uma recarga.
+const OPEN_CHAT_MAX_AGE_MS = 10 * 60_000
+interface OpenChat { projectId: string; tabId: string; at: number }
+function readOpenChat(): OpenChat | null {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(OPEN_CHAT_KEY) ?? 'null')
+    if (!value || typeof value !== 'object') return null
+    const { projectId, tabId, at } = value as Partial<OpenChat>
+    return typeof projectId === 'string' && typeof tabId === 'string' && typeof at === 'number' ? { projectId, tabId, at } : null
+  } catch { return null }
+}
+function writeOpenChat(chat: OpenChat | null): void {
+  try {
+    if (chat) localStorage.setItem(OPEN_CHAT_KEY, JSON.stringify(chat))
+    else localStorage.removeItem(OPEN_CHAT_KEY)
+  } catch { /* sem armazenamento, a recarga volta à lista */ }
+}
 export function MobileApp(): React.JSX.Element {
   const [pairCode, setPairCode] = useState(() => new URLSearchParams(location.hash.slice(1)).get('pair'))
   const [name, setName] = useState('Meu celular')
@@ -104,6 +123,30 @@ export function MobileApp(): React.JSX.Element {
     restore()
     return () => window.removeEventListener('kora-audio-pendente', restore)
   }, [state, replace, navigate])
+
+  // O Android pode recarregar a página com outro app na frente (o seletor de imagem): ela voltaria à lista. A conversa
+  // aberta fica marcada no aparelho, e a recarga logo depois volta para ela. Sair para a lista apaga a marca.
+  const chatChecked = useRef(false)
+  const loaded = state !== null
+  useEffect(() => {
+    if (!state || chatChecked.current) return
+    chatChecked.current = true
+    if ((window as { koraAudioPendente?: unknown }).koraAudioPendente || history.state?.koraMobile?.depth) return
+    const saved = readOpenChat()
+    if (!saved || Date.now() - saved.at > OPEN_CHAT_MAX_AGE_MS) return
+    if (!state.tabs.some((tab) => tab.id === saved.tabId && tab.projectId === saved.projectId)) return
+    replace({ projectId: null, tabId: null, picker: null })
+    navigate({ projectId: saved.projectId, tabId: null, picker: null })
+    navigate({ projectId: saved.projectId, tabId: saved.tabId, picker: null })
+  }, [state, replace, navigate])
+  useEffect(() => {
+    if (!chatChecked.current) return
+    const mark = (): void => writeOpenChat(projectId && tabId ? { projectId, tabId, at: Date.now() } : null)
+    mark()
+    const onHide = (): void => { if (document.hidden) mark() }
+    document.addEventListener('visibilitychange', onHide)
+    return () => document.removeEventListener('visibilitychange', onHide)
+  }, [projectId, tabId, loaded])
 
   useEffect(() => {
     history.replaceState(history.state, '', location.pathname)

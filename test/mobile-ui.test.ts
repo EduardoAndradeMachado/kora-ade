@@ -334,7 +334,8 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.reload()
     await browserExpect(page.getByRole('button', { name: 'Transcrever áudio guardado' })).toBeVisible()
     await page.getByRole('button', { name: 'Transcrever áudio guardado' }).click()
-    await browserExpect(field).toHaveValue('os testes do servidor do celular')
+    // O texto escrito antes da página ser recriada continua no campo; a transcrição recuperada entra depois dele.
+    await browserExpect(field).toHaveValue('Rode os testes do servidor do celular os testes do servidor do celular os testes do servidor do celular')
     expect(heard.at(-1)).toBe('OggS-recuperado')
     expect(await page.evaluate(() => sessionStorage.getItem('teste-audio-recuperado'))).toBeNull()
     await page.evaluate((tabId) => (window as unknown as { koraAudio(event: unknown): void }).koraAudio({ tipo: 'audio', gravacao: 99, mime: 'audio/ogg', base64: btoa('OggS-recuperado'), rascunho: true, recuperado: true, tabId }), tab.id)
@@ -411,6 +412,13 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await browserExpect(page.getByRole('dialog')).toHaveCount(0)
     await page.reload()
     await browserExpect(page.getByRole('textbox', { name: 'Mensagem para a sessão' })).toBeVisible()
+    // O Android pode recriar a página com o seletor de imagem na frente: sem histórico, ela volta à mesma conversa e
+    // com o texto que estava no campo.
+    await page.getByRole('textbox', { name: 'Mensagem para a sessão' }).fill('Texto antes da recarga')
+    await page.evaluate(() => history.replaceState(null, '', '/'))
+    await page.reload()
+    await browserExpect(page.getByRole('textbox', { name: 'Mensagem para a sessão' })).toHaveValue('Texto antes da recarga')
+    await page.getByRole('textbox', { name: 'Mensagem para a sessão' }).fill('')
     await page.locator('.session-name').click()
     await browserExpect(page.getByRole('dialog')).toBeVisible()
     await page.goBack()
@@ -420,6 +428,10 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await page.goBack()
     await browserExpect(page.getByRole('heading', { name: 'Seus projetos' })).toBeVisible()
     await browserExpect(page.locator('.tree-tabs').getByRole('button', { name: /Sessão do celular/ })).toBeVisible()
+    // Quem saiu para a lista continua na lista depois de uma recarga.
+    await page.evaluate(() => history.replaceState(null, '', '/'))
+    await page.reload()
+    await browserExpect(page.getByRole('heading', { name: 'Seus projetos' })).toBeVisible()
 
     await page.evaluate(() => Object.assign(window, {
       koraChaveAudio: 'chave-menu', __copiado: [] as string[],
