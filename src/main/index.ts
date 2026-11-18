@@ -201,7 +201,8 @@ const metricsSources: MetricsSources = {
   claudeRoot: join(homedir(), '.claude'),
   codexSessions: agentDirs.codexRollouts,
   codexRollout,
-  opencodeDb: agentDirs.opencodeDb
+  opencodeDb: agentDirs.opencodeDb,
+  agyRoot: agentDirs.agyRoot
 }
 const agentFolders = new FolderWatch(
   [

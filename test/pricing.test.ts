@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { claudeContextWindow, claudeCost, type ClaudeUsage } from '../src/main/pricing'
+import { agyCost, claudeContextWindow, claudeCost, type ClaudeUsage } from '../src/main/pricing'
 
 const M = 1_000_000
 const none: ClaudeUsage = { input: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, fast: false }
@@ -31,5 +31,43 @@ describe('preço de API do Claude', () => {
 
   it('Fable 5.2 com sufixo de variante tem a janela de 1M', () => {
     expect(claudeContextWindow('claude-fable-5-2[1m]')).toBe(M)
+  })
+})
+
+// Valores do Gemini API (aistudio.google.com/docs/pricing, lido em 2026-11-17), copiados da página: entrada, cache
+// lido e saída. Carbon dobra em 1/12/2026 e o 3.8 Flash em 1/1/2027.
+describe('preço de API dos modelos do agy', () => {
+  const NOV = Date.UTC(2026, 10, 17)
+  const DEC = Date.UTC(2026, 11, 2)
+  const JAN = Date.UTC(2027, 0, 2)
+  const cost = (model: string, at: number): [number | null, number | null, number | null] => [
+    agyCost(model, at, { input: M, cached: 0, output: 0 }),
+    agyCost(model, at, { input: 0, cached: M, output: 0 }),
+    agyCost(model, at, { input: 0, cached: 0, output: M })
+  ]
+
+  it('Carbon cobra o preço do dia em que a resposta terminou', () => {
+    expect(cost('gemini-4-carbon', NOV)).toEqual([2, 0.1, 10])
+    expect(cost('gemini-4-carbon', DEC)).toEqual([4, 0.2, 20])
+  })
+
+  it('3.8 Flash mantém o preço em dezembro e dobra em janeiro', () => {
+    expect(cost('gemini-3.8-flash', DEC)).toEqual([0.75, 0.075, 3.75])
+    expect(cost('gemini-3.8-flash', JAN)).toEqual([1.5, 0.15, 7.5])
+  })
+
+  it('variante gravada pelo agy cobra o modelo base', () => {
+    expect(cost('gemini-4-hydrogen-tiered-high', NOV)).toEqual([1.5, 0.075, 7.5])
+    expect(cost('gemini-3.8-flash-n', NOV)).toEqual([0.75, 0.075, 3.75])
+    expect(cost('gemini-3.8-flash-tiered', NOV)).toEqual([0.75, 0.075, 3.75])
+  })
+
+  it('Claude pelo agy usa a tabela da Anthropic, sem o sufixo -thinking', () => {
+    expect(cost('claude-opus-4-6-thinking', NOV)).toEqual([5, 0.5, 25])
+  })
+
+  it('modelo fora da tabela fica sem preço', () => {
+    expect(agyCost('gemini-flash-safety-le2', NOV, { input: M, cached: 0, output: 0 })).toBeNull()
+    expect(agyCost('desconhecido', NOV, { input: M, cached: 0, output: 0 })).toBeNull()
   })
 })

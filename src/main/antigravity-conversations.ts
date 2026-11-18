@@ -143,7 +143,7 @@ export interface AgyConversationState {
 
 // Banco aberto e fechado a cada leitura: o agy segue gravando nele (WAL) e uma conexão parada veria o arquivo antigo.
 // Sem -wal (conversa fechada), abre como imutável: a abertura comum, mesmo só-leitura, cria -wal e -shm na pasta do agy.
-function withDb<T>(file: string, read: (db: DatabaseSync) => T): T | null {
+export function withDb<T>(file: string, read: (db: DatabaseSync) => T): T | null {
   if (!existsSync(file)) return null
   let db: DatabaseSync | null = null
   try {

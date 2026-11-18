@@ -63,7 +63,7 @@ const trashBin = mkdtempSync(join(tmpdir(), 'kora-lixeira-'))
 async function setup(transcribe?: Transcribe, initial: (dir: string) => Partial<KoraState> = () => ({})): Promise<Setup> {
   const dir = mkdtempSync(join(tmpdir(), 'kora-mobile-'))
   const claudeRoot = join(dir, 'claude-home')
-  const metricSources = { claudeRoot, codexSessions: join(dir, 'sem-codex'), codexRollout: () => null, opencodeDb: join(dir, 'sem-opencode.db') }
+  const metricSources = { claudeRoot, codexSessions: join(dir, 'sem-codex'), codexRollout: () => null, opencodeDb: join(dir, 'sem-opencode.db'), agyRoot: join(dir, 'sem-agy') }
   const config = join(dir, 'mobile.json')
   writeFileSync(join(dir, 'mobile.html'), '<html>Kora mobile</html>')
   mkdirSync(join(dir, 'android'))

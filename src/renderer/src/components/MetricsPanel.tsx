@@ -319,7 +319,7 @@ A cada resposta o agente reenvia a conversa inteira; a parte que já estava em c
   )
 }
 
-const AGENT_ORDER: AgentKind[] = ['claude', 'codex', 'opencode']
+const AGENT_ORDER: AgentKind[] = ['claude', 'codex', 'opencode', 'antigravity']
 
 // Mais que três linhas embola o gráfico e passa do limite de cores que se distinguem com segurança.
 // Mais que três linhas embola o gráfico e passa do limite de cores que se distinguem com segurança.
@@ -482,7 +482,7 @@ export function MetricsPanel({ projectId, agent, activity, source = DESKTOP_SOUR
   const sessionId = agent?.sessionId
 
   const loadSession = useCallback(() => {
-    if (!kind || !sessionId || kind === 'antigravity') return
+    if (!kind || !sessionId) return
     source.session(projectId, { kind, sessionId }).then(
       (m) => {
         // Resposta atrasada da sessão anterior (troca de aba no meio da leitura) não sobrescreve a atual.
@@ -562,10 +562,8 @@ export function MetricsPanel({ projectId, agent, activity, source = DESKTOP_SOUR
         {scope === 'session' ? (
           !agent ? (
             <p className="px-3 py-3 text-xs text-muted-foreground">
-              Selecione uma aba do Claude, do Codex ou do OpenCode. A aba do Codex só ganha sessão depois da primeira mensagem.
+              Selecione uma aba do Claude, do Codex, do OpenCode ou do Antigravity. As abas do Codex e do Antigravity só ganham sessão depois da primeira mensagem.
             </p>
-          ) : agent.kind === 'antigravity' ? (
-            <p className="px-3 py-3 text-xs text-muted-foreground">O Kora ainda não lê tokens e custo das conversas do Antigravity.</p>
           ) : metrics ? (
             <SessionView m={metrics} />
           ) : (

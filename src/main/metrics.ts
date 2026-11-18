@@ -5,6 +5,7 @@ import { StringDecoder } from 'node:string_decoder'
 import type { AgentRef } from '../shared/agent'
 import type { DayPoint, ResponseMetric, SessionMetrics } from '../shared/metrics'
 import { ClaudeMetrics } from './metrics-claude'
+import { agyDay, agyMetrics } from './metrics-antigravity'
 import { CodexMetrics } from './metrics-codex'
 import { opencodeDay, opencodeMetrics } from './metrics-opencode'
 import { claudeProjectDir } from './sessions'
@@ -89,6 +90,7 @@ export interface MetricsSources {
   codexSessions: string
   codexRollout(threadId: string): string | null
   opencodeDb: string
+  agyRoot: string
 }
 
 const claude = new JsonlFollower(() => new ClaudeMetrics())
@@ -220,7 +222,7 @@ async function responsesOf<A extends Accumulator & { snapshot(id: string): Sessi
 }
 
 export async function sessionMetrics(sources: MetricsSources, agent: AgentRef, projectPath: string): Promise<SessionMetrics> {
-  if (agent.kind === 'antigravity') throw new Error('O Kora ainda não lê as métricas do Antigravity.')
+  if (agent.kind === 'antigravity') return agyMetrics(sources.agyRoot, agent.sessionId)
   if (agent.kind === 'opencode') return opencodeMetrics(sources.opencodeDb, agent.sessionId)
   if (agent.kind === 'claude') {
     const file = await claudeTranscript(sources.claudeRoot, projectPath, agent.sessionId)
@@ -257,7 +259,7 @@ function points(agent: SessionMetrics['agent'], responses: ResponseMetric[], sin
   )
 }
 
-// TPS de todas as respostas desde `since`, dos três agentes e dos subagentes deles, em qualquer pasta.
+// TPS de todas as respostas desde `since`, dos quatro agentes e dos subagentes deles, em qualquer pasta.
 export async function dayMetrics(sources: MetricsSources, since: number): Promise<DayPoint[]> {
   const claudeFiles: string[] = []
   const projects = join(sources.claudeRoot, 'projects')
@@ -286,5 +288,6 @@ export async function dayMetrics(sources: MetricsSources, since: number): Promis
     if (acc) out.push(...points('codex', acc.snapshot('').responses, since))
   }
   out.push(...opencodeDay(sources.opencodeDb, since))
+  out.push(...agyDay(sources.agyRoot, since))
   return out.sort((a, b) => a.at - b.at)
 }

@@ -349,7 +349,7 @@ describe('sessionMetrics com subagentes', () => {
     writeFileSync(join(dir, sessionId, 'subagents', 'agent-a1.meta.json'), '{"model":"haiku"}')
 
     const m = await sessionMetrics(
-      { claudeRoot: root, codexSessions: join(root, 'sem-codex'), codexRollout: () => null, opencodeDb: '' },
+      { claudeRoot: root, codexSessions: join(root, 'sem-codex'), codexRollout: () => null, opencodeDb: '', agyRoot: join(root, 'sem-agy') },
       { kind: 'claude', sessionId },
       project
     )
@@ -388,7 +388,7 @@ describe('sessionMetrics com subagentes', () => {
     rollout(ids.outra, '01a10000-0000-7000-8000-000000000000', 'gpt-6-astra')
 
     const m = await sessionMetrics(
-      { claudeRoot: join(sessions, 'sem-claude'), codexSessions: sessions, codexRollout: (id) => (id === ids.root ? rootFile : null), opencodeDb: '' },
+      { claudeRoot: join(sessions, 'sem-claude'), codexSessions: sessions, codexRollout: (id) => (id === ids.root ? rootFile : null), opencodeDb: '', agyRoot: join(sessions, 'sem-agy') },
       { kind: 'codex', sessionId: ids.root },
       sessions
     )

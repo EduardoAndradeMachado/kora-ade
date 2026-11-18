@@ -1,5 +1,5 @@
 // Preços de API em US$ por milhão de tokens, para estimar quanto a conversa custaria fora da assinatura.
-// Fonte: tabelas públicas da Anthropic e da OpenAI (nov/2026). Modelo fora da tabela
+// Fonte: tabelas públicas da Anthropic, da OpenAI e do Gemini API (nov/2026). Modelo fora da tabela
 // fica sem estimativa em vez de herdar o preço de outro.
 
 interface ClaudeRate {
@@ -143,4 +143,49 @@ export function codexCost(model: string, u: OpenAiUsage): number | null {
   const r = u.input > rate.long.from ? rate.long : rate
   const fresh = Math.max(0, u.input - u.cached - u.cacheWrite)
   return (fresh * r.input + u.cached * r.cached + u.cacheWrite * r.cacheWrite + u.output * r.output) / M
+}
+
+interface GeminiRate {
+  // Vale a partir deste instante (ms); a faixa anterior vale até ele.
+  from: number
+  input: number
+  cached: number
+  output: number
+}
+
+// Carbon e 3.8 Flash têm preço com data para dobrar; a resposta paga o preço do dia em que terminou.
+const GEMINI: Record<string, GeminiRate[]> = {
+  'gemini-4-hydrogen': [{ from: 0, input: 1.5, cached: 0.075, output: 7.5 }],
+  'gemini-4-carbon': [
+    { from: 0, input: 2, cached: 0.1, output: 10 },
+    { from: Date.UTC(2026, 11, 1), input: 4, cached: 0.2, output: 20 }
+  ],
+  'gemini-3.8-flash': [
+    { from: 0, input: 0.75, cached: 0.075, output: 3.75 },
+    { from: Date.UTC(2027, 0, 1), input: 1.5, cached: 0.15, output: 7.5 }
+  ],
+  'gemini-3.5-flash-lite': [{ from: 0, input: 0.3, cached: 0.03, output: 2.5 }]
+}
+
+// O agy grava a variante de raciocínio ou de cota no ID (gemini-4-hydrogen-tiered-high, gemini-3.8-flash-n,
+// claude-opus-4-6-thinking); o preço é o do modelo base.
+export const normalizeAgyModel = (model: string): string =>
+  model
+    .replace(/-thinking$/, '')
+    .replace(/-tiered(-[a-z]+)?$/, '')
+    .replace(/-(n|low|medium|high|xhigh)$/, '')
+
+export interface AgyUsage {
+  // Como o agy grava: entrada sem o cache lido, que vem à parte; a saída inclui o raciocínio.
+  input: number
+  cached: number
+  output: number
+}
+
+export function agyCost(model: string, at: number, u: AgyUsage): number | null {
+  const base = normalizeAgyModel(model)
+  if (base.startsWith('claude-')) return claudeCost(base, { input: u.input, cacheRead: u.cached, cacheWrite5m: 0, cacheWrite1h: 0, output: u.output, fast: false })
+  const r = GEMINI[base]?.findLast((rate) => rate.from <= at)
+  if (!r) return null
+  return (u.input * r.input + u.cached * r.cached + u.output * r.output) / M
 }
