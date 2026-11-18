@@ -159,6 +159,24 @@ describe('CodexMetrics', () => {
     expect(m.responses[0]!.costUsd).toBeCloseTo((2000 * 2 + 8000 * 0.1 + 200 * 10) / 1_000_000, 10)
   })
 
+  it.each([
+    { model: 'gpt-6.2-astra', standard: 1.196, long: 1.990016 },
+    { model: 'gpt-6.2-sol', standard: 0.299, long: 0.497504 }
+  ])('estima o custo de $model nos dois lados do limite de contexto', ({ model, standard, long }) => {
+    const acc = new CodexMetrics()
+    acc.line({ type: 'turn_context', timestamp: iso(0), payload: { model } })
+    for (const [index, inputTokens] of [272_000, 272_001].entries()) {
+      acc.line({
+        type: 'token_usage_record',
+        timestamp: iso(1000 + index),
+        payload: { usage: { input_tokens: inputTokens, cached_input_tokens: 240_000, cache_write_input_tokens: 20_000, output_tokens: 20_100 } }
+      })
+    }
+    const { responses } = acc.snapshot('t')
+    expect(responses[0]!.costUsd).toBeCloseTo(standard, 10)
+    expect(responses[1]!.costUsd).toBeCloseTo(long, 10)
+  })
+
   it('lê turnos, interrupção e compactação', () => {
     const acc = new CodexMetrics()
     for (const line of lines()) acc.line(line)

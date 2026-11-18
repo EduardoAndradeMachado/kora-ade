@@ -1,5 +1,5 @@
 // Preços de API em US$ por milhão de tokens, para estimar quanto a conversa custaria fora da assinatura.
-// Fonte: tabela de preços da Anthropic (nov/2026) e tabela pública da OpenAI (out/2026). Modelo fora da tabela
+// Fonte: tabelas públicas da Anthropic e da OpenAI (nov/2026). Modelo fora da tabela
 // fica sem estimativa em vez de herdar o preço de outro.
 
 interface ClaudeRate {
@@ -78,6 +78,20 @@ interface OpenAiRate {
 }
 
 const OPENAI: Record<string, OpenAiRate> = {
+  'gpt-6.2-astra': {
+    input: 8,
+    cached: 0.4,
+    cacheWrite: 10,
+    output: 40,
+    long: { from: 272_000, input: 16, cached: 0.8, cacheWrite: 20, output: 60 }
+  },
+  'gpt-6.2-sol': {
+    input: 2,
+    cached: 0.1,
+    cacheWrite: 2.5,
+    output: 10,
+    long: { from: 272_000, input: 4, cached: 0.2, cacheWrite: 5, output: 15 }
+  },
   'gpt-6.1-sol': {
     input: 2,
     cached: 0.1,
