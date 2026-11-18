@@ -66,9 +66,13 @@ describe('atividade do agy pelos passos', () => {
     expect(agyActivity([userInput, TOOL_RESPONSE, tool(2), FINAL_RESPONSE])).toBe('working')
   })
 
-  it('aprovação pendente é esperando você; cancelado, erro ou interrompido encerram o turno', () => {
+  it('aprovação pendente é esperando você; cancelado ou interrompido encerram o turno', () => {
     expect(agyActivity([userInput, TOOL_RESPONSE, tool(9)])).toBe('waiting')
-    for (const status of [6, 7, 12]) expect(agyActivity([userInput, TOOL_RESPONSE, tool(status)])).toBe('waiting')
+    for (const status of [6, 12]) expect(agyActivity([userInput, TOOL_RESPONSE, tool(status)])).toBe('waiting')
+  })
+
+  it('ferramenta que falhou volta para o modelo: o turno segue trabalhando', () => {
+    expect(agyActivity([userInput, TOOL_RESPONSE, tool(3), tool(7)])).toBe('working')
   })
 
   it('conversa sem passos: esperando o primeiro pedido', () => {

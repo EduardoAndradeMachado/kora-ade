@@ -105,6 +105,11 @@ const IN_PROGRESS = new Set([STEP_PENDING, STEP_RUNNING, STEP_GENERATING, STEP_Q
 const TURN_STOPPED = new Set([STEP_CANCELED, STEP_ERROR, STEP_INTERRUPTED])
 // Resposta do modelo (planner response): o campo 20 traz o texto e, no 20.7, as ferramentas que ele pediu.
 const PLANNER_RESPONSE = 15
+// Ferramenta que falhou (arquivo inexistente, comando com erro) volta para o modelo, que segue o turno: em 80
+// conversas, 83 de 85 erros de ferramenta vieram seguidos de outra resposta do modelo ou de um subagente.
+const TOOL = 132
+
+const stopsTurn = (step: AgyStep): boolean => TURN_STOPPED.has(step.status) && !(step.type === TOOL && step.status === STEP_ERROR)
 
 function plannerCallsTools(payload: Uint8Array | null): boolean | null {
   if (!payload) return null
@@ -126,7 +131,7 @@ export function agyActivity(steps: AgyStep[]): AgentActivity {
   if (steps.some((s) => IN_PROGRESS.has(s.status))) return 'working'
   const last = steps.at(-1)
   if (!last) return 'waiting'
-  if (TURN_STOPPED.has(last.status)) return 'waiting'
+  if (stopsTurn(last)) return 'waiting'
   if (last.type === PLANNER_RESPONSE && last.status === STEP_DONE) return plannerCallsTools(last.payload) === false ? 'waiting' : 'working'
   return 'working'
 }
