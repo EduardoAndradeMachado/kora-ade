@@ -1,14 +1,15 @@
-import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ClaudeMetrics } from '../src/main/metrics-claude'
 import { CodexMetrics } from '../src/main/metrics-codex'
 import { opencodeDay, opencodeMetrics } from '../src/main/metrics-opencode'
 import { JsonlFollower, sessionMetrics } from '../src/main/metrics'
 import { claudeProjectDir } from '../src/main/sessions'
 import { closeOpencodeDb } from '../src/main/opencode'
+import { isOff } from '../src/shared/metrics'
 
 const T0 = Date.parse('2026-10-21T01:00:00.000Z')
 const iso = (ms: number): string => new Date(T0 + ms).toISOString()
@@ -281,6 +282,87 @@ describe('opencodeMetrics', () => {
     const file = makeDb()
     expect(opencodeDay(file, T0).map((p) => p.tps.toFixed(1))).toEqual(['36.6'])
     expect(opencodeDay(file, T0 + 60)).toEqual([])
+  })
+})
+
+// OpenCode Go é assinatura: desde a v2.3 o OpenCode grava custo 0 nele e guarda o catálogo no próprio banco.
+describe('opencodeMetrics no OpenCode Go', () => {
+  afterEach(() => {
+    closeOpencodeDb()
+    vi.unstubAllEnvs()
+  })
+  const catalog = readFileSync(new URL('./fixtures/opencode-catalogo.json', import.meta.url), 'utf8')
+
+  function goDb(messages: { model: string; created: number; tokens: Record<string, unknown> }[], withCatalog = true): string {
+    const file = join(mkdtempSync(join(tmpdir(), 'kora-go-')), 'opencode.db')
+    const db = new DatabaseSync(file)
+    db.exec(`
+      create table session_v2 (id text primary key, parent_id text);
+      create table session_message (id text primary key, session_id text, type text, seq integer, time_created integer, data text);
+      create table kv (key text primary key, value text not null, time_created integer not null, time_updated integer not null);
+    `)
+    db.prepare('insert into session_v2 values (?, ?)').run('ses_go', null)
+    if (withCatalog) {
+      const value = JSON.stringify({ updatedAt: 1, digest: 'x', body: catalog })
+      db.prepare('insert into kv values (?, ?, 1, 1)').run('models-dev:v2:catalog', value)
+    }
+    messages.forEach((m, i) =>
+      db.prepare('insert into session_message values (?, ?, ?, ?, ?, ?)').run(`m${i}`, 'ses_go', 'assistant', i, m.created, JSON.stringify({
+        time: { created: m.created, streamed: m.created + 2000, completed: m.created + 2100 },
+        model: { id: m.model, providerID: 'opencode-go', variant: 'high' },
+        cost: 0,
+        tokens: m.tokens
+      }))
+    )
+    db.close()
+    return file
+  }
+
+  const ds = { input: 1000, output: 400, reasoning: 100, cache: { read: 200_000, write: 0 } }
+  const costs = (file: string): unknown[] => opencodeMetrics(file, 'ses_go').responses.map((r) => r.costUsd)
+
+  it('estima pelo catálogo do banco em vez do custo 0 gravado, e lê a janela de contexto dele', () => {
+    const m = opencodeMetrics(goDb([{ model: 'deepseek-v4.1-flash', created: Date.parse('2026-11-18T12:00:00Z'), tokens: ds }]), 'ses_go')
+    // 1000 × 0,15 + 200000 × 0,003 + (400 + 100) × 0,6, por milhão.
+    expect(m.responses[0]!.costUsd).toBeCloseTo(0.00105, 10)
+    expect(m.costKind).toBe('estimado')
+    expect(m.contextWindow).toBe(1_000_000)
+  })
+
+  it('dobra no horário de pico só em dia útil', () => {
+    const file = goDb([
+      { model: 'deepseek-v4.1-flash', created: Date.parse('2026-11-18T02:30:00Z'), tokens: ds },
+      { model: 'deepseek-v4.1-flash', created: Date.parse('2026-11-18T04:00:00Z'), tokens: ds },
+      { model: 'deepseek-v4.1-flash', created: Date.parse('2026-11-21T02:30:00Z'), tokens: ds }
+    ])
+    const [peak, afterPeak, saturday] = costs(file) as number[]
+    expect(peak).toBeCloseTo(0.0021, 10)
+    expect(afterPeak).toBeCloseTo(0.00105, 10)
+    expect(saturday).toBeCloseTo(0.00105, 10)
+  })
+
+  it('usa a faixa de contexto longo e a gravação de cache mais curta', () => {
+    const at = Date.parse('2026-11-18T12:00:00Z')
+    const file = goDb([
+      { model: 'claude-haiku-5-5', created: at, tokens: { input: 1000, output: 100, cache: { read: 150_000, write: 2000 } } },
+      { model: 'claude-haiku-5-5', created: at, tokens: { input: 1000, output: 100, cache: { read: 50_000, write: 2000 } } },
+      { model: 'qwen4-max', created: at, tokens: { input: 1000, output: 100, cache: { read: 0, write: 1000 } } }
+    ])
+    const [long, short, qwen] = costs(file) as number[]
+    // Contexto de 153 mil passa dos 100 mil: entrada 0,5, cache lido 0,05, gravado 0,625, saída 2,5.
+    expect(long).toBeCloseTo(0.0095, 10)
+    expect(short).toBeCloseTo(0.0009, 10)
+    // Gravação 5m (1,875) e não 1h (3).
+    expect(qwen).toBeCloseTo(0.003825, 10)
+  })
+
+  it('modelo fora do catálogo ou banco sem catálogo fica desativado, não com custo 0', () => {
+    const at = Date.parse('2026-11-18T12:00:00Z')
+    expect(costs(goDb([{ model: 'modelo-novo', created: at, tokens: ds }]))[0]).toEqual({ off: expect.stringContaining('opencode-go/modelo-novo') })
+    closeOpencodeDb()
+    // Sem o catálogo no banco ele procuraria o models.json das versões antigas; aqui não há nenhum.
+    vi.stubEnv('XDG_CACHE_HOME', mkdtempSync(join(tmpdir(), 'kora-cache-')))
+    expect(isOff(costs(goDb([{ model: 'deepseek-v4.1-flash', created: at, tokens: ds }], false))[0])).toBe(true)
   })
 })
 

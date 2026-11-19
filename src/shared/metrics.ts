@@ -37,7 +37,7 @@ export interface SessionMetrics {
   subagentResponses: ResponseMetric[]
   // Pedidos feitos ao agente (cada um dispara uma ou mais respostas do modelo).
   turns: number
-  // O custo do OpenCode vem gravado; o do Claude e do Codex é estimado pela tabela de preços da API.
+  // O custo do OpenCode vem gravado, menos o do OpenCode Go (assinatura); o dos outros é estimado pela tabela de preços da API.
   costKind: 'real' | 'estimado'
   contextWindow: Metric<number>
   interruptions: number

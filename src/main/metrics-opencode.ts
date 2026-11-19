@@ -1,8 +1,6 @@
-import { readFileSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { off, type DayPoint, type ResponseMetric, type SessionMetrics } from '../shared/metrics'
 import { queryOpencode } from './opencode'
+import { catalogContext, catalogCost, opencodeCatalog, type ModelLookup } from './opencode-catalog'
 
 interface MessageRow {
   type: string
@@ -31,25 +29,27 @@ function generation(d: AssistantData): { durationMs: number | null; tps: number 
   }
 }
 
-// Catálogo de modelos (models.dev) que o próprio OpenCode mantém em cache: dá a janela de contexto por provedor.
-let catalog: { file: string; mtimeMs: number; data: Record<string, { models?: Record<string, { limit?: { context?: number } }> }> } | null = null
+// O OpenCode Go é assinatura: a partir da v2.3 o OpenCode grava custo 0 nele. O custo vira estimativa pela tabela do catálogo.
+const SUBSCRIPTION = new Set(['opencode-go'])
+const isSubscription = (d: AssistantData): boolean => SUBSCRIPTION.has(d.model?.providerID ?? '')
 
-function contextWindowOf(provider: string, model: string, env: NodeJS.ProcessEnv = process.env): number | null {
-  const cacheRoot = env['XDG_CACHE_HOME']?.trim() || join(homedir(), '.cache')
-  const file = join(cacheRoot, 'opencode', 'models.json')
-  try {
-    const { mtimeMs } = statSync(file)
-    if (!catalog || catalog.file !== file || catalog.mtimeMs !== mtimeMs) {
-      catalog = { file, mtimeMs, data: JSON.parse(readFileSync(file, 'utf8')) as NonNullable<typeof catalog>['data'] }
-    }
-  } catch {
-    return null
-  }
-  const context = catalog.data[provider]?.models?.[model]?.limit?.context
-  return typeof context === 'number' && context > 0 ? context : null
+function costOf(catalog: ModelLookup, d: AssistantData): ResponseMetric['costUsd'] {
+  const recorded = typeof d.cost === 'number' ? d.cost : null
+  if (!isSubscription(d)) return recorded ?? off('O OpenCode não gravou o custo desta mensagem.')
+  const model = catalog(d.model?.providerID ?? '', d.model?.id ?? '')
+  const t = d.tokens
+  const estimate = model
+    ? catalogCost(
+        model,
+        { input: num(t?.input), cacheRead: num(t?.cache?.read), cacheWrite: num(t?.cache?.write), output: num(t?.output), reasoning: num(t?.reasoning) },
+        num(d.time?.created)
+      )
+    : null
+  if (estimate !== null) return estimate
+  return recorded ? recorded : off(`${d.model?.providerID}/${d.model?.id} não tem preço no catálogo de modelos do OpenCode.`)
 }
 
-function response(d: AssistantData): ResponseMetric {
+function response(catalog: ModelLookup, d: AssistantData): ResponseMetric {
   const t = d.tokens
   const { durationMs, tps, generated } = generation(d)
   return {
@@ -62,7 +62,7 @@ function response(d: AssistantData): ResponseMetric {
     contextTokens: num(t?.input) + num(t?.cache?.read) + num(t?.cache?.write),
     durationMs,
     tps,
-    costUsd: typeof d.cost === 'number' ? d.cost : off('O OpenCode não gravou o custo desta mensagem.')
+    costUsd: costOf(catalog, d)
   }
 }
 
@@ -88,12 +88,16 @@ function descendants(dbFile: string, sessionId: string): string[] {
 export function opencodeMetrics(dbFile: string, sessionId: string): SessionMetrics {
   const rows = messagesOf(dbFile, sessionId)
   const children = descendants(dbFile, sessionId)
+  const catalog = opencodeCatalog(dbFile)
   const subagentResponses: ResponseMetric[] = []
+  let estimated = false
   for (const child of children) {
     for (const row of messagesOf(dbFile, child)) {
       if (row.type !== 'assistant') continue
       try {
-        subagentResponses.push(response(JSON.parse(row.data) as AssistantData))
+        const d = JSON.parse(row.data) as AssistantData
+        if (isSubscription(d)) estimated = true
+        subagentResponses.push(response(catalog, d))
       } catch {
         // mensagem corrompida não derruba as outras
       }
@@ -129,17 +133,18 @@ export function opencodeMetrics(dbFile: string, sessionId: string): SessionMetri
     if (row.type !== 'assistant') continue
 
     lastModel = { provider: d.model?.providerID ?? '', id: d.model?.id ?? 'desconhecido' }
-    responses.push(response(d))
+    if (isSubscription(d)) estimated = true
+    responses.push(response(catalog, d))
   }
 
-  const window = lastModel ? contextWindowOf(lastModel.provider, lastModel.id) : null
+  const window = lastModel ? catalogContext(catalog(lastModel.provider, lastModel.id)) : null
   return {
     agent: 'opencode',
     sessionId,
     responses,
     subagentResponses,
     turns,
-    costKind: 'real',
+    costKind: estimated ? 'estimado' : 'real',
     contextWindow:
       window ??
       off(lastModel ? `${lastModel.provider}/${lastModel.id} não está no catálogo de modelos do OpenCode.` : 'Nenhuma resposta ainda.'),
