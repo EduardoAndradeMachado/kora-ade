@@ -46,6 +46,12 @@ describe('preço de API dos modelos do agy', () => {
     agyCost(model, at, { input: 0, cached: 0, output: M })
   ]
 
+  it('Neon tem preço fixo, sem data para mudar (lido em 2026-11-18)', () => {
+    expect(cost('gemini-4-neon', NOV)).toEqual([3, 0.15, 15])
+    expect(cost('gemini-4-neon', JAN)).toEqual([3, 0.15, 15])
+    expect(cost('gemini-4-neon-tiered-high', NOV)).toEqual([3, 0.15, 15])
+  })
+
   it('Carbon cobra o preço do dia em que a resposta terminou', () => {
     expect(cost('gemini-4-carbon', NOV)).toEqual([2, 0.1, 10])
     expect(cost('gemini-4-carbon', DEC)).toEqual([4, 0.2, 20])

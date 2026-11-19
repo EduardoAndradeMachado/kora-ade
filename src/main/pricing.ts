@@ -155,6 +155,7 @@ interface GeminiRate {
 
 // Carbon e 3.8 Flash têm preço com data para dobrar; a resposta paga o preço do dia em que terminou.
 const GEMINI: Record<string, GeminiRate[]> = {
+  'gemini-4-neon': [{ from: 0, input: 3, cached: 0.15, output: 15 }],
   'gemini-4-hydrogen': [{ from: 0, input: 1.5, cached: 0.075, output: 7.5 }],
   'gemini-4-carbon': [
     { from: 0, input: 2, cached: 0.1, output: 10 },
