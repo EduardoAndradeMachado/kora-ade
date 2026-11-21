@@ -22,7 +22,7 @@ import type { TextFile } from '../shared/ipc'
 import type { AgentUsage } from '../shared/usage-types'
 import type { ClaudeAccountsView } from '../shared/claude-accounts'
 
-const DEFAULT_TITLE = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', shell: 'Terminal' } as const
+const DEFAULT_TITLE = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', antigravity: 'Antigravity', shell: 'Terminal' } as const
 
 export class MobileRuntime {
   readonly sizes = new TerminalSizes()

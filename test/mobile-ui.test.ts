@@ -90,8 +90,9 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await browserExpect(page.getByRole('button', { name: 'Nova aba', exact: true })).toBeEnabled()
     await page.getByRole('button', { name: 'Nova aba', exact: true }).click()
     const options = page.getByRole('dialog').locator('.new-tab-option')
-    await browserExpect(options).toHaveText([/^Claude/, /^Codex/, /^OpenCode/, /^Terminal/])
+    await browserExpect(options).toHaveText([/^Claude/, /^Codex/, /^OpenCode/, /^Antigravity/, /^Terminal/])
     await browserExpect(options.first().getByLabel('Claude', { exact: true })).toBeVisible()
+    await page.screenshot({ path: join(resolve('e2e/.results/mobile-validation'), 'nova-aba-350.png') })
     await options.filter({ hasText: /^Terminal/ }).click()
     await browserExpect(page.locator('.xterm-screen')).toBeVisible()
     const tab = runtime.snapshot().tabs[0]!

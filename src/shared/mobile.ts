@@ -28,7 +28,7 @@ const SectionSchema = z.union([z.object({ hidden: z.literal(true) }), z.object({
 export const MobileCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('add-project'), path: z.string().trim().min(1).max(4096) }),
   z.object({ type: z.literal('relocate-project'), projectId: id, path: z.string().trim().min(1).max(4096) }),
-  z.object({ type: z.literal('create'), projectId: id, kind: z.enum(['claude', 'codex', 'opencode', 'shell']), ...size }),
+  z.object({ type: z.literal('create'), projectId: id, kind: z.enum(['claude', 'codex', 'opencode', 'antigravity', 'shell']), ...size }),
   z.object({ type: z.literal('open-session'), projectId: id, agent: AgentSessionSchema, ...size }),
   z.object({ type: z.literal('attach'), tabId: id, ...size }),
   z.object({ type: z.literal('detach'), tabId: id }),

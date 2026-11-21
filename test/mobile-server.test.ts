@@ -12,6 +12,7 @@ import { Terminals } from '../src/main/terminals'
 import { DESKTOP, type SizeChange } from '../src/main/terminal-sizes'
 import { emptyState, type KoraState } from '../src/shared/state'
 import type { MobileStatus } from '../src/shared/mobile'
+import type { Launch } from '../src/shared/ipc'
 import { mergeTabs } from '../src/main/projects'
 import { dayMetrics, sessionMetrics } from '../src/main/metrics'
 import { claudeProjectDir } from '../src/main/sessions'
@@ -33,6 +34,7 @@ afterEach(async () => {
 
 interface Setup {
   server: MobileServer
+  launches: { tabId: string; how: Launch }[]
   runtime: MobileRuntime
   terminals: Terminals
   url: string
@@ -73,6 +75,7 @@ async function setup(transcribe?: Transcribe, initial: (dir: string) => Partial<
   let desktop = ''
   const sizes: { id: string; change: SizeChange }[] = []
   const switched: string[] = []
+  const launches: { tabId: string; how: Launch }[] = []
   const statuses: MobileStatus[] = []
   const trashed: { from: string; to: string }[] = []
   const unwatched: string[] = []
@@ -93,7 +96,10 @@ async function setup(transcribe?: Transcribe, initial: (dir: string) => Partial<
     commit: (next) => { state = next },
     terminals,
     activities: new Map(),
-    launch: (tab, cols, rows) => { terminals.spawn(tab.id, dir, cols, rows) },
+    launch: (tab, cols, rows, how) => {
+      launches.push({ tabId: tab.id, how })
+      terminals.spawn(tab.id, dir, cols, rows)
+    },
     changed: () => server?.publishState(),
     sized: (id, change) => sizes.push({ id, change }),
     usage: async () => [
@@ -126,7 +132,7 @@ async function setup(transcribe?: Transcribe, initial: (dir: string) => Partial<
     // mergeTabs só guarda o agente de aba que já existia; o PC grava o agente depois, quando a sessão começa.
     state = { ...merged, tabs: merged.tabs.map((tab) => tab.id === id && agent ? { ...tab, agent } : tab) }
   }
-  return { server, runtime, terminals, url, cookie, device, config, dir, desktop: () => desktop, sizes, addTab, claudeRoot, switched, statuses, trashed, unwatched }
+  return { server, launches, runtime, terminals, url, cookie, device, config, dir, desktop: () => desktop, sizes, addTab, claudeRoot, switched, statuses, trashed, unwatched }
 }
 
 async function action(url: string, cookie: string, command: unknown): Promise<Response> {
@@ -263,6 +269,15 @@ describe('terminal compartilhado entre o PC e o celular', () => {
     const snapshot = await response.json()
     expect(snapshot.data).toContain('ANTES_DA_FOTO')
     expect(snapshot.sequence).toBeGreaterThan(0)
+  })
+
+  it('celular cria aba do agy, que o PC abre como Antigravity', async () => {
+    const s = await setup()
+    const response = await action(s.url, s.cookie, { type: 'create', projectId: 'p', kind: 'antigravity', cols: 80, rows: 24 })
+    expect(response.status).toBe(200)
+    const { tabId } = await response.json()
+    expect(s.launches).toEqual([{ tabId, how: { type: 'antigravity' } }])
+    expect(s.runtime.snapshot().tabs.find((t) => t.id === tabId)?.title).toBe('Antigravity')
   })
 
   it('celular abre, suspende, retoma e fecha uma aba sem trocar o processo à toa', async () => {
