@@ -19,6 +19,7 @@ import type {
 } from './git-types'
 import type { AgentUsage } from './usage-types'
 import type { ClaudeAccountsView } from './claude-accounts'
+import type { AntigravityAccountsView } from './antigravity-accounts'
 import type { DayPoint, SessionMetrics } from './metrics'
 import type { UpdateStatus } from './update'
 import type { AccountAction, AdminRequest, DesktopSessionState, MobilePairing, MobileStatus, TerminalSizeEvent, TerminalSnapshot } from './mobile'
@@ -268,6 +269,14 @@ export interface KoraApi {
   cancelClaudeLogin(): void
   dismissClaudeLogin(): void
   onClaudeAccountsChanged(listener: () => void): () => void
+  // Contas do agy guardadas no Kora; trocar muda o login do agy no computador todo e exige o agy fechado.
+  antigravityAccounts(): Promise<AntigravityAccountsView>
+  switchAntigravityAccount(id: string): Promise<AntigravityAccountsView>
+  removeAntigravityAccount(id: string): Promise<AntigravityAccountsView>
+  // Guarda a conta atual e tira o login do agy; a conta nova entra pelo próprio agy e chega por onAntigravityAccountsChanged.
+  addAntigravityAccount(): Promise<AntigravityAccountsView>
+  cancelAddAntigravityAccount(): Promise<AntigravityAccountsView>
+  onAntigravityAccountsChanged(listener: () => void): () => void
   listOrphans(): Promise<{ key: string; title: string; project: string; agent: AgentSession['kind'] | null; memoryMb: number; processCount: number }[]>
   killOrphan(key: string): Promise<void>
   killAllOrphans(): Promise<void>

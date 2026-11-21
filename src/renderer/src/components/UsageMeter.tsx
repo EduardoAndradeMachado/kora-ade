@@ -6,6 +6,7 @@ import { formatResetAt, formatResetIn, isCritical, isWarning, mostConstrained } 
 import { Icon } from '@/brand/icons'
 import { cn } from '@/lib/utils'
 import { AgentIcon, agentLabel } from './AgentIcon'
+import { AntigravityAccountSwitcher } from './AntigravityAccounts'
 import { ClaudeAccountSwitcher } from './ClaudeAccounts'
 
 interface Props {
@@ -246,6 +247,10 @@ function AgentDetail({
           // Trocar de conta não abre nem fecha o bloco.
           <div className="ml-auto flex min-w-0 cursor-default" onClick={(e) => e.stopPropagation()}>
             <ClaudeAccountSwitcher now={now} liveWeekly={claudeWeekly(usage)} onSwitched={onRefresh} />
+          </div>
+        ) : usage.agent === 'antigravity' ? (
+          <div className="ml-auto flex min-w-0 cursor-default" onClick={(e) => e.stopPropagation()}>
+            <AntigravityAccountSwitcher account={usage.account} onSwitched={onRefresh} />
           </div>
         ) : (usage.account ?? usage.plan) ? (
           <span className="ml-auto truncate px-1.5 text-[11px] text-muted-foreground">{usage.account ?? usage.plan}</span>

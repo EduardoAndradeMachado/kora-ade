@@ -730,12 +730,23 @@ const ANTIGRAVITY_SOURCE = 'cloudcode-pa.googleapis.com (retrieveUserQuotaSummar
 export interface AntigravitySource {
   readCredential(): string | null
   version(): Promise<string | null>
+  // Contas do agy guardadas no Kora: sem login ativo o bloco continua no popup para escolher uma.
+  hasSavedAccounts?(): boolean
 }
 
+// O agy 1.5.9 gravava o id_token inteiro; o 1.5.13 grava só o e-mail dele em id_token_email.
 const AntigravityCredentialSchema = z.object({
   token: z.object({ access_token: z.string().min(1), expiry: z.string().nullish() }),
-  id_token: z.string().nullish()
+  id_token: z.string().nullish(),
+  id_token_email: z.string().nullish()
 })
+
+/** E-mail da conta dona da credencial do agy; null quando ela não diz. */
+export function antigravityCredentialEmail(credential: { id_token?: string | null; id_token_email?: string | null }): string | null {
+  const email = credential.id_token_email?.trim()
+  if (email && email.includes('@')) return email
+  return jwtEmail(credential.id_token)
+}
 
 const AntigravityBucketSchema = z.object({
   window: z.string().nullish(),
@@ -823,7 +834,7 @@ function antigravityErrorMessage(err: unknown): string {
 }
 
 /**
- * null quando o agy não tem login nesta máquina. Não renovamos o token (dura 1 h): só o agy aberto renova, e com ele
+ * null quando o agy não tem login nesta máquina nem contas guardadas no Kora. Não renovamos o token (dura 1 h): só o agy aberto renova, e com ele
  * fechado há mais tempo fica a última leitura com o aviso.
  */
 export async function readAntigravityUsage(
@@ -831,9 +842,12 @@ export async function readAntigravityUsage(
   now = Date.now(),
   deps: { fetch?: typeof fetch } = {}
 ): Promise<UsageRead | null> {
-  const raw = source.readCredential()
-  if (raw === null) return null
   const fail = (error: string): UsageRead => ({ agent: 'antigravity', windows: [], updatedAt: now, source: ANTIGRAVITY_SOURCE, error })
+  const raw = source.readCredential()
+  if (raw === null) {
+    if (!source.hasSavedAccounts?.()) return null
+    return { ...fail('Nenhuma conta ativa no agy; escolha uma das guardadas ou entre pelo agy'), credentialsExpired: true }
+  }
   let credential: z.infer<typeof AntigravityCredentialSchema>
   try {
     const parsed = AntigravityCredentialSchema.safeParse(JSON.parse(raw))
@@ -842,7 +856,7 @@ export async function readAntigravityUsage(
   } catch {
     return fail('Login do agy em formato desconhecido')
   }
-  const email = jwtEmail(credential.id_token)
+  const email = antigravityCredentialEmail(credential)
   const account = email ? { account: email } : {}
   // Data zero do Go (ano 1) é token sem validade.
   const expiry = epochMs(credential.token.expiry)

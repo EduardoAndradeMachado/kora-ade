@@ -126,6 +126,25 @@ describe('readAntigravityUsage', () => {
     expect(f.calls).toHaveLength(0)
   })
 
+  it('sem login ativo mas com contas guardadas no Kora: o bloco fica, sem consulta, para escolher uma', async () => {
+    const f = fakeFetch(() => json(realSummary))
+    const usage = await readAntigravityUsage({ ...source(null), hasSavedAccounts: () => true }, NOW, { fetch: f.fetch })
+    expect(f.calls).toHaveLength(0)
+    expect(usage).toMatchObject({ agent: 'antigravity', windows: [], credentialsExpired: true })
+    expect(usage?.error).toMatch(/Nenhuma conta ativa no agy/)
+  })
+
+  it('mostra a conta do formato do agy 1.5.13, que grava só id_token_email', async () => {
+    const f = fakeFetch(() => json(realSummary))
+    const raw = JSON.stringify({
+      token: { access_token: FAKE_TOKEN, token_type: 'Bearer', refresh_token: FAKE_REFRESH, expiry: '2026-11-16T00:15:00-03:00', expires_in: 3599 },
+      auth_method: 'consumer',
+      id_token_email: 'nova@example.com'
+    })
+    const usage = await readAntigravityUsage(source(raw, '1.5.13'), NOW, { fetch: f.fetch })
+    expect(usage).toMatchObject({ agent: 'antigravity', account: 'nova@example.com' })
+  })
+
   it('token vencido não vai para a rede e pede para abrir o agy', async () => {
     const f = fakeFetch(() => json(realSummary))
     const usage = await readAntigravityUsage(source(credential('2026-11-15T23:00:00-03:00')), NOW, { fetch: f.fetch })

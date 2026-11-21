@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { AgentKind } from '@shared/agent'
 import type { ClaudeAccount, ClaudeAccountsView, WeeklyUsage } from '@shared/claude-accounts'
 import { formatRemaining, formatResetAt, isCritical } from '@shared/usage-format'
 import { Icon } from '@/brand/icons'
@@ -28,7 +29,19 @@ export function weeklyText(weekly: WeeklyUsage | null, now: number): { text: str
   }
 }
 
-function AccountsDialog({ onClose, children }: { onClose(): void; children: React.ReactNode }): React.JSX.Element {
+export function AccountsDialog({
+  agent,
+  title,
+  description,
+  onClose,
+  children
+}: {
+  agent: AgentKind
+  title: string
+  description: string
+  onClose(): void
+  children: React.ReactNode
+}): React.JSX.Element {
   useWindowDim()
   useEffect(() => {
     // Na captura e parando ali: o Esc fecha só o modal, não o popup de limites que fica embaixo.
@@ -51,13 +64,13 @@ function AccountsDialog({ onClose, children }: { onClose(): void; children: Reac
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Contas do Claude"
+        aria-label={title}
         onMouseDown={(e) => e.stopPropagation()}
         className="flex max-h-[80vh] w-full max-w-sm flex-col gap-3 overflow-y-auto rounded-xl border bg-card p-4 text-card-foreground shadow-2xl"
       >
         <div className="flex items-center gap-2">
-          <AgentIcon kind="claude" className="size-4" />
-          <h2 className="text-sm font-semibold">Contas do Claude</h2>
+          <AgentIcon kind={agent} className="size-4" />
+          <h2 className="text-sm font-semibold">{title}</h2>
           <button
             type="button"
             aria-label="Fechar"
@@ -67,9 +80,7 @@ function AccountsDialog({ onClose, children }: { onClose(): void; children: Reac
             <Icon name="fechar" className="size-3.5" />
           </button>
         </div>
-        <p className="text-[11px] text-muted-foreground">
-          Trocar muda o login do Claude Code no computador todo; os Claude abertos depois disso usam a conta escolhida.
-        </p>
+        <p className="text-[11px] text-muted-foreground">{description}</p>
         {children}
       </div>
     </div>,
@@ -143,7 +154,12 @@ export function ClaudeAccountSwitcher({
         <Icon name="expandir" className="size-3 shrink-0 rotate-90" />
       </button>
       {open && (
-        <AccountsDialog onClose={close}>
+        <AccountsDialog
+          agent="claude"
+          title="Contas do Claude"
+          description="Trocar muda o login do Claude Code no computador todo; os Claude abertos depois disso usam a conta escolhida."
+          onClose={close}
+        >
     <section className="flex flex-col gap-2">
       {view?.accounts.map((account) => {
         const expiry = expiryText(account, now)

@@ -25,7 +25,8 @@ import { createEntry, openInDefaultBrowser, renameEntry, trashEntry, treeStamp, 
 import { ProjectIcons } from './project-icons'
 import { savePastedImage } from './pasted-image'
 import { createUsageReader } from './usage'
-import { antigravitySource } from './antigravity'
+import { agyCredentialStore, antigravitySource, isAgyProcess } from './antigravity'
+import { AntigravityAccounts } from './antigravity-accounts'
 import { agyPresenceDir, agyPresenceLocks, agyRoot, readAgyConversation } from './antigravity-conversations'
 import { ClaudeAccounts } from './claude-accounts'
 import { KillOnCloseJob } from './job-object'
@@ -100,7 +101,7 @@ const usage = createUsageReader({
   claudeRoot: join(homedir(), '.claude'),
   codexRoot: join(homedir(), '.codex'),
   opencode: { dbFile: opencodeDbPath(), dataDir: opencodeDataDir() },
-  antigravity: antigravitySource,
+  antigravity: { ...antigravitySource, hasSavedAccounts: () => antigravityAccounts?.hasSavedAccounts() ?? false },
   cache: {
     load: () => JSON.parse(readFileSync(usageCacheFile(), 'utf8')),
     save: (slots) => writeFileSync(usageCacheFile(), JSON.stringify(slots), 'utf8')
@@ -111,8 +112,9 @@ const usage = createUsageReader({
 })
 let projectIcons: ProjectIcons
 let claudeAccounts: ClaudeAccounts
-// Pega as renovações que o Claude Code faz a cada ~8 h: a cópia da conta ativa no cofre fica sempre a mais nova.
-const CLAUDE_ACCOUNTS_SYNC_MS = 60_000
+let antigravityAccounts: AntigravityAccounts
+// Pega as renovações do Claude Code (a cada ~8 h) e do agy (a cada 1 h): a cópia da conta ativa no cofre fica sempre a mais nova.
+const ACCOUNTS_SYNC_MS = 60_000
 
 let mainWindow: BrowserWindow | null = null
 let state: KoraState
@@ -1019,6 +1021,11 @@ function registerIpc(): void {
   ipcMain.on('claude-accounts:login-code', (_e, code: unknown) => claudeAccounts.loginCode(String(code)))
   ipcMain.on('claude-accounts:login-cancel', () => claudeAccounts.cancelLogin())
   ipcMain.on('claude-accounts:login-dismiss', () => claudeAccounts.dismissLogin())
+  ipcMain.handle('antigravity-accounts:list', () => antigravityAccounts.list())
+  ipcMain.handle('antigravity-accounts:switch', (_e, id: string) => antigravityAccounts.switchTo(String(id)))
+  ipcMain.handle('antigravity-accounts:remove', (_e, id: string) => antigravityAccounts.remove(String(id)))
+  ipcMain.handle('antigravity-accounts:add', () => antigravityAccounts.startAdding())
+  ipcMain.handle('antigravity-accounts:cancel-add', () => antigravityAccounts.cancelAdding())
 
   ipcMain.handle('orphans:list', () =>
     [...survivors.values()].map((s) => ({
@@ -1276,21 +1283,44 @@ void app.whenReady().then(() => {
   nativeTheme.themeSource = state.settings.theme
   registerKoraFileProtocol(projectRoot)
   projectIcons = new ProjectIcons(join(app.getPath('userData'), 'icons'))
+  // DPAPI do Windows: só o mesmo usuário nesta máquina abre os logins guardados.
+  const loginSecrets = {
+    encrypt: (plain: string): string => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('Criptografia do Windows indisponível; o Kora não guarda logins sem ela')
+      return safeStorage.encryptString(plain).toString('base64')
+    },
+    decrypt: (cipher: string): string => safeStorage.decryptString(Buffer.from(cipher, 'base64'))
+  }
   claudeAccounts = new ClaudeAccounts({
     claudeRoot: join(homedir(), '.claude'),
     globalConfigFile: join(homedir(), '.claude.json'),
     vaultFile: join(app.getPath('userData'), 'claude-accounts.json'),
     scratchDir: app.getPath('userData'),
-    // DPAPI do Windows: só o mesmo usuário nesta máquina abre os logins guardados.
-    secrets: {
-      encrypt: (plain) => {
-        if (!safeStorage.isEncryptionAvailable()) throw new Error('Criptografia do Windows indisponível; o Kora não guarda logins sem ela')
-        return safeStorage.encryptString(plain).toString('base64')
-      },
-      decrypt: (cipher) => safeStorage.decryptString(Buffer.from(cipher, 'base64'))
-    },
+    secrets: loginSecrets,
     onChange: () => mainWindow?.webContents.send('claude-accounts:changed')
   })
+  antigravityAccounts = new AntigravityAccounts({
+    store: agyCredentialStore,
+    vaultFile: join(app.getPath('userData'), 'antigravity-accounts.json'),
+    secrets: loginSecrets,
+    runningAgy: () => {
+      const all = listProcesses()
+      // Lista vazia é falha do snapshot (o próprio Kora está rodando), não "nenhum agy aberto".
+      if (all.length === 0) throw new Error('Não consegui conferir se há agy aberto; tente de novo')
+      return all.filter((p) => isAgyProcess(p.name)).length
+    },
+    onChange: () => mainWindow?.webContents.send('antigravity-accounts:changed'),
+    onActiveChange: () => {
+      usage.forget('antigravity')
+      mainWindow?.webContents.send('antigravity-accounts:changed')
+    }
+  })
+  // Sem esperar o primeiro intervalo: sem login ativo no agy, é a contagem das contas guardadas que mantém o bloco
+  // dele no popup.
+  antigravityAccounts
+    .sync()
+    .then(() => usage.forget('antigravity'))
+    .catch(() => {})
   setInterval(() => {
     claudeAccounts
       .sync()
@@ -1298,7 +1328,13 @@ void app.whenReady().then(() => {
         if (changed) mainWindow?.webContents.send('claude-accounts:changed')
       })
       .catch(() => {})
-  }, CLAUDE_ACCOUNTS_SYNC_MS)
+    antigravityAccounts
+      .sync()
+      .then((changed) => {
+        if (changed) mainWindow?.webContents.send('antigravity-accounts:changed')
+      })
+      .catch(() => {})
+  }, ACCOUNTS_SYNC_MS)
   // O menu padrão do Electron traz Ctrl+W (fecha a janela) e Ctrl+R (recarrega a interface e perde a edição não
   // salva dos arquivos); os atalhos do Kora ficam todos na interface.
   Menu.setApplicationMenu(null)
