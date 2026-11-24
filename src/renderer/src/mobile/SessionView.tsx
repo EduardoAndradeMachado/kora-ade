@@ -112,7 +112,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   const [uploading, setUploading] = useState(0)
   // Erro de imagem ou de envio aparece no campo, onde a pessoa agiu, e não no aviso do topo.
   const [composerError, setComposerError] = useState<string | null>(null)
-  // Skills do Claude para o menu "/": pedidas ao PC na primeira vez que a mensagem começa com barra.
+  // Skills do Claude para o menu "/", pedidas ao PC quando a mensagem começa com barra.
   const [skills, setSkills] = useState<{ name: string; description: string }[] | null>(null)
   const [moreKeys, setMoreKeys] = useState(false)
   // Cada Redesenhar refaz o terminal daqui com uma foto nova do PC, depois de o agente redesenhar a tela.
@@ -521,11 +521,16 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     }
   }
   const kind = tab.agent?.kind
+  // Pedidas de novo a cada vez que a barra começa e quando a conversa troca (/clear): numa conversa nova a lista só
+  // existe depois que o Claude grava a primeira mensagem.
+  const slashing = draft.startsWith('/')
+  const sessionId = tab.agent?.sessionId
   useEffect(() => {
-    if (kind !== 'claude' || skills !== null || !draft.startsWith('/') || !connected) return
-    setSkills([])
-    void api<{ name: string; description: string }[]>(`skills?tab=${encodeURIComponent(tab.id)}`).then(setSkills, () => setSkills([]))
-  }, [kind, skills, draft, connected, tab.id])
+    if (kind !== 'claude' || !slashing || !connected) return
+    let current = true
+    void api<{ name: string; description: string }[]>(`skills?tab=${encodeURIComponent(tab.id)}`).then((list) => { if (current) setSkills(list) }, () => {})
+    return () => { current = false }
+  }, [kind, slashing, connected, tab.id, sessionId])
   const slash = ((): { label: string; description: string; fill: string }[] => {
     if (!kind || !draft.startsWith('/') || draft.includes('\n')) return []
     const commands = agentCommands(kind)

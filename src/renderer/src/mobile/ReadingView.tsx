@@ -15,6 +15,8 @@ const PAGE = 40
 // Perto do fim, a mensagem nova rola a lista até ela; mais acima, a pessoa está lendo e ganha o aviso.
 const STICK_PX = 120
 const WORKING_POLL_MS = 3000
+const FOLLOW_RETRIES = 5
+const FOLLOW_RETRY_MS = 2000
 
 export function duration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000))
@@ -131,6 +133,9 @@ export function ReadingView({ tab, connected, connection, feed, modelSheet, onMo
   const generation = useRef(0)
   const following = useRef<Promise<void> | null>(null)
   const again = useRef(false)
+  const loaded = useRef(false)
+  const retries = useRef(0)
+  const followRef = useRef<() => void>(() => {})
 
   const nearBottom = (): boolean => {
     const element = list.current
@@ -141,10 +146,12 @@ export function ReadingView({ tab, connected, connection, feed, modelSheet, onMo
 
   const loadLatest = useCallback(async (): Promise<void> => {
     const mine = ++generation.current
+    loaded.current = false
     try {
       const page = await fetchPage(`limit=${PAGE}`)
       if (mine !== generation.current) return
       cursor.current = { start: page.start, end: page.end }
+      loaded.current = true
       setStatus(page.status ?? {})
       anchor.current = { kind: 'bottom' }
       setItems(page.items)
@@ -160,28 +167,42 @@ export function ReadingView({ tab, connected, connection, feed, modelSheet, onMo
   // Um pedido de novidades por vez; aviso que chega no meio vira mais uma volta no fim, não um pedido paralelo
   // (dois "after" do mesmo cursor trariam as mesmas mensagens duas vezes).
   const follow = useCallback((): void => {
+    // Sem a primeira página o cursor ainda é 0: pedir as novidades dali traria o começo da conversa como se fosse o fim.
+    if (!loaded.current) return void loadLatest()
     if (following.current) {
       again.current = true
       return
     }
     const mine = generation.current
     following.current = (async () => {
+      // Uma leitura traz no máximo um pedaço (o PC limita bytes e linhas por pedido): enquanto o cursor anda, pede de
+      // novo, senão o resto de um atraso grande só viria com a próxima escrita do agente.
+      let advanced: boolean
       do {
         again.current = false
         const page = await fetchPage(`after=${cursor.current.end}`)
         if (mine !== generation.current) return
         if (page.reset) return void loadLatest()
-        if (page.end === cursor.current.end) continue
+        // O status pode mudar sem o cursor andar, e chega só com os campos que o agente gravou neste trecho.
+        if (page.status) setStatus((current) => ({ ...current, ...page.status }))
+        advanced = page.end !== cursor.current.end
+        if (!advanced) continue
         cursor.current.end = page.end
-        if (page.status) setStatus(page.status)
         if (page.items.length === 0) continue
         const stick = nearBottom()
         if (stick) anchor.current = { kind: 'bottom' }
         else setUnseen(true)
         setItems((current) => [...current, ...page.items])
-      } while (again.current)
-    })().catch(() => {}).finally(() => { following.current = null })
+      } while (again.current || advanced)
+      retries.current = 0
+    })().catch(() => {
+      // Falha passageira (rede, PC ocupado): tenta de novo sozinho, porque com o agente parado não haveria outro aviso.
+      if (mine !== generation.current || retries.current >= FOLLOW_RETRIES) return
+      retries.current++
+      setTimeout(() => { if (mine === generation.current) followRef.current() }, FOLLOW_RETRY_MS * retries.current)
+    }).finally(() => { following.current = null })
   }, [tab.id, loadLatest])
+  followRef.current = follow
 
   const loadOlder = async (): Promise<void> => {
     if (older !== 'idle') return
