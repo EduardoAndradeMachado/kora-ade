@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, readFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { createServer, request, type Server } from 'node:http'
@@ -19,6 +19,8 @@ import { claudeProjectDir } from '../src/main/sessions'
 import type { AgentSession } from '../src/shared/agent'
 import type { DayPoint, SessionMetrics } from '../src/shared/metrics'
 import { createTranscriber, type Transcribe } from '../src/main/transcriber'
+import { agentTranscript } from '../src/main/transcript'
+import type { TranscriptPage } from '../src/shared/transcript'
 import transcritor from './fixtures/transcritor-api.json'
 
 const servers: MobileServer[] = []
@@ -110,6 +112,7 @@ async function setup(transcribe?: Transcribe, initial: (dir: string) => Partial<
     switchAccount: async (id) => { switched.push(id); active = id },
     metrics: (agent, path) => sessionMetrics(metricSources, agent, path),
     dayMetrics: (since) => dayMetrics(metricSources, since),
+    transcript: (agent, path, cursor) => agentTranscript(metricSources, agent, path, cursor),
     // Registra o pedido antes de mover: pedido para o que não existe também conta.
     trash: async (abs) => {
       const to = join(trashBin, `${++trashCount}-${basename(abs)}`)
@@ -862,6 +865,49 @@ describe('métricas da sessão pelo celular', () => {
     const day: DayPoint[] = await (await read(`day?since=${Date.now() - 3_600_000}`)).json()
     expect(day.filter((point) => point.agent === 'claude').map((point) => point.model).sort()).toEqual(['claude-opus-5-5', 'claude-opus-5-5', 'claude-sonnet-5-5'])
     expect((await read('day?since=amanhã')).status).toBe(400)
+  })
+})
+
+describe('modo leitura do celular', () => {
+  it('lê a conversa do Claude pela aba, página a página e o que chegou depois, sem mexer no tamanho do terminal do PC', async () => {
+    const s = await setup()
+    const sessionId = '7b2e4d6f-1a3c-4b5d-8e9f-0a1b2c3d4e5f'
+    const folder = claudeProjectDir(s.claudeRoot, s.dir)
+    mkdirSync(folder, { recursive: true })
+    const file = join(folder, `${sessionId}.jsonl`)
+    const line = (uuid: string, type: 'user' | 'assistant', text: string): string =>
+      JSON.stringify({ type, uuid, timestamp: '2026-11-24T10:00:00.000Z', isSidechain: false, message: { role: type, content: type === 'user' ? text : [{ type: 'text', text }] } }) + '\n'
+    writeFileSync(file, line('u1', 'user', 'primeira') + line('a1', 'assistant', 'resposta 1') + line('u2', 'user', 'segunda') + line('a2', 'assistant', 'resposta 2') + JSON.stringify({ type: 'api-request', querySource: 'repl_main_thread', params: { model: 'claude-opus-5-5', output_config: { effort: 'high' } } }) + '\n' + JSON.stringify({ type: 'permission-mode', permissionMode: 'plan' }) + '\n')
+    s.addTab('c', { kind: 'claude', sessionId })
+    s.terminals.spawn('c', s.dir, 100, 30)
+    s.runtime.launched('c', DESKTOP, { cols: 100, rows: 30 })
+    s.addTab('t')
+
+    const read = (query: string, cookie = s.cookie): Promise<Response> => fetch(`${s.url}/api/transcript?${query}`, { headers: { cookie } })
+    const texts = (page: TranscriptPage): string[] => page.items.map((item) => ('text' in item ? item.text : item.kind))
+    expect((await read('tab=c', '')).status).toBe(401)
+    const last: TranscriptPage = await (await read('tab=c&limit=2')).json()
+    expect(texts(last)).toEqual(['segunda', 'resposta 2'])
+    expect(last.atStart).toBe(false)
+    expect(last.status).toEqual({ model: 'claude-opus-5-5', effort: 'high', mode: 'plan' })
+    const first: TranscriptPage = await (await read(`tab=c&before=${last.start}&limit=2`)).json()
+    expect(texts(first)).toEqual(['primeira', 'resposta 1'])
+    expect(first.atStart).toBe(true)
+    appendFileSync(file, line('u3', 'user', 'terceira'))
+    const next: TranscriptPage = await (await read(`tab=c&after=${last.end}`)).json()
+    expect(texts(next)).toEqual(['terceira'])
+
+    const shell = await read('tab=t')
+    expect(shell.status).toBe(400)
+    expect((await shell.json()).error).toBe('Esta aba é um terminal, sem conversa para ler.')
+    expect((await read('tab=c&limit=999')).status).toBe(400)
+    expect((await read('tab=c&after=-1')).status).toBe(400)
+
+    // O modo leitura nunca manda attach: a tecla do celular chega ao terminal e o PC continua com a largura dele.
+    expect((await action(s.url, s.cookie, { type: 'keys', tabId: 'c', data: width('K') })).status).toBe(200)
+    await expect.poll(() => s.desktop(), { timeout: 15000 }).toContain('K=100')
+    expect(s.sizes).toEqual([])
+    expect(s.runtime.sizes.holder('c')).toBe(DESKTOP)
   })
 })
 

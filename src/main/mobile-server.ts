@@ -16,6 +16,7 @@ import { MAX_PASTED_FILE_BYTES, savePastedFile } from './pasted-file'
 import { imageTypeOf } from '../shared/image-bytes'
 import { ConflictError } from './files'
 import type { MobileRuntime } from './mobile-runtime'
+import { TRANSCRIPT_PAGE_MAX, type TranscriptEvent } from '../shared/transcript'
 import type { TLSSocket } from 'node:tls'
 import { RelayLink } from './remote/link'
 import { TranscriberUnavailableError, type Transcribe } from './transcriber'
@@ -86,6 +87,12 @@ const MAX_AUDIO_BYTES = 8 * 1024 * 1024
 // caminho relativo. Vale por pouco tempo e só lê: a página roda isolada (sandbox) e não recebe o pareamento.
 const RAW_LINK_MS = 30 * 60_000
 // certificado: o app novo informa a impressão digital do certificado dele, para depois entrar pelo relay sem cookie.
+const TranscriptQuerySchema = z.object({
+  tab: z.string().min(1).max(200),
+  before: z.coerce.number().int().min(0).optional(),
+  after: z.coerce.number().int().min(0).optional(),
+  limit: z.coerce.number().int().min(1).max(TRANSCRIPT_PAGE_MAX).default(40)
+})
 const PairSchema = z.object({ code: z.string().min(1).max(100), name: z.string().max(60), certificado: z.string().regex(/^[0-9a-f]{64}$/).optional() })
 // Envelope que chegou pelo relay: o aperto de mãos já provou qual celular é (o certificado registrado no pareamento).
 type TunnelSocket = TLSSocket & { koraCertificate?: string }
@@ -405,6 +412,10 @@ export class MobileServer {
     for (const client of this.clients) sendEvent(client.response, 'files', event)
   }
 
+  publishTranscript(event: TranscriptEvent): void {
+    for (const client of this.clients) sendEvent(client.response, 'transcript', event)
+  }
+
   publishSize(event: TerminalSizeEvent): void {
     for (const client of this.clients) sendEvent(client.response, 'size', event)
   }
@@ -715,6 +726,12 @@ export class MobileServer {
           return json(response, 200, { id: device, name: this.pairing.devices.find((d) => d.id === device)?.name ?? '' })
         }
         if (url.pathname === '/api/sessions' && request.method === 'GET') return json(response, 200, await this.options.runtime.sessions(url.searchParams.get('project') ?? ''))
+        if (url.pathname === '/api/transcript' && request.method === 'GET') {
+          const query = (name: string): string | undefined => url.searchParams.get(name) ?? undefined
+          const { tab, ...cursor } = TranscriptQuerySchema.parse({ tab: query('tab'), before: query('before'), after: query('after'), limit: query('limit') })
+          return json(response, 200, await this.options.runtime.tabTranscript(tab, cursor))
+        }
+        if (url.pathname === '/api/skills' && request.method === 'GET') return json(response, 200, await this.options.runtime.tabSkills(url.searchParams.get('tab') ?? ''))
         if (url.pathname === '/api/snapshot' && request.method === 'GET') {
           const id = url.searchParams.get('tab') ?? ''
           return json(response, 200, await this.options.runtime.snapshotTerminal(id))

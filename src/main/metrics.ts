@@ -97,7 +97,7 @@ const claude = new JsonlFollower(() => new ClaudeMetrics())
 const claudeSubagent = new JsonlFollower(() => new ClaudeMetrics(true), 256)
 const codex = new JsonlFollower(() => new CodexMetrics(), 256)
 
-async function claudeTranscript(claudeRoot: string, projectPath: string, sessionId: string): Promise<string | null> {
+export async function claudeTranscript(claudeRoot: string, projectPath: string, sessionId: string): Promise<string | null> {
   const expected = join(claudeProjectDir(claudeRoot, projectPath), `${sessionId}.jsonl`)
   if (existsSync(expected)) return expected
   // Conversa retomada a partir de outra pasta fica gravada na pasta de origem.

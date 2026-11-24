@@ -15,6 +15,8 @@ import { statSync } from 'node:fs'
 import { DESKTOP, TerminalSizes, type SizeChange, type TerminalSize } from './terminal-sizes'
 import type { AgentActivity, AgentRef } from '../shared/agent'
 import type { DayPoint, SessionMetrics } from '../shared/metrics'
+import type { TranscriptPage } from '../shared/transcript'
+import type { SkillEntry, TranscriptCursor } from './transcript-claude'
 import type { KoraState } from '../shared/state'
 import type { Launch, TabRef } from '../shared/ipc'
 import type { EntryAction, EntryResult, GroupCommand, MobileCommand, MobileDirectory, MobileFileStat, MobileGit, MobileState, MobileUsage } from '../shared/mobile'
@@ -41,6 +43,8 @@ export class MobileRuntime {
     usage?(): Promise<AgentUsage[]>
     metrics?(agent: AgentRef, projectPath: string): Promise<SessionMetrics>
     dayMetrics?(since: number): Promise<DayPoint[]>
+    transcript?(agent: AgentRef, projectPath: string, cursor: TranscriptCursor): Promise<TranscriptPage>
+    skills?(agent: AgentRef, projectPath: string): Promise<SkillEntry[]>
     accounts?(): Promise<ClaudeAccountsView>
     switchAccount?(id: string): Promise<void>
     dictation?(): boolean
@@ -169,6 +173,25 @@ export class MobileRuntime {
     if (!tab.agent) throw new Error('Esta aba é um terminal, sem métricas de IA.')
     if (!this.host.metrics) throw new Error('Métricas indisponíveis neste PC.')
     return this.host.metrics({ kind: tab.agent.kind, sessionId: tab.agent.sessionId }, this.projectRoot(tab.projectId))
+  }
+
+  // Só lê o arquivo da conversa: não entra no terminal, então não muda o tamanho dele no PC.
+  tabTranscript(tabId: string, cursor: TranscriptCursor): Promise<TranscriptPage> {
+    const { agent, root } = this.agentTab(tabId)
+    if (!this.host.transcript) throw new Error('Modo leitura indisponível neste PC.')
+    return this.host.transcript(agent, root, cursor)
+  }
+
+  async tabSkills(tabId: string): Promise<SkillEntry[]> {
+    const { agent, root } = this.agentTab(tabId)
+    return (await this.host.skills?.(agent, root)) ?? []
+  }
+
+  private agentTab(tabId: string): { agent: AgentRef; root: string } {
+    const tab = this.host.state().tabs.find((t) => t.id === tabId)
+    if (!tab) throw new Error('Aba desconhecida.')
+    if (!tab.agent) throw new Error('Esta aba é um terminal, sem conversa para ler.')
+    return { agent: { kind: tab.agent.kind, sessionId: tab.agent.sessionId }, root: this.projectRoot(tab.projectId) }
   }
 
   dayMetrics(since: number): Promise<DayPoint[]> {

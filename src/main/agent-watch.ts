@@ -44,6 +44,8 @@ export interface WatchTarget {
   recursive: boolean
   // Nome relativo à pasta vigiada; sem filtro (ou sem nome no evento), qualquer mudança dispara.
   accept?(name: string): boolean
+  // Quem precisa saber qual arquivo mudou (o modo leitura do celular segue uma conversa só).
+  changed?(name: string): void
 }
 
 export class FolderWatch {
@@ -62,11 +64,14 @@ export class FolderWatch {
   }
 
   private attach(): void {
-    for (const { dir, recursive, accept } of this.targets) {
+    for (const { dir, recursive, accept, changed } of this.targets) {
       if (this.watchers.has(dir) || !existsSync(dir)) continue
       try {
         const watcher = watch(dir, { recursive }, (_event, name) => {
-          if (!accept || !name || accept(name)) this.onChange()
+          if (!accept || !name || accept(name)) {
+            if (name) changed?.(name)
+            this.onChange()
+          }
         })
         watcher.on('error', () => {
           watcher.close()

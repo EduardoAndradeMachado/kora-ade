@@ -20,6 +20,7 @@ import { AgentDetector, UNREADABLE } from './agent-detect'
 import { createRolloutFinder, FolderWatch, isClaudeTranscript } from './agent-watch'
 import { listProjectSessions, sessionArtifacts } from './sessions'
 import { dayMetrics, sessionMetrics, type MetricsSources } from './metrics'
+import { agentSkills, agentTranscript } from './transcript'
 import { deleteOpencodeSession, newOpencodeSessionId, opencodeActivity, opencodeDataDir, opencodeDbPath } from './opencode'
 import { createEntry, openInDefaultBrowser, renameEntry, trashEntry, treeStamp, TreeUndoStepSchema, undoTreeStep } from './file-actions'
 import { ProjectIcons } from './project-icons'
@@ -206,13 +207,30 @@ const metricsSources: MetricsSources = {
   opencodeDb: agentDirs.opencodeDb,
   agyRoot: agentDirs.agyRoot
 }
+// Os agentes gravam a conversa aos pedaços durante o turno: no máximo um aviso por conversa a cada 250 ms ao modo
+// leitura do celular. Só das conversas abertas em alguma aba; as de fora do Kora não interessam.
+const transcriptTimers = new Map<string, NodeJS.Timeout>()
+function transcriptChanged(sessionId: string): void {
+  if (transcriptTimers.has(sessionId) || !state.tabs.some((tab) => tab.agent?.sessionId === sessionId)) return
+  transcriptTimers.set(sessionId, setTimeout(() => {
+    transcriptTimers.delete(sessionId)
+    mobileServer?.publishTranscript({ sessionId })
+  }, 250))
+}
 const agentFolders = new FolderWatch(
   [
     { dir: agentDirs.claudeSessions, recursive: false },
     { dir: agentDirs.codexLocks, recursive: false },
-    { dir: agentDirs.codexRollouts, recursive: true },
+    {
+      dir: agentDirs.codexRollouts,
+      recursive: true,
+      changed: (name: string) => {
+        const threadId = name.match(/-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i)?.[1]
+        if (threadId) transcriptChanged(threadId)
+      }
+    },
     // Com subagente em segundo plano, o fim do turno só aparece no transcript; o arquivo do pid segue "busy".
-    { dir: agentDirs.claudeProjects, recursive: true, accept: isClaudeTranscript },
+    { dir: agentDirs.claudeProjects, recursive: true, accept: isClaudeTranscript, changed: (name: string) => transcriptChanged(basename(name, '.jsonl')) },
     // O OpenCode grava cada evento do turno no WAL do SQLite; o banco em si muda ao abrir/fechar.
     ...(agentDirs.opencodeDb
       ? [
@@ -220,14 +238,21 @@ const agentFolders = new FolderWatch(
             dir: dirname(agentDirs.opencodeDb),
             recursive: false,
             accept: (name: string) =>
-              name === basename(agentDirs.opencodeDb) || name.startsWith(`${basename(agentDirs.opencodeDb)}-`)
+              name === basename(agentDirs.opencodeDb) || name.startsWith(`${basename(agentDirs.opencodeDb)}-`),
+            // O banco é um só para todas as sessões: avisa todas as abas do OpenCode. Só o -wal, porque a leitura do
+            // celular toca o -shm e o aviso dispararia a si mesmo.
+            changed: (name: string) => {
+              if (!name.endsWith('-wal')) return
+              for (const tab of state.tabs) if (tab.agent?.kind === 'opencode') transcriptChanged(tab.agent.sessionId)
+            }
           }
         ]
       : []),
     // O agy cria presence/<conversa>.lock ao abrir uma conversa e grava os passos do turno no WAL do banco dela.
-    // Só o -wal: a leitura do Kora toca o -shm, e vigiá-lo faria a detecção disparar a si mesma.
+    // O -wal durante a conversa e o .db depois do checkpoint. Nunca o -shm: a leitura do Kora toca nele, e vigiá-lo faria a
+    // detecção disparar a si mesma.
     { dir: agyPresenceDir(agentDirs.agyRoot), recursive: false },
-    { dir: join(agentDirs.agyRoot, 'conversations'), recursive: false, accept: (name: string) => name.endsWith('.db-wal') }
+    { dir: join(agentDirs.agyRoot, 'conversations'), recursive: false, accept: (name: string) => name.endsWith('.db-wal') || name.endsWith('.db'), changed: (name: string) => transcriptChanged(basename(basename(name, '-wal'), '.db')) }
   ],
   () => scheduleDetect()
 )
@@ -1356,6 +1381,8 @@ void app.whenReady().then(() => {
     usage: () => usage.read(),
     metrics: (agent, path) => sessionMetrics(metricsSources, agent, path),
     dayMetrics: (since) => dayMetrics(metricsSources, since),
+    transcript: (agent, path, cursor) => agentTranscript(metricsSources, agent, path, cursor),
+    skills: (agent, path) => agentSkills(metricsSources, agent, path),
     dictation: transcriberInstalled,
     accounts: () => claudeAccounts.list(),
     switchAccount: async (id) => {

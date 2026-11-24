@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createRolloutFinder, FolderWatch, isClaudeTranscript } from '../src/main/agent-watch'
 
@@ -89,7 +89,9 @@ describe('watch das pastas dos agentes', () => {
     mkdirSync(join(project, sessionId, 'subagents'), { recursive: true })
     mkdirSync(join(project, sessionId, 'tool-results'), { recursive: true })
     let changes = 0
-    watch = new FolderWatch([{ dir, recursive: true, accept: isClaudeTranscript }], () => changes++, 100)
+    // O modo leitura do celular precisa saber qual conversa mudou, não só que algo mudou.
+    const names: string[] = []
+    watch = new FolderWatch([{ dir, recursive: true, accept: isClaudeTranscript, changed: (name) => names.push(name) }], () => changes++, 100)
     watch.start()
     await settle(150)
     const before = changes
@@ -97,9 +99,11 @@ describe('watch das pastas dos agentes', () => {
     writeFileSync(join(project, sessionId, 'tool-results', 'saida.txt'), 'x\n')
     await settle(300)
     expect(changes, 'escrita dos subagentes não dispara detecção').toBe(before)
+    expect(names).toEqual([])
     writeFileSync(join(project, `${sessionId}.jsonl`), 'x\n')
     await settle(300)
     expect(changes).toBeGreaterThan(before)
+    expect(new Set(names.map((name) => basename(name)))).toEqual(new Set([`${sessionId}.jsonl`]))
     rmSync(dir, { recursive: true, force: true })
   })
 })
