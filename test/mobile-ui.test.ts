@@ -918,6 +918,10 @@ it('pareia no navegador, usa o mesmo PowerShell que o PC e funciona em celular, 
     await preview.getByRole('link', { name: 'Ir ao topo', exact: true }).click()
     await page.getByRole('button', { name: 'Voltar à conversa', exact: true }).click()
     await browserExpect(page.locator('.session-strip')).toBeVisible()
+    // Dentro da conversa o cabeçalho com o logo (e o Início) sai: a barra da sessão tem o voltar e a bolinha de conexão.
+    await browserExpect(page.getByRole('button', { name: 'Início', exact: true })).toBeHidden()
+    await browserExpect(page.locator('.session-strip').getByRole('status', { name: 'PC conectado' })).toBeVisible()
+    await page.locator('.session-strip').getByRole('button', { name: 'Voltar', exact: true }).click()
     // Da lista inicial, os arquivos do projeto estão a um toque, sem passar pela página de conversas, na mesma pasta.
     await page.getByRole('button', { name: 'Início', exact: true }).click()
     await page.getByRole('button', { name: 'Arquivos de Projeto de validação', exact: true }).click()
