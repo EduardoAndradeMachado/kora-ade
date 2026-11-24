@@ -49,6 +49,9 @@ describe('claudeItems', () => {
     ])
     expect(claudeItems(user('u4', '<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>'))[0]).toMatchObject({ kind: 'note', text: '/clear' })
     expect(claudeItems({ type: 'system', subtype: 'compact_boundary', uuid: 's1', content: 'Conversation compacted' })[0]).toMatchObject({ kind: 'note', text: 'Conversa compactada' })
+    // O Esc do botão de parar: o Claude grava o texto cru como mensagem da pessoa, com e sem ferramenta no meio.
+    expect(claudeItems(user('i1', '[Request interrupted by user]'))).toMatchObject([{ kind: 'note', text: 'Interrompido' }])
+    expect(claudeItems(user('i2', [{ type: 'text', text: '[Request interrupted by user for tool use]' }]))).toMatchObject([{ kind: 'note', text: 'Interrompido' }])
   })
 
   it('mensagem enfileirada (escrita com o agente trabalhando) aparece como balão', () => {

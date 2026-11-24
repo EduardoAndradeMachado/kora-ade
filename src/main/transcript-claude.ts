@@ -53,6 +53,8 @@ function resultText(content: unknown): string {
 // saída de comando): vira nota, não balão.
 function userNote(text: string): string | null {
   if (text.startsWith('<task-notification>')) return tag(text, 'summary') ?? 'Tarefa em segundo plano terminou'
+  // Esc no meio da resposta (ou de uma ferramenta): o Claude grava como se fosse mensagem da pessoa.
+  if (/^\[Request interrupted by user[^\]]*\]$/.test(text)) return 'Interrompido'
   const command = tag(text, 'command-name')
   if (command) return oneLine(`${command} ${tag(text, 'command-args') ?? ''}`)
   const stdout = tag(text, 'local-command-stdout') ?? tag(text, 'bash-stdout')
