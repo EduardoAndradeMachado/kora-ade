@@ -310,7 +310,7 @@ export function ReadingView({ tab, connected, connection, feed, modelSheet, onMo
     }
   }
 
-  return <div className="reading-area">
+  return <div className="reading-area" data-agent={tab.agent?.kind}>
     {tab.agent && <ReadingStatus kind={tab.agent.kind} status={status} connected={connected} open={modelSheet} onOpen={onModelSheet} onSend={onSend} />}
     <div className="reading-list" ref={list} onClick={click} onScroll={(event) => {
       const element = event.currentTarget

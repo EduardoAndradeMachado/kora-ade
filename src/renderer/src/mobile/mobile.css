@@ -683,3 +683,15 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .markdown-view input[type="checkbox"] { margin: 0 6px 0 -2px; vertical-align: middle; }
 .markdown-view li:has(> input[type="checkbox"]) { list-style: none; }
 .markdown-view .path-link { color: var(--brand-amber); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+/* Cores do markdown iguais às do terminal de cada agente (medidas no próprio terminal de cada um em 2026-11-24). O
+   arquivo da conversa não guarda cor: quem pinta é o programa do agente. Só no escuro, que é o fundo dessas paletas. */
+.dark [data-agent] .markdown-view :not(pre) > code { background: transparent; padding: 0; }
+.dark [data-agent="claude"] .markdown-view :not(pre) > code { color: #b1b9f9; }
+.dark [data-agent="codex"] .markdown-view :not(pre) > code { color: #a6e3a1; }
+.dark [data-agent="opencode"] .markdown-view :is(h1, h2, h3, h4, h5, h6) { color: #9d7cd8; }
+.dark [data-agent="opencode"] .markdown-view strong { color: #f5a742; }
+.dark [data-agent="opencode"] .markdown-view :not(pre) > code { color: #7fd88f; }
+.dark [data-agent="opencode"] .markdown-view em { color: #e5c07b; }
+.dark [data-agent="opencode"] .markdown-view li::marker { color: #fab283; }
+.dark [data-agent="antigravity"] .markdown-view :not(pre) > code { color: #8eb4f6; background: #303030; padding: 1px 4px; }
+.dark [data-agent="antigravity"] .markdown-view a { color: #8eb4f6; }
