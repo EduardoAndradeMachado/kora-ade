@@ -32,6 +32,7 @@ const KEYS: [string, string][] = [
   ['↓', '\x1b[B'],
   ['←', '\x1b[D'],
   ['→', '\x1b[C'],
+  ['⌫', '\x7f'],
   ['Enter', '\r']
 ]
 // O agente leva um instante para redesenhar depois da mudança de altura; a foto pedida antes viria velha.
@@ -44,6 +45,8 @@ const MORE_KEYS: [string, string][] = [
   ['Ctrl+X', '\x18'],
   // No Claude Code, troca o modo: normal, aceitar edições e planejar.
   ['Shift+Tab', '\x1b[Z'],
+  // Alt no terminal é Esc seguido da tecla. No Windows o Claude Code troca o modo pelo Alt+M.
+  ['Alt+M', '\x1bm'],
   ['Tab', '\t'],
   ['PgUp', '\x1b[5~'],
   ['PgDn', '\x1b[6~'],
