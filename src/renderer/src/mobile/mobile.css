@@ -672,3 +672,12 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .dark .markdown-view .tok-propertyName, .dark .markdown-view .tok-function { color: #61afef; }
 .dark .markdown-view .tok-variableName.tok-definition, .dark .markdown-view .tok-labelName { color: #e06c75; }
 .dark .markdown-view .tok-deleted, .dark .markdown-view .tok-invalid { color: #e06c75; }
+/* O reset do Tailwind tira marcador de lista; o markdown do PC devolve em .markdown (main.css), o do celular aqui. */
+.markdown-view ul { list-style: disc; }
+.markdown-view ol { list-style: decimal; }
+.markdown-view ul ul { list-style: circle; }
+.markdown-view li { margin: 2px 0; }
+.markdown-view li > ul, .markdown-view li > ol { margin: 2px 0; }
+.markdown-view li > p { margin: 0; }
+.markdown-view input[type="checkbox"] { margin: 0 6px 0 -2px; vertical-align: middle; }
+.markdown-view li:has(> input[type="checkbox"]) { list-style: none; }
