@@ -10,6 +10,7 @@ import { copyWithNotice } from './CopyActions'
 import { SkeletonRows } from './Skeleton'
 import { ReadingStatus } from './ReadingStatus'
 import { colorCodeBlocks } from './code-colors'
+import { cachedResolver, linkPaths, type ResolvePath, type ResolvedPath } from './path-links'
 
 const PAGE = 40
 // Perto do fim, a mensagem nova rola a lista até ela; mais acima, a pessoa está lendo e ganha o aviso.
@@ -70,10 +71,14 @@ const openUrl = (uri: string): void => {
   else window.open(uri, '_blank')
 }
 
-const Assistant = memo(function Assistant({ text, truncated }: { text: string; truncated: boolean }): React.JSX.Element {
+const Assistant = memo(function Assistant({ text, truncated, resolvePath }: { text: string; truncated: boolean; resolvePath: ResolvePath }): React.JSX.Element {
   const html = useMemo(() => markdownMessage(text), [text])
   const article = useRef<HTMLElement>(null)
-  useEffect(() => { if (article.current) void colorCodeBlocks(article.current) }, [html])
+  useEffect(() => {
+    if (!article.current) return
+    void colorCodeBlocks(article.current)
+    void linkPaths(article.current, resolvePath)
+  }, [html, resolvePath])
   return <div className="reading-assistant">
     <article ref={article} className="markdown-view" dangerouslySetInnerHTML={{ __html: html }} />
     {truncated && <p className="reading-cut">Mensagem longa: o resto está no terminal.</p>}
@@ -100,7 +105,7 @@ function pendingTool(items: TranscriptItem[], results: Map<string, Result>): Too
   return null
 }
 
-export function ReadingView({ tab, connected, connection, feed, modelSheet, onModelSheet, onTerminal, onInterrupt, onSend, onError }: {
+export function ReadingView({ tab, connected, connection, feed, modelSheet, onModelSheet, onTerminal, onOpenFile, onSend, onError }: {
   tab: MobileTab
   connected: boolean
   connection: number
@@ -108,11 +113,13 @@ export function ReadingView({ tab, connected, connection, feed, modelSheet, onMo
   modelSheet: boolean
   onModelSheet(open: boolean): void
   onTerminal(): void
-  onInterrupt(): void
+  onOpenFile(path: string, line?: number): void
   onSend(text: string, picker: boolean): void
   onError(message: string): void
 }): React.JSX.Element {
   const sessionId = tab.agent?.sessionId ?? ''
+  const resolvePath = useMemo(() => cachedResolver(tab.projectId, (text) =>
+    api<ResolvedPath | null>(`resolve-link?project=${encodeURIComponent(tab.projectId)}&text=${encodeURIComponent(text)}`)), [tab.projectId])
   const [items, setItems] = useState<TranscriptItem[]>([])
   const [loading, setLoading] = useState(true)
   const [older, setOlder] = useState<'idle' | 'loading' | 'done'>('idle')
@@ -274,11 +281,21 @@ export function ReadingView({ tab, connected, connection, feed, modelSheet, onMo
       void copyWithNotice(code, 'Código copiado.').catch((error: Error) => onError(error.message))
       return
     }
+    const path = target.closest<HTMLElement>('.path-link')
+    if (path) {
+      if (window.getSelection()?.isCollapsed === false) return
+      const line = Number(path.dataset['line'])
+      return onOpenFile(path.dataset['rel'] ?? '', Number.isFinite(line) && line > 0 ? line : undefined)
+    }
     const link = target.closest('a')
     const href = link?.getAttribute('href') ?? ''
     if (link) {
       event.preventDefault()
-      if (/^https?:\/\//i.test(href)) openUrl(href)
+      if (/^https?:\/\//i.test(href)) return openUrl(href)
+      // Link do markdown para arquivo do projeto ([index.ts](src/index.ts)): abre no visualizador, como no terminal.
+      let target = href
+      try { target = decodeURI(href) } catch { /* % solto no link: usa como veio */ }
+      void resolvePath(target.replace(/#L?(\d+).*$/, ':$1')).then((found) => { if (found) onOpenFile(found.rel, found.line ?? undefined) })
     }
   }
 
@@ -299,15 +316,16 @@ export function ReadingView({ tab, connected, connection, feed, modelSheet, onMo
             <p>{item.text}</p>
             {item.images > 0 && <small><Icon name="imagem" />{item.images === 1 ? '1 imagem' : `${item.images} imagens`}</small>}
           </div>
-          if (item.kind === 'assistant') return <Assistant key={item.id} text={item.text} truncated={item.truncated} />
+          if (item.kind === 'assistant') return <Assistant key={item.id} text={item.text} truncated={item.truncated} resolvePath={resolvePath} />
           if (item.kind === 'tool') return <ToolRow key={item.id} tool={item} result={results.get(item.toolId)} />
           if (item.kind === 'turn') return <p key={item.id} className="reading-turn"><Icon name="ok" />{item.durationMs !== null ? `Trabalhou por ${duration(item.durationMs)}` : 'Turno concluído'}</p>
           return <p key={item.id} className="reading-note">{item.text}</p>
         })}
-        {tab.activity === 'working' && <div className="reading-working" role="status"><span className="activity-dot working" />Trabalhando{Number.isFinite(turnStart) && <Elapsed since={turnStart} />}<button type="button" onClick={onInterrupt} disabled={!connected}>Interromper</button></div>}
         {waitingOn && <button type="button" className="reading-waiting" onClick={onTerminal}><Icon name="alerta" active /><span><strong>O agente pode estar esperando você no terminal</strong><small>{waitingOn.name}{waitingOn.summary ? ` · ${waitingOn.summary}` : ''}. Toque para abrir o terminal.</small></span></button>}
       </>}
     </div>
+    {/* Fixo acima do campo, fora da lista: continua à vista com a conversa rolada para cima. Parar fica no botão de enviar. */}
+    {tab.activity === 'working' && <div className="reading-working" role="status"><span className="activity-dot working" />Trabalhando{Number.isFinite(turnStart) && <Elapsed since={turnStart} />}</div>}
     {unseen && <button type="button" className="reading-unseen" onClick={() => { const element = list.current; if (element) element.scrollTop = element.scrollHeight; setUnseen(false) }}><Icon name="setaBaixo" />Novas mensagens</button>}
   </div>
 }

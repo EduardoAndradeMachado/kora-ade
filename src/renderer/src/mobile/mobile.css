@@ -623,8 +623,9 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .reading-tool pre { margin: 0; padding: 8px 10px; border-top: 1px solid var(--border); max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--terminal-font-family, monospace); font-size: 11.5px; line-height: 1.45; }
 .reading-tool > .reading-cut { padding: 0 10px 8px; }
 .reading-note { align-self: center; max-width: 90%; margin: 2px 0; text-align: center; font-size: 11.5px; line-height: 1.45; color: var(--muted-foreground); overflow-wrap: anywhere; }
-.reading-working { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-foreground); }
-.reading-working button { margin-left: auto; min-height: 30px; padding: 4px 12px; font-size: 12px; }
+.reading-working { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 6px 16px; font-size: 12px; color: var(--muted-foreground); border-top: 1px solid var(--border); }
+.send-button.stop { background: var(--foreground); color: var(--background); --icon-accent: currentColor; }
+.send-button.stop svg { width: 14px; height: 14px; }
 .reading-waiting { justify-content: flex-start; text-align: left; gap: 10px; border-color: color-mix(in oklab, var(--brand-amber) 55%, var(--border)); background: color-mix(in oklab, var(--brand-amber) 10%, var(--card)); }
 .reading-waiting span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .reading-waiting small { overflow-wrap: anywhere; }
@@ -681,3 +682,4 @@ input, textarea { min-width: 0; border: 1px solid var(--input); border-radius: 6
 .markdown-view li > p { margin: 0; }
 .markdown-view input[type="checkbox"] { margin: 0 6px 0 -2px; vertical-align: middle; }
 .markdown-view li:has(> input[type="checkbox"]) { list-style: none; }
+.markdown-view .path-link { color: var(--brand-amber); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }

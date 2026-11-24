@@ -588,7 +588,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   if (!live) return <></>
   const elsewhere = holder !== null && holder !== device
   return <>
-    {reading ? <ReadingView tab={tab} connected={connected} connection={connection} feed={feed} modelSheet={modelSheet} onModelSheet={(open) => onModelSheet?.(open)} onError={onError} onTerminal={() => onTerminal?.()} onInterrupt={() => keys('\x1b')} onSend={(text, picker) => void send({ type: 'send', tabId: tab.id, text, images: [], files: [] }).then(() => { if (picker) onTerminal?.() }, (error: Error) => onError(error.message))} /> : <>
+    {reading ? <ReadingView tab={tab} connected={connected} connection={connection} feed={feed} modelSheet={modelSheet} onModelSheet={(open) => onModelSheet?.(open)} onError={onError} onTerminal={() => onTerminal?.()} onOpenFile={(path, line) => openFile.current(path, line)} onSend={(text, picker) => void send({ type: 'send', tabId: tab.id, text, images: [], files: [] }).then(() => { if (picker) onTerminal?.() }, (error: Error) => onError(error.message))} /> : <>
     {elsewhere && <button className="size-banner" onClick={() => void send({ type: 'attach', tabId: tab.id, ...wanted.current() }).catch((error: Error) => onError(error.message))}>
       {holder === DESKTOP ? 'Em uso no PC, no tamanho dele.' : 'Em uso em outro celular.'} Toque para ajustar a este celular.
     </button>}
@@ -649,7 +649,11 @@ export function SessionView({ tab, device, connected, connection, feed, command,
                 onClick={() => { recoveryAllowed.current = false; setComposerError(null); startRecording(tab.projectId, tab.id) }}>
                 <Icon name="microfone" />
               </button>}
-              <button className={`send-button ${ready ? 'ready' : ''}`} aria-label="Enviar" disabled={!ready}><Icon name="setaCima" /></button>
+              {/* No modo texto, com o agente trabalhando e nada escrito, o enviar vira parar (Esc), como nos apps de chat;
+                  ao escrever, volta a enviar, porque dá para mandar mensagem com o agente trabalhando. */}
+              {reading && tab.activity === 'working' && draft.trim() === '' && images.length === 0
+                ? <button type="button" className="send-button stop" aria-label="Interromper" disabled={!connected} onClick={() => keys('\x1b')}><Icon name="parar" active /></button>
+                : <button className={`send-button ${ready ? 'ready' : ''}`} aria-label="Enviar" disabled={!ready}><Icon name="setaCima" /></button>}
             </div>
           </div> : <div className="composer-actions dictating">
             <button type="button" className="voice-cancel" aria-label={voice === 'recording' || voice === 'saved' ? 'Descartar gravação' : 'Cancelar transcrição'} onClick={cancelVoice}><Icon name="fechar" /></button>
