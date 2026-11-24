@@ -117,13 +117,18 @@ interface Context {
   turnStart: (idleSeq: number) => number | null
 }
 
+// Linha que não dá para interpretar (JSON inválido, data nulo, estrutura trocada) vira nada, em vez de travar a conversa.
 function rowUnits(row: Row, ctx: Context): Unit[] {
-  let d: Data
   try {
-    d = JSON.parse(row.data) as Data
+    const d = JSON.parse(row.data) as unknown
+    if (!d || typeof d !== 'object' || Array.isArray(d)) return [{ pos: 0, settled: true, items: [] }]
+    return dataUnits(row, d as Data, ctx)
   } catch {
     return [{ pos: 0, settled: true, items: [] }]
   }
+}
+
+function dataUnits(row: Row, d: Data, ctx: Context): Unit[] {
   const at = iso((d['time'] as { created?: unknown } | undefined)?.created, row.time_created)
   const one = (items: TranscriptItem[], settled = true): Unit[] => [{ pos: 0, settled, items }]
   const note = (text: string): TranscriptItem => ({ kind: 'note', id: row.id, at, text })
@@ -249,7 +254,7 @@ function pageOf(db: DatabaseSync, sessionId: string, cursor: TranscriptCursor): 
       return get<{ t: number }>("select time_created as t from session_message where session_id = ? and type in ('user', 'synthetic') and seq > ? and seq < ? order by seq limit 1", sessionId, previous, idleSeq)?.t ?? null
     }
   }
-  const page = cursor.after !== undefined ? forward(db, sessionId, cursor.after, ctx) : backward(db, sessionId, cursor.before, cursor.limit, ctx, maxSeq)
+  const page = cursor.after !== undefined ? forward(db, sessionId, cursor.after, ctx) : backward(db, sessionId, cursor.before, cursor.limit, ctx, maxSeq, lastStep)
   return { ...page, status }
 }
 
@@ -272,8 +277,21 @@ function forward(db: DatabaseSync, sessionId: string, after: number, ctx: Contex
   return { sessionId, items, start: after, end, atStart: after === 0 }
 }
 
-function backward(db: DatabaseSync, sessionId: string, before: number | undefined, limit: number, ctx: Context, maxSeq: number | null): TranscriptPage {
-  const bound = before ?? (maxSeq === null ? 0 : (maxSeq + 1) * STRIDE)
+function backward(db: DatabaseSync, sessionId: string, before: number | undefined, limit: number, ctx: Context, maxSeq: number | null, lastStep: number | null): TranscriptPage {
+  let bound = before ?? (maxSeq === null ? 0 : (maxSeq + 1) * STRIDE)
+  // Na página mais nova, o end para na primeira unidade que ainda pode mudar, achada antes de o limite cortar a leitura:
+  // uma mensagem enfileirada depois do passo em andamento não pode deixar a resposta dele atrás do end.
+  if (before === undefined && maxSeq !== null) {
+    const tail = db.prepare(`${rowsSql} and seq >= ? order by seq`).all(sessionId, Math.min(lastStep ?? maxSeq, maxSeq)) as unknown as Row[]
+    frontier: for (const row of tail) {
+      for (const unit of rowUnits(row, ctx)) {
+        if (!unit.settled) {
+          bound = row.seq * STRIDE + unit.pos
+          break frontier
+        }
+      }
+    }
+  }
   const boundSeq = Math.floor(bound / STRIDE)
   const boundPos = bound % STRIDE
   let end = bound

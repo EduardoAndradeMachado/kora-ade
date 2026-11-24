@@ -299,6 +299,30 @@ describe('paginação', () => {
     expect(ids(next.items)).toEqual([`${stepId}:0`, `${queued}:user`, expect.stringMatching(/:turn$/)])
   })
 
+  it('com limite curto, a página mais recente para antes do passo em andamento mesmo com mensagem enfileirada depois', async () => {
+    setBusy(true)
+    conversation(3)
+    const stepId = insert('assistant', step([text('')], 'drafting'))
+    const queued = insert('user', user('enfileirada'))
+    const latest = await page({ limit: 1 })
+    expect(ids(latest.items)).not.toContain(`${queued}:user`)
+    update(stepId, step([text('pronto')]))
+    insert('idle', idle())
+    const next = await page({ after: latest.end })
+    expect(ids(next.items)).toEqual([`${stepId}:0`, `${queued}:user`, expect.stringMatching(/:turn$/)])
+  })
+
+  it('linha com data nulo ou estrutura trocada não derruba a página', async () => {
+    insert('user', user('antes'))
+    seq += 3
+    db.prepare('insert into session_message values (?, ?, ?, ?, ?, ?, ?)').run('msg_nulo', SID, 'user', seq, clock, clock, 'null')
+    seq += 3
+    db.prepare('insert into session_message values (?, ?, ?, ?, ?, ?, ?)').run('msg_troca', SID, 'assistant', seq, clock, clock, JSON.stringify({ content: [null] }))
+    insert('user', user('depois'))
+    const latest = await page()
+    expect(latest.items.map((i) => ('text' in i ? i.text : i.kind))).toEqual(['antes', 'depois'])
+  })
+
   it('passo largado no meio (sessão parada) aparece com a ferramenta sem resultado', async () => {
     insert('user', user('roda'))
     insert('assistant', step([tool('call_x', 'shell', { command: 'sleep 999' }, 'running')], 'streamed'))

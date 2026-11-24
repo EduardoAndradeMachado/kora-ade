@@ -5,7 +5,7 @@ import { sessionMetrics, type MetricsSources } from './metrics'
 import { agyTranscriptPage } from './transcript-agy'
 import { codexTranscriptPage } from './transcript-codex'
 import { opencodeTranscriptPage } from './transcript-opencode'
-import { claudeSkills, claudeStatus, claudeTabTranscript, claudeTranscriptFile, type SkillEntry, type TranscriptCursor } from './transcript-claude'
+import { claudeSkills, claudeStatus, claudeTabTranscript, claudeTranscriptFile, STATUS_DEEP, type SkillEntry, type TranscriptCursor } from './transcript-claude'
 
 async function metricsStatus(sources: MetricsSources, agent: AgentRef, projectPath: string): Promise<TranscriptStatus> {
   try {
@@ -33,7 +33,7 @@ export async function agentTranscript(sources: MetricsSources, agent: AgentRef, 
     case 'claude': {
       const file = await claudeTranscriptFile(sources.claudeRoot, agent.sessionId, projectPath)
       page = await claudeTabTranscript(sources.claudeRoot, agent.sessionId, projectPath, cursor)
-      extra = () => claudeStatus(file)
+      extra = () => claudeStatus(file, cursor.after === undefined ? STATUS_DEEP : undefined)
       break
     }
     case 'codex':
@@ -52,7 +52,7 @@ export async function agentTranscript(sources: MetricsSources, agent: AgentRef, 
     default:
       throw new Error('O modo leitura ainda não lê este agente.')
   }
-  if (cursor.after === undefined || page.items.length > 0) {
+  if (cursor.after === undefined || page.end !== cursor.after) {
     const [fromMetrics, fromAgent] = await Promise.all([metricsStatus(sources, agent, projectPath), extra()])
     page.status = { ...defined(fromMetrics), ...defined(page.status), ...defined(fromAgent) }
   }

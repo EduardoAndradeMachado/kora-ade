@@ -1,10 +1,12 @@
-import { appendFileSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { claudeItems, claudePageAfter, claudePageBefore, claudeSkills, claudeStatus } from '../src/main/transcript-claude'
 import { opensTerminal } from '../src/shared/agent-commands'
 import type { TranscriptItem } from '../src/shared/transcript'
+import { agentTranscript } from '../src/main/transcript'
+import { claudeProjectDir } from '../src/main/sessions'
 
 // Linhas no formato do Claude Code 2.1 (capturadas de transcripts reais e anonimizadas; só os campos que contam).
 const user = (uuid: string, content: unknown, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -179,4 +181,61 @@ describe('comandos cuja resposta só aparece no terminal', () => {
     expect(opensTerminal('antigravity', 'veja o /tmp')).toBe(false)
     expect(opensTerminal('opencode', '/')).toBe(false)
   })
+})
+
+describe('novidades com linha maior que a janela de leitura', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'kora-claude-grande-')) })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('imagem colada de 5 MB não prende o cursor: a resposta depois dela chega', async () => {
+    const file = join(dir, 's.jsonl')
+    const big = user('img', [{ type: 'image', source: { type: 'base64', data: 'A'.repeat(5 * 1024 * 1024) } }, { type: 'text', text: 'veja' }])
+    writeFileSync(file, [user('u1', 'antes'), big, assistant('a1', [{ type: 'text', text: 'depois' }])].map((l) => JSON.stringify(l)).join('\n') + '\n')
+    const seen: string[] = []
+    let end = 0
+    for (let guard = 0; guard < 10; guard++) {
+      const page = await claudePageAfter(file, 's', end)
+      seen.push(...page.items.map((i) => i.id))
+      if (page.end === end) break
+      end = page.end
+    }
+    expect(seen).toEqual(['u1:user', 'img:user', 'a1:0'])
+  })
+})
+
+describe('status pelo despachante', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'kora-claude-despachante-')) })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('mudança de modo sozinha, sem mensagem nova, atualiza o status', async () => {
+    const claudeRoot = join(dir, 'claude')
+    const project = join(dir, 'projeto')
+    const folder = claudeProjectDir(claudeRoot, project)
+    mkdirSync(folder, { recursive: true })
+    const file = join(folder, '7b2e4d6f-1a3c-4b5d-8e9f-0a1b2c3d4e5f.jsonl')
+    writeFileSync(file, [JSON.stringify(user('u1', 'oi')), JSON.stringify({ type: 'permission-mode', permissionMode: 'bypassPermissions' })].join('\n') + '\n')
+    const sources = { claudeRoot, codexSessions: join(dir, 'x'), codexRollout: () => null, opencodeDb: join(dir, 'x.db'), agyRoot: join(dir, 'agy') }
+    const agent = { kind: 'claude' as const, sessionId: '7b2e4d6f-1a3c-4b5d-8e9f-0a1b2c3d4e5f' }
+    const first = await agentTranscript(sources, agent, project, { limit: 10 })
+    expect(first.status?.mode).toBe('bypassPermissions')
+    appendFileSync(file, JSON.stringify({ type: 'permission-mode', permissionMode: 'plan' }) + '\n')
+    const next = await agentTranscript(sources, agent, project, { after: first.end, limit: 10 })
+    expect(next.items).toEqual([])
+    expect(next.status?.mode).toBe('plan')
+  })
+  it('turno longo: o modo gravado antes de 1 MB de ferramentas ainda aparece na primeira página', async () => {
+    const claudeRoot = join(dir, 'claude')
+    const project = join(dir, 'projeto')
+    const folder = claudeProjectDir(claudeRoot, project)
+    mkdirSync(folder, { recursive: true })
+    const file = join(folder, '7b2e4d6f-1a3c-4b5d-8e9f-0a1b2c3d4e5f.jsonl')
+    const tools = Array.from({ length: 20 }, (_, n) => JSON.stringify(user(`r${n}`, [{ type: 'tool_result', tool_use_id: `t${n}`, content: 'x'.repeat(60 * 1024) }])))
+    writeFileSync(file, [JSON.stringify({ type: 'permission-mode', permissionMode: 'acceptEdits' }), ...tools].join('\n') + '\n')
+    const sources = { claudeRoot, codexSessions: join(dir, 'x'), codexRollout: () => null, opencodeDb: join(dir, 'x.db'), agyRoot: join(dir, 'agy') }
+    const first = await agentTranscript(sources, { kind: 'claude', sessionId: '7b2e4d6f-1a3c-4b5d-8e9f-0a1b2c3d4e5f' }, project, { limit: 10 })
+    expect(first.status?.mode).toBe('acceptEdits')
+  })
+
 })

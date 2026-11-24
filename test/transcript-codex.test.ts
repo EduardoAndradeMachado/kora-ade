@@ -177,6 +177,27 @@ describe('paginação do rollout', () => {
     expect(await codexTranscriptPage(file, 'th', { after: next.end, limit: 50 })).toMatchObject({ items: [] })
   })
 
+  it('saída de 5 MB numa linha só não prende o cursor: a resposta depois dela chega', async () => {
+    writeFileSync(file, [JSON.stringify(userMessage('u1', 'antes')), JSON.stringify(command('big', 'cat log', 'x'.repeat(5 * 1024 * 1024))), JSON.stringify(agentMessage('a1', 'depois'))].join('\n') + '\n')
+    const seen: string[] = []
+    let end = 0
+    for (let guard = 0; guard < 10; guard++) {
+      const page = await codexTranscriptPage(file, 'th', { after: end, limit: 50 })
+      seen.push(...page.items.map((i) => i.kind))
+      if (page.end === end) break
+      end = page.end
+    }
+    expect(seen).toEqual(['user', 'tool', 'result', 'assistant'])
+  })
+
+  it('evento com membro nulo não derruba a página: as mensagens válidas em volta aparecem', async () => {
+    const broken = completed({ type: 'AgentMessage', id: 'quebrada', content: [null] })
+    writeFileSync(file, [userMessage('u1', 'antes'), broken, agentMessage('a1', 'depois')].map((l) => JSON.stringify(l)).join('\n') + '\n')
+    const page = await codexTranscriptPage(file, 'th', { limit: 50 })
+    expect(page.items.map((i) => ('text' in i ? i.text : i.kind))).toEqual(['antes', 'depois'])
+  })
+
+
   it('cursor fora de começo de linha ou além do fim (arquivo reescrito) pede para recomeçar', async () => {
     writeFileSync(file, rollout(3).join('\n') + '\n')
     const page = await codexTranscriptPage(file, 'th', { limit: 2 })

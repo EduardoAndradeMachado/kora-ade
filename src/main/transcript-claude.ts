@@ -215,10 +215,20 @@ export async function claudePageAfter(file: string, sessionId: string, after: nu
   try {
     const { size } = await handle.stat()
     if (!(await lineStart(handle, after, size))) return { ...empty(sessionId), reset: true }
-    const length = Math.min(FORWARD_MAX, size - after)
-    const data = Buffer.alloc(length)
-    const { bytesRead } = await handle.read(data, 0, length, after)
-    const last = data.subarray(0, bytesRead).lastIndexOf(NEWLINE)
+    let data = Buffer.alloc(Math.min(FORWARD_MAX, size - after))
+    let filled = (await handle.read(data, 0, data.length, after)).bytesRead
+    let last = data.subarray(0, filled).lastIndexOf(NEWLINE)
+    // Uma linha só pode passar de FORWARD_MAX (imagem colada vai em base64): sem quebra na janela, lê até achar o fim
+    // dela, senão o cursor nunca sairia do lugar.
+    while (last === -1 && after + filled < size) {
+      const more = Buffer.alloc(Math.min(FORWARD_MAX, size - after - filled))
+      const { bytesRead } = await handle.read(more, 0, more.length, after + filled)
+      if (bytesRead === 0) break
+      const at = more.subarray(0, bytesRead).indexOf(NEWLINE)
+      data = Buffer.concat([data.subarray(0, filled), more.subarray(0, bytesRead)])
+      if (at !== -1) last = filled + at
+      filled += bytesRead
+    }
     const items: TranscriptItem[] = []
     let from = 0
     while (from <= last) {
@@ -267,12 +277,15 @@ async function readWindow(file: string, fromEnd: boolean, bytes: number): Promis
 }
 
 const STATUS_TAIL = 512 * 1024
+// Na primeira página o celular ainda não sabe nada: vale procurar mais fundo, porque um turno longo grava MB de
+// ferramentas depois da última linha de modo. Nas novidades o celular junta com o que já tinha.
+export const STATUS_DEEP = 8 * 1024 * 1024
 
 // Esforço e modo de permissão atuais. O Claude grava uma linha api-request a cada chamada (até ~10 KB) e o modo a cada
 // turno: no fim do arquivo estão os valores em vigor. Modelo e contexto vêm das métricas, que já seguem o arquivo.
-export async function claudeStatus(file: string): Promise<TranscriptStatus> {
+export async function claudeStatus(file: string, window = STATUS_TAIL): Promise<TranscriptStatus> {
   const status: TranscriptStatus = {}
-  const lines = await readWindow(file, true, STATUS_TAIL)
+  const lines = await readWindow(file, true, window)
   for (let i = lines.length - 1; i >= 0 && (status.effort === undefined || status.mode === undefined); i--) {
     const line = lines[i]!
     if (status.effort === undefined && line.startsWith('{"type":"api-request"')) {

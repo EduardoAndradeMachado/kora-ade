@@ -439,9 +439,16 @@ export async function agyTranscriptPage(root: string, conversationId: string, cu
   if (!SESSION_ID.test(conversationId)) return empty(conversationId)
   const file = agyConversationFile(root, conversationId)
   if (!existsSync(file)) return cursor.after !== undefined && cursor.after !== 0 ? { ...empty(conversationId), reset: true } : empty(conversationId)
-  const page = withDb(file, (db) =>
-    cursor.after !== undefined ? pageAfter(db, conversationId, cursor.after, file) : pageBefore(db, conversationId, cursor.before, cursor.limit, file)
-  )
+  const page = withDb(file, (db) => {
+    // Uma foto só do banco para a página inteira: um /undo do agy entre a leitura dos passos e a da marca do último
+    // entregue faria o cursor aceitar o passo novo como se fosse o antigo, e o celular pularia o conteúdo.
+    db.exec('begin')
+    try {
+      return cursor.after !== undefined ? pageAfter(db, conversationId, cursor.after, file) : pageBefore(db, conversationId, cursor.before, cursor.limit, file)
+    } finally {
+      db.exec('commit')
+    }
+  })
   if (!page) throw new Error('Não deu para ler a conversa do Antigravity agora.')
   return page
 }

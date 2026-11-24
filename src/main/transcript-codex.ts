@@ -269,10 +269,20 @@ async function pageBefore(handle: Handle, sessionId: string, before: number | un
 async function pageAfter(handle: Handle, sessionId: string, after: number, parse: Parse): Promise<TranscriptPage> {
   const { size } = await handle.stat()
   if (!(await lineStart(handle, after, size))) return { ...empty(sessionId), reset: true }
-  const length = Math.min(FORWARD_MAX, size - after)
-  const data = Buffer.alloc(length)
-  const { bytesRead } = await handle.read(data, 0, length, after)
-  const last = data.subarray(0, bytesRead).lastIndexOf(NEWLINE)
+  let data = Buffer.alloc(Math.min(FORWARD_MAX, size - after))
+  let filled = (await handle.read(data, 0, data.length, after)).bytesRead
+  let last = data.subarray(0, filled).lastIndexOf(NEWLINE)
+  // Uma linha só pode passar de FORWARD_MAX (imagem em base64): sem quebra na janela, lê até achar o fim dela, senão o
+  // cursor nunca sairia do lugar.
+  while (last === -1 && after + filled < size) {
+    const more = Buffer.alloc(Math.min(FORWARD_MAX, size - after - filled))
+    const { bytesRead } = await handle.read(more, 0, more.length, after + filled)
+    if (bytesRead === 0) break
+    const at = more.subarray(0, bytesRead).indexOf(NEWLINE)
+    data = Buffer.concat([data.subarray(0, filled), more.subarray(0, bytesRead)])
+    if (at !== -1) last = filled + at
+    filled += bytesRead
+  }
   const items: TranscriptItem[] = []
   let from = 0
   while (from <= last) {
@@ -335,7 +345,12 @@ export async function codexTranscriptPage(file: string | null, threadId: string,
       if (!entry) return []
       // De trás para frente o primeiro achado é o mais recente; para frente, o último.
       if (entry['type'] === 'turn_context' && (forward || seen.context === null)) seen.context = entry
-      return codexItems(entry, String(offset))
+      // JSON válido com estrutura inesperada (membro nulo, tipo trocado) não pode travar a conversa inteira.
+      try {
+        return codexItems(entry, String(offset))
+      } catch {
+        return []
+      }
     }
     if (cursor.after !== undefined) {
       const page = await pageAfter(handle, threadId, cursor.after, parse)
