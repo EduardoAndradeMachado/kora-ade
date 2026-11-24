@@ -3,14 +3,15 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import type { MobileTab } from '@shared/mobile'
 import type { TranscriptEvent, TranscriptItem, TranscriptPage, TranscriptStatus } from '@shared/transcript'
-import { ALLOWED_URI } from '@/lib/markdown-links'
+import { ALLOWED_URI, resolveMarkdownHref } from '@/lib/markdown-links'
 import { Icon } from '@/brand/icons'
 import { api, koraApp } from './api'
 import { copyWithNotice } from './CopyActions'
 import { SkeletonRows } from './Skeleton'
 import { ReadingStatus } from './ReadingStatus'
 import { colorCodeBlocks } from './code-colors'
-import { cachedResolver, linkPaths, type ResolvePath, type ResolvedPath } from './path-links'
+import { linkPaths } from './path-links'
+import { cachedResolver, type ResolvePath, type ResolvedPath } from './path-cache'
 
 const PAGE = 40
 // Perto do fim, a mensagem nova rola a lista até ela; mais acima, a pessoa está lendo e ganha o aviso.
@@ -138,6 +139,9 @@ export function ReadingView({ tab, connected, connection, feed, modelSheet, onMo
   // Ajuste de rolagem para depois de desenhar: ao fim (mensagem nova) ou mantendo o lugar (página anterior no topo).
   const anchor = useRef<{ kind: 'bottom' } | { kind: 'keep'; height: number; top: number } | null>(null)
   const generation = useRef(0)
+  // Toque num link resolvido depois de sair da conversa não pode abrir o arquivo por cima da tela escolhida.
+  const mounted = useRef(true)
+  useEffect(() => () => { mounted.current = false }, [])
   const following = useRef<Promise<void> | null>(null)
   const again = useRef(false)
   const loaded = useRef(false)
@@ -292,10 +296,17 @@ export function ReadingView({ tab, connected, connection, feed, modelSheet, onMo
     if (link) {
       event.preventDefault()
       if (/^https?:\/\//i.test(href)) return openUrl(href)
-      // Link do markdown para arquivo do projeto ([index.ts](src/index.ts)): abre no visualizador, como no terminal.
-      let target = href
-      try { target = decodeURI(href) } catch { /* % solto no link: usa como veio */ }
-      void resolvePath(target.replace(/#L?(\d+).*$/, ':$1')).then((found) => { if (found) onOpenFile(found.rel, found.line ?? undefined) })
+      // Link do markdown para arquivo ([index.ts](src/index.ts#L10), /docs/a.md#uso): as regras do visualizador de
+      // markdown, a partir da raiz do projeto. Caminho absoluto do Windows, que os agentes escrevem muito, fica para o
+      // resolvedor do terminal, que aceita o que estiver dentro do projeto.
+      const target = resolveMarkdownHref(href, '')
+      if (target.kind === 'external') return openUrl(target.url)
+      let text: string | null = null
+      if (target.kind === 'file') text = target.line ? `${target.rel}:${target.line}` : target.rel
+      else if (target.kind === 'blocked' && /^[a-z]:/i.test(href)) {
+        try { text = decodeURIComponent(href.replace(/[#?].*$/, '')) } catch { text = href.replace(/[#?].*$/, '') }
+      }
+      if (text) void resolvePath(text).then((found) => { if (found && mounted.current) onOpenFile(found.rel, found.line ?? undefined) })
     }
   }
 

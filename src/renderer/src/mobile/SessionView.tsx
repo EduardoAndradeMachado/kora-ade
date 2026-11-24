@@ -58,6 +58,7 @@ const MORE_KEYS: [string, string][] = [
 ]
 
 const MIN_COLS = 20
+const STOP_AFTER_SEND_MS = 1500
 const MIN_ROWS = 5
 
 // name só em arquivo que não é imagem: ele vai como caminho no texto, e não como anexo.
@@ -108,6 +109,8 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   const [hydrating, setHydrating] = useState(true)
   const [draft, setDraft] = useState(() => drafts.get(tab.id)?.text ?? storedDraftTexts()[tab.id] ?? '')
   const [sending, setSending] = useState(false)
+  // Logo depois de enviar, o lugar do botão fica com o enviar: o parar surgindo sob o dedo interromperia o agente num toque duplo.
+  const [justSent, setJustSent] = useState(false)
   const [images, setImages] = useState<Attached[]>(() => drafts.get(tab.id)?.images ?? [])
   const [uploading, setUploading] = useState(0)
   // Erro de imagem ou de envio aparece no campo, onde a pessoa agiu, e não no aviso do topo.
@@ -582,7 +585,11 @@ export function SessionView({ tab, device, connected, connection, feed, command,
         setImages((current) => (current.length > 0 ? current : sent.images))
         setComposerError(error.message)
       })
-      .finally(() => setSending(false))
+      .finally(() => {
+        setSending(false)
+        setJustSent(true)
+        setTimeout(() => setJustSent(false), STOP_AFTER_SEND_MS)
+      })
   }
 
   if (!live) return <></>
@@ -651,7 +658,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
               </button>}
               {/* No modo texto, com o agente trabalhando e nada escrito, o enviar vira parar (Esc), como nos apps de chat;
                   ao escrever, volta a enviar, porque dá para mandar mensagem com o agente trabalhando. */}
-              {reading && tab.activity === 'working' && draft.trim() === '' && images.length === 0
+              {reading && tab.activity === 'working' && !sending && !justSent && draft.trim() === '' && images.length === 0
                 ? <button type="button" className="send-button stop" aria-label="Interromper" disabled={!connected} onClick={() => keys('\x1b')}><Icon name="parar" active /></button>
                 : <button className={`send-button ${ready ? 'ready' : ''}`} aria-label="Enviar" disabled={!ready}><Icon name="setaCima" /></button>}
             </div>

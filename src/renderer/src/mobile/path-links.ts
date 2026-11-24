@@ -1,7 +1,5 @@
 import { findPathCandidates } from '@shared/terminal-links'
-
-export interface ResolvedPath { rel: string; line: number | null }
-export type ResolvePath = (text: string) => Promise<ResolvedPath | null>
+import type { ResolvePath } from './path-cache'
 
 // Por mensagem: uma resposta que lista um diretório inteiro não vira dezenas de pedidos ao PC.
 const MAX_PER_MESSAGE = 30
@@ -39,19 +37,4 @@ export async function linkPaths(root: HTMLElement, resolve: ResolvePath): Promis
       link.append(tail)
     }
   }))
-}
-
-// Um pedido por texto e projeto enquanto a página vive: a mesma resposta redesenhada não pergunta de novo.
-const cache = new Map<string, Promise<ResolvedPath | null>>()
-export function cachedResolver(projectId: string, ask: ResolvePath): ResolvePath {
-  return (text) => {
-    const key = `${projectId}\n${text}`
-    let hit = cache.get(key)
-    if (!hit) {
-      hit = ask(text).catch(() => null)
-      cache.set(key, hit)
-      if (cache.size > 2000) cache.delete(cache.keys().next().value!)
-    }
-    return hit
-  }
 }
