@@ -18,6 +18,7 @@ import { findPathCandidates } from '@shared/terminal-links'
 import { DESKTOP, type MobileDevice, type TerminalSizeEvent } from '@shared/mobile'
 import { SnapshotGate } from '@shared/terminal-replay'
 import { Button } from '@/brand/Button'
+import type { AgentKind } from '@shared/agent'
 
 const cssVar = (name: string): string =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -85,9 +86,10 @@ interface Props {
   // O pty desta aba sobreviveu à interface recarregada: a tela vem inteira do main, e o histórico salvo em disco
   // (de antes da queda, do mesmo processo) repetiria o que ela já tem.
   reattach?: boolean
+  agent?: AgentKind
 }
 
-export function TerminalView({ id, visible, onTitle, onReady, fontSize: requestedFontSize, projectId, onOpenPath, reattach = false }: Props): React.JSX.Element {
+export function TerminalView({ id, visible, onTitle, onReady, fontSize: requestedFontSize, projectId, onOpenPath, reattach = false, agent }: Props): React.JSX.Element {
   // Tamanho indefinido faz o xterm medir a célula errado (texto minúsculo e espaçado); nunca repassa isso.
   const fontSize = Number.isFinite(requestedFontSize) ? requestedFontSize : TERMINAL_FONT.default
   const containerRef = useRef<HTMLDivElement>(null)
@@ -100,6 +102,8 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
   onReadyRef.current = onReady
   const onOpenPathRef = useRef(onOpenPath)
   onOpenPathRef.current = onOpenPath
+  const agentRef = useRef(agent)
+  agentRef.current = agent
   const reattachRef = useRef(reattach)
   // Celular usando o terminal: o pty está no tamanho dele e a janela só mostra, sem refazer o fit.
   const [phone, setPhone] = useState<string | null>(null)
@@ -178,6 +182,8 @@ export function TerminalView({ id, visible, onTitle, onReady, fontSize: requeste
       if (!file) return
       event.preventDefault()
       event.stopImmediatePropagation()
+      // O agy não anexa imagem pelo caminho colado, mas lê a área de transferência sozinho no Ctrl+V: recebe a tecla crua.
+      if (agentRef.current === 'antigravity') return void window.kora.writeTerminal(id, '\x16')
       void file
         .arrayBuffer()
         .then((buffer) => window.kora.savePastedImage(new Uint8Array(buffer), file.type))

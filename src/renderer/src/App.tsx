@@ -1509,6 +1509,7 @@ export function App(): React.JSX.Element {
                     fontSize={state.settings.terminalFontSize}
                     projectId={projectId}
                     onOpenPath={(rel, line) => openFromTerminal(projectId, rel, line)}
+                    agent={tab.agent?.kind}
                   />
                 )
               }))
