@@ -32,6 +32,7 @@ import { SessionView, type SessionFeed, type TerminalChunk } from './SessionView
 import { saveSound, savedSound, useFinishedAlerts } from './alerts'
 import { useSwipe, type SwipeActions } from './swipe'
 import { discardAudio } from './voice'
+import type { TranscriptEvent } from '@shared/transcript'
 
 const REOPEN_MS = 10_000
 
@@ -58,6 +59,15 @@ let homeScroll = 0
 // Tamanho provisório para abrir o processo; a tela da sessão manda o tamanho real assim que monta.
 const START_SIZE = { cols: 60, rows: 30 }
 
+// Como as conversas abrem neste aparelho: a última escolha no botão vale para todas. Sem escolha, texto.
+type ChatMode = 'texto' | 'terminal'
+const CHAT_MODE_KEY = 'kora-modo-conversa'
+function storedChatMode(): ChatMode {
+  try { return localStorage.getItem(CHAT_MODE_KEY) === 'terminal' ? 'terminal' : 'texto' } catch { return 'texto' }
+}
+function storeChatMode(mode: ChatMode): void {
+  try { localStorage.setItem(CHAT_MODE_KEY, mode) } catch { /* sem armazenamento, a escolha dura até a página fechar */ }
+}
 
 const OPEN_CHAT_KEY = 'kora-conversa-aberta'
 // Passado disso, abrir o app é começar de novo pela lista, não voltar de uma recarga.
@@ -95,7 +105,16 @@ export function MobileApp(): React.JSX.Element {
   const [phoneTheme, setPhoneTheme] = useState(savedTheme)
   const [sound, setSound] = useState(savedSound)
   const alerted = useFinishedAlerts(state?.tabs, tabId, sound)
-  const feed = useRef<SessionFeed>({ terminal: null, size: null })
+  const feed = useRef<SessionFeed>({ terminal: null, size: null, transcript: null })
+  const [chatMode, setChatMode] = useState(storedChatMode)
+  // Abas levadas ao terminal sem a pessoa escolher (comando que abre seletor, pedido pendente): não mudam a preferência.
+  const [sentToTerminal, setSentToTerminal] = useState<ReadonlySet<string>>(new Set())
+  const chooseChatMode = (mode: ChatMode): void => {
+    setChatMode(mode)
+    storeChatMode(mode)
+    setSentToTerminal(new Set())
+  }
+  const readingIn = (tab: MobileTab): boolean => Boolean(tab.agent) && chatMode === 'texto' && !sentToTerminal.has(tab.id)
   const longPress = useLongPress()
   const selectedTab = state?.tabs.find((tab) => tab.id === tabId)
   const live = selectedTab?.live ?? false
@@ -228,6 +247,7 @@ export function MobileApp(): React.JSX.Element {
     events.addEventListener('terminal', (event) => feed.current.terminal?.(JSON.parse(event.data) as TerminalChunk))
     events.addEventListener('size', (event) => feed.current.size?.(JSON.parse(event.data) as TerminalSizeEvent))
     events.addEventListener('files', (event) => publishFiles(JSON.parse(event.data) as MobileFilesEvent))
+    events.addEventListener('transcript', (event) => feed.current.transcript?.(JSON.parse(event.data) as TranscriptEvent))
     events.addEventListener('revoked', () => {
       events.close()
       setConnected(false)
@@ -378,9 +398,9 @@ export function MobileApp(): React.JSX.Element {
         {saved.map((session) => <button className="session-row" disabled={busy || !connected || missing} key={`${session.kind}:${session.sessionId}`} {...longPress(() => navigate({ ...route, menu: { title: session.title, values: [{ label: 'Copiar ID da sessão', text: session.sessionId }] } }))} onClick={() => void run(async () => { const result = await command({ type: 'open-session', projectId, agent: { kind: session.kind, sessionId: session.sessionId }, ...START_SIZE }); await refresh(); if (result.tabId) open(result.tabId) })}><AgentIcon kind={session.kind} /><span><strong>{session.title}</strong><small>{agentLabel(session.kind)} · {new Date(session.updatedAt).toLocaleDateString('pt-BR')}</small></span><Icon name="expandir" /></button>)}
       </>}
     </main> : !selectedTab ? <main className="session-message"><Icon name="sessoes" /><p>Esta aba foi fechada.</p><button onClick={back}>Voltar às conversas</button></main> : <>
-      <div className="session-strip"><button className="icon-button back-button" aria-label="Voltar" onClick={back}><Icon name="expandir" className="back-icon" /></button><TabIcon tab={selectedTab} /><button className="session-name" aria-label={`Renomear ${selectedTab.title}`} onClick={() => navigate({ ...route, rename: selectedTab.id })} {...longPress(() => tabActions(selectedTab))}><span>{selectedTab.title}</span><Icon name="editar" /></button><button className="icon-button" aria-label="Arquivos do projeto" onClick={() => chatFiles(selectedTab.id)}><Icon name="projeto" /></button></div>
+      <div className="session-strip"><button className="icon-button back-button" aria-label="Voltar" onClick={back}><Icon name="expandir" className="back-icon" /></button><TabIcon tab={selectedTab} /><button className="session-name" aria-label={`Renomear ${selectedTab.title}`} onClick={() => navigate({ ...route, rename: selectedTab.id })} {...longPress(() => tabActions(selectedTab))}><span>{selectedTab.title}</span><Icon name="editar" /></button>{live && selectedTab.agent && <button className={`icon-button reading-toggle ${readingIn(selectedTab) ? 'on' : ''}`} aria-label={readingIn(selectedTab) ? 'Mostrar o terminal' : 'Mostrar como texto'} aria-pressed={readingIn(selectedTab)} onClick={() => chooseChatMode(readingIn(selectedTab) ? 'terminal' : 'texto')}><Icon name={readingIn(selectedTab) ? 'conversa' : 'terminal'} active={readingIn(selectedTab)} /></button>}<button className="icon-button" aria-label="Arquivos do projeto" onClick={() => chatFiles(selectedTab.id)}><Icon name="projeto" /></button></div>
       {live
-        ? <SessionView key={selectedTab.id} tab={selectedTab} device={device} connected={connected} connection={connection} feed={feed} command={command} onError={showError} onOpenFile={(file, line) => navigate({ projectId, tabId: null, picker: null, file, ...(line ? { fileLine: line } : {}), chat: { tabId: selectedTab.id, ...historyMark() } })} dictation={state.dictation} />
+        ? <SessionView key={selectedTab.id} tab={selectedTab} device={device} connected={connected} connection={connection} feed={feed} command={command} onError={showError} onOpenFile={(file, line) => navigate({ projectId, tabId: null, picker: null, file, ...(line ? { fileLine: line } : {}), chat: { tabId: selectedTab.id, ...historyMark() } })} dictation={state.dictation} reading={readingIn(selectedTab)} onTerminal={() => setSentToTerminal((current) => new Set(current).add(selectedTab.id))} modelSheet={route.modelSheet === selectedTab.id} onModelSheet={(open) => { if (open) navigate({ ...route, modelSheet: selectedTab.id }); else if (route.modelSheet) back() }} />
         : <main className="session-message page-enter"><div className="message-symbol"><Icon name="pausar" active /></div><h1>{selectedTab.agent ? 'Sessão suspensa' : 'Terminal encerrado'}</h1><p className="muted">{selectedTab.agent ? 'Continue para abrir o agente de novo.' : 'Abra para começar um terminal novo nesta pasta.'}</p>{missing && <button onClick={() => picker(projectId)}>Revincular pasta</button>}<button className="primary" disabled={busy || !connected || missing} onClick={() => void resume(selectedTab.id)}><Icon name="retomar" active />{selectedTab.agent ? 'Continuar conversa' : 'Abrir terminal'}</button></main>}
     </>}
     {route.picker && <FolderPicker projectName={state.projects.find((project) => project.id === route.picker?.projectId)?.name} busy={busy} onClose={back} onSelect={async (path) => {

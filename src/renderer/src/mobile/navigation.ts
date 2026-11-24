@@ -11,6 +11,8 @@ export interface MobileRoute {
   // Opções da categoria; id null abre a folha só para criar uma categoria nova.
   groupActions?: { id: string | null }
   rename?: string
+  // Modelo e raciocínio do modo leitura, da aba com este id.
+  modelSheet?: string
   menu?: import('./CopyActions').CopyMenu
   pc?: 'usage' | 'settings'
   // Arquivos do projeto: files é a pasta aberta ('' é a raiz); file, o arquivo aberto por cima dela.

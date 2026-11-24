@@ -12,6 +12,9 @@ import { VoiceMeter } from './VoiceMeter'
 import { SkeletonTerminal } from './Skeleton'
 import { targetAt } from './terminalTap'
 import { firstVisibleRow } from './terminalWindow'
+import { ReadingView } from './ReadingView'
+import type { TranscriptEvent } from '@shared/transcript'
+import { agentCommands, opensTerminal } from '@shared/agent-commands'
 
 // Toque curto e parado é toque em link; mais longo é seleção de texto, e com o dedo andando é rolagem.
 const TAP_MS = 450
@@ -22,6 +25,7 @@ export interface TerminalChunk { id: string; data: string; sequence: number }
 export interface SessionFeed {
   terminal: ((chunk: TerminalChunk) => void) | null
   size: ((event: TerminalSizeEvent) => void) | null
+  transcript: ((event: TranscriptEvent) => void) | null
 }
 
 // Teclas que o teclado do celular não tem. Sequências do modo legado do terminal, as mesmas que o xterm
@@ -81,7 +85,7 @@ function storeDraftText(tabId: string, text: string): void {
 
 // O terminal do celular só mostra: as respostas automáticas do terminal (consulta de cor, de teclado) já vêm
 // da janela do PC, e uma segunda resposta chegaria ao programa como se fosse digitada.
-export function SessionView({ tab, device, connected, connection, feed, command, onError, onOpenFile, dictation }: {
+export function SessionView({ tab, device, connected, connection, feed, command, onError, onOpenFile, dictation, reading = false, onTerminal, modelSheet = false, onModelSheet }: {
   tab: MobileTab
   device: string
   connected: boolean
@@ -91,6 +95,11 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   onError(message: string): void
   onOpenFile(path: string, line?: number): void
   dictation: boolean
+  // Modo leitura: a conversa vem do arquivo do Claude, sem entrar no terminal (o tamanho no PC não muda).
+  reading?: boolean
+  onTerminal?(): void
+  modelSheet?: boolean
+  onModelSheet?(open: boolean): void
 }): React.JSX.Element {
   const openFile = useRef(onOpenFile)
   openFile.current = onOpenFile
@@ -103,6 +112,8 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   const [uploading, setUploading] = useState(0)
   // Erro de imagem ou de envio aparece no campo, onde a pessoa agiu, e não no aviso do topo.
   const [composerError, setComposerError] = useState<string | null>(null)
+  // Skills do Claude para o menu "/": pedidas ao PC na primeira vez que a mensagem começa com barra.
+  const [skills, setSkills] = useState<{ name: string; description: string }[] | null>(null)
   const [moreKeys, setMoreKeys] = useState(false)
   // Cada Redesenhar refaz o terminal daqui com uma foto nova do PC, depois de o agente redesenhar a tela.
   const [redraws, setRedraws] = useState(0)
@@ -130,7 +141,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
 
   useEffect(() => {
     const element = mount.current
-    if (!element || !live || !connected) return
+    if (!element || !live || !connected || reading) return
     let oscOpened = 0
     // No app, navegar para outro endereço cai no shouldOverrideUrlLoading da MainActivity, que manda a página de fora ao
     // navegador do celular e deixa o Kora onde está; o window.open depende de o WebView aceitar abrir janela. No navegador,
@@ -387,7 +398,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       term.dispose()
       void command({ type: 'detach', tabId: tab.id }).catch(() => {})
     }
-  }, [tab.id, live, connected, connection, device, feed, command, onError, redraws])
+  }, [tab.id, live, connected, connection, device, feed, command, onError, redraws, reading])
 
   useEffect(() => {
     if (draft || images.length > 0) drafts.set(tab.id, { text: draft, images })
@@ -509,6 +520,28 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       }
     }
   }
+  const kind = tab.agent?.kind
+  useEffect(() => {
+    if (kind !== 'claude' || skills !== null || !draft.startsWith('/') || !connected) return
+    setSkills([])
+    void api<{ name: string; description: string }[]>(`skills?tab=${encodeURIComponent(tab.id)}`).then(setSkills, () => setSkills([]))
+  }, [kind, skills, draft, connected, tab.id])
+  const slash = ((): { label: string; description: string; fill: string }[] => {
+    if (!kind || !draft.startsWith('/') || draft.includes('\n')) return []
+    const commands = agentCommands(kind)
+    const withArg = draft.match(/^(\/\S+)\s+(\S*)$/)
+    if (withArg) {
+      const command = commands.find((c) => c.name === withArg[1])
+      return (command?.options ?? []).filter((o) => o.startsWith(withArg[2]!) && o !== withArg[2]).map((o) => ({ label: o, description: '', fill: `${command!.name} ${o}` }))
+    }
+    if (/\s/.test(draft)) return []
+    const typed = draft.toLowerCase()
+    const all = [
+      ...commands.map((c) => ({ label: c.name, description: c.interactive || kind !== 'claude' ? `${c.description} · abre no terminal` : c.description, fill: `${c.name} ` })),
+      ...(skills ?? []).map((s) => ({ label: `/${s.name}`, description: s.description, fill: `/${s.name} ` }))
+    ]
+    return all.filter((entry) => entry.label.toLowerCase().startsWith(typed) && entry.fill.trim() !== draft.trim()).slice(0, 30)
+  })()
   const removeImage = (path: string): void => setImages((list) => list.filter((image) => image.path !== path))
   const clear = (): void => {
     setDraft('')
@@ -534,6 +567,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
     const files = images.filter((item) => item.name !== undefined).map((item) => item.path)
     const pictures = images.filter((item) => item.name === undefined).map((item) => pathForPrompt(item.path))
     void send({ type: 'send', tabId: tab.id, text, images: pictures, files })
+      .then(() => { if (reading && kind && opensTerminal(kind, text)) onTerminal?.() })
       .catch((error: Error) => {
         if (!drafts.has(tab.id)) {
           drafts.set(tab.id, sent)
@@ -549,6 +583,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
   if (!live) return <></>
   const elsewhere = holder !== null && holder !== device
   return <>
+    {reading ? <ReadingView tab={tab} connected={connected} connection={connection} feed={feed} modelSheet={modelSheet} onModelSheet={(open) => onModelSheet?.(open)} onError={onError} onTerminal={() => onTerminal?.()} onInterrupt={() => keys('\x1b')} onSend={(text, picker) => void send({ type: 'send', tabId: tab.id, text, images: [], files: [] }).then(() => { if (picker) onTerminal?.() }, (error: Error) => onError(error.message))} /> : <>
     {elsewhere && <button className="size-banner" onClick={() => void send({ type: 'attach', tabId: tab.id, ...wanted.current() }).catch((error: Error) => onError(error.message))}>
       {holder === DESKTOP ? 'Em uso no PC, no tamanho dele.' : 'Em uso em outro celular.'} Toque para ajustar a este celular.
     </button>}
@@ -564,6 +599,7 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       {KEYS.map(([label, data]) => <button disabled={!connected} key={label} onClick={() => keys(data)}>{label}</button>)}
       <button className="more-keys-toggle" aria-label="Mais teclas" aria-expanded={moreKeys} onClick={() => setMoreKeys((open) => !open)}>⋯</button>
     </nav>
+    </>}
     {(() => {
       const ready = !sending && uploading === 0 && voice === 'idle' && connected && (draft.trim() !== '' || images.length > 0)
       const thumbs = (images.length > 0 || uploading > 0) && <div className="composer-images" aria-label="Anexos">
@@ -582,6 +618,11 @@ export function SessionView({ tab, device, connected, connection, feed, command,
       // Caixa única, como no app do Claude e do ChatGPT: miniaturas e texto dentro, imagem e enviar embaixo.
       // O rascunho de áudio vale enquanto este chat está aberto, inclusive com o app em segundo plano.
       return <form className="composer" data-no-swipe data-swipe-lock={voice === 'idle' ? undefined : ''} onSubmit={(event) => { event.preventDefault(); submit() }}>
+        {slash.length > 0 && <ul className="slash-menu" role="listbox" aria-label="Comandos">
+          {slash.map((entry) => <li key={entry.label}><button type="button" role="option" aria-selected={false} onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraft(entry.fill); field.current?.focus() }}>
+            <strong>{entry.label}</strong>{entry.description && <small>{entry.description}</small>}
+          </button></li>)}
+        </ul>}
         <input ref={picker} type="file" multiple hidden aria-label="Escolher arquivo" onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void attach(files) }} />
         <div className="composer-box">
           {composerError && <p role="alert" className="composer-error"><Icon name="alerta" /><span>{composerError}</span><button type="button" aria-label="Dispensar aviso" onClick={() => setComposerError(null)}><Icon name="fechar" /></button></p>}
