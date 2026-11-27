@@ -8,6 +8,7 @@ import { useConfirm } from '@/components/ConfirmDialog'
 import { FileIcon } from '@/components/FileIcon'
 import { ipcErrorMessage, isNotFound } from '@/lib/ipc-error'
 import { cn } from '@/lib/utils'
+import { VirtualRows, type VirtualRowsApi } from '@/components/VirtualRows'
 import { FILE_MIME } from '@/lib/drag'
 import { windowsFileUrl } from '@shared/file-url'
 import { opensInBrowser } from '@shared/browser-viewable'
@@ -58,6 +59,11 @@ let compareSource: { projectId: string; rel: string } | null = null
 type Target = { path: string; isDir: boolean }
 type Creating = { parent: string; kind: 'file' | 'dir' }
 type Message = { text: string; tone: 'error' | 'info' }
+
+// Altura da classe h-6 das linhas: a lista virtual depende dela.
+const ROW_HEIGHT = 24
+
+type TreeRow = { kind: 'entry'; entry: FileEntry; depth: number } | { kind: 'create'; parent: string; depth: number }
 
 const parentOf = (rel: string): string => {
   const i = Math.max(rel.lastIndexOf('\\'), rel.lastIndexOf('/'))
@@ -312,8 +318,30 @@ export function FileTree({
   }, [children, expanded])
   const byPath = useMemo(() => new Map(visible.map((entry) => [entry.path, entry])), [visible])
 
+  // As linhas desenhadas, já achatadas: só as perto da área visível existem no DOM (pasta com milhares de arquivos
+  // aberta custava segundos por render). O campo de criar aparece no topo da pasta onde o item vai nascer.
+  const rows = useMemo(() => {
+    const list: TreeRow[] = []
+    const walk = (rel: string, depth: number): void => {
+      if (creating?.parent === rel) list.push({ kind: 'create', parent: rel, depth })
+      for (const entry of children[rel] ?? []) {
+        list.push({ kind: 'entry', entry, depth })
+        if (entry.isDir && expanded.has(entry.path)) walk(entry.path, depth + 1)
+      }
+    }
+    walk('', 0)
+    return list
+  }, [children, expanded, creating])
+  const rowsRef = useRef(rows)
+  rowsRef.current = rows
+  const listApi = useRef<VirtualRowsApi | null>(null)
+
+  // A linha pode não existir no DOM (fora da área visível): rola pelo índice dela na lista.
   const scrollTo = (rel: string): void => {
-    requestAnimationFrame(() => rootRef.current?.querySelector(`[data-tip="${CSS.escape(rel)}"]`)?.scrollIntoView({ block: 'nearest' }))
+    requestAnimationFrame(() => {
+      const index = rowsRef.current.findIndex((row) => row.kind === 'entry' && row.entry.path === rel)
+      if (index >= 0) listApi.current?.scrollToIndex(index)
+    })
   }
 
   const selectOnly = (rel: string | null): void => {
@@ -662,17 +690,21 @@ export function FileTree({
     }
   }
 
-  const dropProps = (dir: string): React.HTMLAttributes<HTMLDivElement> => ({
+  // Cada linha solta na pasta dela (a própria, se for pasta; a de cima, se for arquivo). Passar de uma linha para
+  // outra da mesma pasta não apaga o destaque.
+  const dropProps = (dir: string): React.HTMLAttributes<HTMLDivElement> & { 'data-drop-dir': string } => ({
+    'data-drop-dir': dir,
     onDragOver: (e) => {
       const internal = e.dataTransfer.types.includes(FILE_MIME)
       if (!internal && !e.dataTransfer.types.includes('Files')) return
       e.preventDefault()
       e.stopPropagation()
       e.dataTransfer.dropEffect = internal ? 'move' : 'copy'
-      if (dropDir !== dir) setDropDir(dir)
+      setDropDir(dir)
     },
     onDragLeave: (e) => {
-      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropDir((d) => (d === dir ? null : d))
+      const into = e.relatedTarget instanceof Element ? e.relatedTarget.closest('[data-drop-dir]')?.getAttribute('data-drop-dir') : undefined
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null) && into !== dir) setDropDir((d) => (d === dir ? null : d))
     },
     onDrop: (e) => {
       const from = e.dataTransfer.getData(FILE_MIME)
@@ -899,7 +931,7 @@ export function FileTree({
 
   const creationRow = (parent: string, depth: number): React.ReactNode =>
     creating?.parent === parent && (
-      <div style={{ paddingLeft: 4 + depth * 12 + 16 }} className="flex h-6 items-center gap-1 pr-2">
+      <div key={`criar:${parent}`} {...dropProps(parent)} style={{ paddingLeft: 4 + depth * 12 + 16 }} className="flex h-6 items-center gap-1 pr-2">
         {creating.kind === 'dir' ? <Icon name="projeto" className="size-3.5" /> : <FileIcon name="" className="size-3.5" />}
         <NameField
           key={`${creating.parent}|${creating.kind}`}
@@ -913,89 +945,85 @@ export function FileTree({
 
   const cutPaths = clip?.cut && clip.projectId === projectId ? clip.rels : []
 
-  const renderLevel = (rel: string, depth: number): React.ReactNode => (
-    <>
-      {creationRow(rel, depth)}
-      {(children[rel] ?? []).map((entry) => {
-        const open = expanded.has(entry.path)
-        const isIgnored = ignored.has(key(entry.path))
-        const isCut = cutPaths.includes(entry.path)
-        const git = entry.isDir ? gitByPath.dirs.get(key(entry.path)) : gitByPath.files.get(key(entry.path))
-        return (
-          <div key={entry.path} {...(entry.isDir ? dropProps(entry.path) : {})}>
-            <div
-              data-tip={entry.path}
-              style={{ paddingLeft: 4 + depth * 12 }}
-              draggable={renaming !== entry.path}
-              onDragStart={(e) => {
-                let items = [entry.path]
-                if (picked.has(entry.path)) items = outermost(visible.filter((v) => picked.has(v.path)).map((v) => v.path))
-                else selectOnly(entry.path)
-                e.dataTransfer.setData(FILE_MIME, items[0]!)
-                if (items.length > 1) e.dataTransfer.setData(FILES_MIME, JSON.stringify(items))
-                e.dataTransfer.setData('text/plain', items.length === 1 ? absolute(items[0]!) : items.map((p) => quoted(absolute(p))).join(' '))
-                e.dataTransfer.setData(PATHS_MIME, JSON.stringify(items.map(absolute)))
-                // Link file:// é o que o navegador aceita soltar: HTML, PDF e JSON abrem direto numa aba dele.
-                const files = items.filter((p) => !byPath.get(p)?.isDir)
-                if (files.length) e.dataTransfer.setData('text/uri-list', files.map((p) => windowsFileUrl(absolute(p))).join('\r\n'))
-                e.dataTransfer.effectAllowed = 'copyMove'
-              }}
-              onClick={(e) => clickRow(e, entry)}
-              // Pasta: o primeiro clique já expandiu ou recolheu, como no VS Code; renomear é pelo F2 ou pelo menu.
-              onDoubleClick={(e) => {
-                if (e.ctrlKey || e.metaKey || e.shiftKey || entry.isDir) return
-                onOpenFile(entry.path)
-              }}
-              onContextMenu={(e) => openMenu(e, { path: entry.path, isDir: entry.isDir })}
-              className={cn(
-                'flex h-6 cursor-default items-center gap-1 rounded pr-2 text-xs text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
-                (menu?.target?.path === entry.path || picked.has(entry.path)) && 'bg-secondary/60 text-foreground',
-                cursor === entry.path && 'group-focus:shadow-[inset_0_0_0_1px_var(--ring)]',
-                entry.isDir && dropDir === entry.path && 'bg-secondary shadow-[inset_0_0_0_1px_var(--brand-amber)]'
-              )}
-            >
-              <Icon
-                name="expandir"
-                className={cn('size-3 transition-transform', open && 'rotate-90', !entry.isDir && 'invisible')}
-              />
-              {/* Na árvore o detalhe da pasta fica cinza: o âmbar em toda linha deixaria de marcar o que está ativo. */}
-              {entry.isDir ? (
-                <Icon name={open ? 'pastaAberta' : 'projeto'} className={cn('size-3.5', (isIgnored || isCut) && 'opacity-40')} />
-              ) : (
-                <FileIcon name={entry.name} className={cn('size-3.5', (isIgnored || isCut) && 'opacity-40')} />
-              )}
-              {renaming === entry.path ? (
-                <NameField
-                  initial={entry.name}
-                  selectUntil={entry.isDir || entry.name.lastIndexOf('.') <= 0 ? entry.name.length : entry.name.lastIndexOf('.')}
-                  validate={(value) => renameProblem(value, entry.name, (children[parentOf(entry.path)] ?? []).filter((e) => e.path !== entry.path))}
-                  onCommit={(value, viaKey) => rename(entry.path, value, viaKey)}
-                  onCancel={cancelField(() => setRenaming(null))}
-                />
-              ) : (
-                <span
-                  className={cn(
-                    'flex-1 truncate',
-                    isIgnored ? 'text-git-ignored' : git ? GIT_STYLE[git].className : 'text-foreground/85',
-                    isCut && 'opacity-60'
-                  )}
-                >
-                  {entry.name}
-                </span>
-              )}
-              {git && !entry.isDir && !isIgnored && (
-                <span className={cn('shrink-0 pl-1 text-[10px] font-semibold', GIT_STYLE[git].className)}>{GIT_STYLE[git].letter}</span>
-              )}
-              {git && entry.isDir && !isIgnored && (
-                <span className={cn('size-1.5 shrink-0 rounded-full bg-current', GIT_STYLE[git].className)} />
-              )}
-            </div>
-            {entry.isDir && open && renderLevel(entry.path, depth + 1)}
-          </div>
-        )
-      })}
-    </>
-  )
+  const renderRow = (row: TreeRow): React.ReactNode => {
+    if (row.kind === 'create') return creationRow(row.parent, row.depth)
+    const { entry, depth } = row
+    const open = expanded.has(entry.path)
+    const isIgnored = ignored.has(key(entry.path))
+    const isCut = cutPaths.includes(entry.path)
+    const git = entry.isDir ? gitByPath.dirs.get(key(entry.path)) : gitByPath.files.get(key(entry.path))
+    return (
+      <div
+        key={entry.path}
+        {...dropProps(entry.isDir ? entry.path : parentOf(entry.path))}
+        data-tip={entry.path}
+        style={{ paddingLeft: 4 + depth * 12 }}
+        draggable={renaming !== entry.path}
+        onDragStart={(e) => {
+          let items = [entry.path]
+          if (picked.has(entry.path)) items = outermost(visible.filter((v) => picked.has(v.path)).map((v) => v.path))
+          else selectOnly(entry.path)
+          e.dataTransfer.setData(FILE_MIME, items[0]!)
+          if (items.length > 1) e.dataTransfer.setData(FILES_MIME, JSON.stringify(items))
+          e.dataTransfer.setData('text/plain', items.length === 1 ? absolute(items[0]!) : items.map((p) => quoted(absolute(p))).join(' '))
+          e.dataTransfer.setData(PATHS_MIME, JSON.stringify(items.map(absolute)))
+          // Link file:// é o que o navegador aceita soltar: HTML, PDF e JSON abrem direto numa aba dele.
+          const files = items.filter((p) => !byPath.get(p)?.isDir)
+          if (files.length) e.dataTransfer.setData('text/uri-list', files.map((p) => windowsFileUrl(absolute(p))).join('\r\n'))
+          e.dataTransfer.effectAllowed = 'copyMove'
+        }}
+        onClick={(e) => clickRow(e, entry)}
+        // Pasta: o primeiro clique já expandiu ou recolheu, como no VS Code; renomear é pelo F2 ou pelo menu.
+        onDoubleClick={(e) => {
+          if (e.ctrlKey || e.metaKey || e.shiftKey || entry.isDir) return
+          onOpenFile(entry.path)
+        }}
+        onContextMenu={(e) => openMenu(e, { path: entry.path, isDir: entry.isDir })}
+        className={cn(
+          'flex h-6 cursor-default items-center gap-1 rounded pr-2 text-xs text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+          (menu?.target?.path === entry.path || picked.has(entry.path)) && 'bg-secondary/60 text-foreground',
+          cursor === entry.path && 'group-focus:shadow-[inset_0_0_0_1px_var(--ring)]',
+          entry.isDir && dropDir === entry.path && 'bg-secondary shadow-[inset_0_0_0_1px_var(--brand-amber)]'
+        )}
+      >
+        <Icon
+          name="expandir"
+          className={cn('size-3 transition-transform', open && 'rotate-90', !entry.isDir && 'invisible')}
+        />
+        {/* Na árvore o detalhe da pasta fica cinza: o âmbar em toda linha deixaria de marcar o que está ativo. */}
+        {entry.isDir ? (
+          <Icon name={open ? 'pastaAberta' : 'projeto'} className={cn('size-3.5', (isIgnored || isCut) && 'opacity-40')} />
+        ) : (
+          <FileIcon name={entry.name} className={cn('size-3.5', (isIgnored || isCut) && 'opacity-40')} />
+        )}
+        {renaming === entry.path ? (
+          <NameField
+            initial={entry.name}
+            selectUntil={entry.isDir || entry.name.lastIndexOf('.') <= 0 ? entry.name.length : entry.name.lastIndexOf('.')}
+            validate={(value) => renameProblem(value, entry.name, (children[parentOf(entry.path)] ?? []).filter((e) => e.path !== entry.path))}
+            onCommit={(value, viaKey) => rename(entry.path, value, viaKey)}
+            onCancel={cancelField(() => setRenaming(null))}
+          />
+        ) : (
+          <span
+            className={cn(
+              'flex-1 truncate',
+              isIgnored ? 'text-git-ignored' : git ? GIT_STYLE[git].className : 'text-foreground/85',
+              isCut && 'opacity-60'
+            )}
+          >
+            {entry.name}
+          </span>
+        )}
+        {git && !entry.isDir && !isIgnored && (
+          <span className={cn('shrink-0 pl-1 text-[10px] font-semibold', GIT_STYLE[git].className)}>{GIT_STYLE[git].letter}</span>
+        )}
+        {git && entry.isDir && !isIgnored && (
+          <span className={cn('size-1.5 shrink-0 rounded-full bg-current', GIT_STYLE[git].className)} />
+        )}
+      </div>
+    )
+  }
 
   return (
     <div
@@ -1025,7 +1053,7 @@ export function FileTree({
       {message && (
         <p className={cn('px-2 py-1 text-xs', message.tone === 'error' ? 'text-destructive' : 'text-muted-foreground')}>{message.text}</p>
       )}
-      {renderLevel('', 0)}
+      <VirtualRows items={rows} rowHeight={ROW_HEIGHT} render={renderRow} apiRef={listApi} />
       <div className="min-h-8 flex-1" onClick={() => selectOnly(null)} />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.target)} onClose={() => setMenu(null)} />}
     </div>
