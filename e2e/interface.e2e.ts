@@ -1031,6 +1031,10 @@ test('R79 pasta do projeto apagada com o Kora aberto: a tela de pasta não encon
   const page = run.page
   const row = page.locator('aside nav [data-project-row]')
   await expect(rightPanel(page).getByText('leia.txt')).toBeVisible()
+  // O watcher do Windows leva um instante para começar a observar depois da primeira listagem; apagar antes disso
+  // não gera evento nenhum e o Kora nunca solta a pasta. Arquivo novo aparecendo na árvore prova que ele já observa.
+  writeFileSync(join(env.project, 'observando.txt'), 'oi')
+  await expect(rightPanel(page).getByText('observando.txt')).toBeVisible()
 
   // Como o Explorer, tenta de novo: o Windows pode dar EBUSY por um instante enquanto o watcher solta a pasta.
   rmSync(env.project, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
