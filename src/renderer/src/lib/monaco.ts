@@ -168,6 +168,10 @@ export function addEditorAction(editor: monaco.editor.IStandaloneCodeEditor, act
 // mantém viva depois do dispose, presa à assinatura global de troca de tema, com o diff e o DOM da aba junto.
 // Desligar a régua antes faz o Monaco descartar a feature.
 export function disposeDiffEditor(editor: monaco.editor.IStandaloneDiffEditor): void {
-  editor.updateOptions({ renderOverviewRuler: false })
+  try {
+    editor.updateOptions({ renderOverviewRuler: false })
+  } catch {
+    // Contorno falhou (outra versão do Monaco): descarta assim mesmo, e quem chamou segue limpando os models.
+  }
   editor.dispose()
 }
