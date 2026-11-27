@@ -38,6 +38,8 @@ export function TipLayer(): React.JSX.Element | null {
     let clicked: Element | null = null
     let timer: ReturnType<typeof setTimeout> | undefined
     let hiddenAt = 0
+    // Rolando com o mouse parado, cada linha que passa embaixo dele abriria a dica na hora (medindo o layout).
+    let scrolledAt = 0
 
     const hide = (): void => {
       clearTimeout(timer)
@@ -56,7 +58,7 @@ export function TipLayer(): React.JSX.Element | null {
       const el = e.target instanceof Element ? e.target.closest('[data-tip]') : null
       if (el === current || (el !== null && el === clicked)) return
       clicked = null
-      const warm = current !== null || Date.now() - hiddenAt < WARM_MS
+      const warm = (current !== null || Date.now() - hiddenAt < WARM_MS) && Date.now() - scrolledAt > WARM_MS
       hide()
       if (!el) return
       current = el
@@ -82,7 +84,12 @@ export function TipLayer(): React.JSX.Element | null {
     document.addEventListener('mouseout', onOut)
     document.addEventListener('mousedown', onDown, true)
     document.addEventListener('keydown', hide, true)
-    window.addEventListener('scroll', hide, true)
+    const onScroll = (): void => {
+      scrolledAt = Date.now()
+      hide()
+    }
+
+    window.addEventListener('scroll', onScroll, true)
     window.addEventListener('blur', hide)
     return () => {
       clearTimeout(timer)
@@ -91,7 +98,7 @@ export function TipLayer(): React.JSX.Element | null {
       document.removeEventListener('mouseout', onOut)
       document.removeEventListener('mousedown', onDown, true)
       document.removeEventListener('keydown', hide, true)
-      window.removeEventListener('scroll', hide, true)
+      window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('blur', hide)
     }
   }, [])
