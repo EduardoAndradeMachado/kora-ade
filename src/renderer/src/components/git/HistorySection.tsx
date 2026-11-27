@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '@/brand/icons'
 import type { GitCommitFile, GitLogCommit, GitRef } from '@shared/git-types'
 import { GIT_STYLE } from '@/lib/git-decorations'
@@ -63,6 +63,8 @@ const splitPath = (path: string): { name: string; dir: string } => {
 
 export function HistorySection({ projectId, refreshKey, file, onClearFile, onOpenDiff }: Props): React.JSX.Element {
   const [commits, setCommits] = useState<GitLogCommit[]>([])
+  // Formatar a data com Intl é caro, e o painel renderiza de novo a cada mudança no git.
+  const tips = useMemo(() => new Map(commits.map((c) => [c.hash, commitTip(c)])), [commits])
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -174,7 +176,7 @@ export function HistorySection({ projectId, refreshKey, file, onClearFile, onOpe
           <div key={commit.hash}>
             <div
               data-git-commit={commit.hash}
-              data-tip={commitTip(commit)}
+              data-tip={tips.get(commit.hash)}
               onClick={() => toggle(commit.hash)}
               onContextMenu={(e) => commitMenu(e, commit)}
               className={cn(ROW, 'pl-1')}

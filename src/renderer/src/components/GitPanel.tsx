@@ -16,6 +16,7 @@ import { useConfirm } from '@/components/ConfirmDialog'
 import { ContextMenu, type MenuItem } from '@/components/ContextMenu'
 import { HistorySection } from '@/components/git/HistorySection'
 import { GitErrorNotice } from '@/components/git/GitErrorNotice'
+import { VirtualRows } from '@/components/VirtualRows'
 import { GIT_STYLE } from '@/lib/git-decorations'
 import { copyPath } from '@/lib/copied-path'
 import { ipcErrorMessage } from '@/lib/ipc-error'
@@ -162,6 +163,8 @@ const FILE_GROUPS: { id: string; title: string; match(file: GitFile): boolean }[
   { id: 'files:untracked', title: 'Não rastreados', match: (f) => f.status === 'untracked' }
 ]
 
+// Altura da classe h-6 do ROW: a lista virtual de arquivos depende dela.
+const ROW_HEIGHT = 24
 const ROW = 'flex h-6 cursor-default items-center gap-1.5 rounded pr-2 text-xs hover:bg-secondary/60'
 
 function splitPath(path: string): { name: string; dir: string } {
@@ -1127,17 +1130,22 @@ export function GitPanel({
                   disabled={working}
                   onToggle={() => toggle(group.id)}
                 />
-                {open &&
-                  list.map((file) => (
-                    <FileRow
-                      key={`${group.id}:${file.path}`}
-                      file={file}
-                      actions={fileActions(file)}
-                      disabled={working}
-                      onOpen={openEntry}
-                      onMenu={fileMenu}
-                    />
-                  ))}
+                {open && (
+                  <VirtualRows
+                    items={list}
+                    rowHeight={ROW_HEIGHT}
+                    render={(file) => (
+                      <FileRow
+                        key={`${group.id}:${file.path}`}
+                        file={file}
+                        actions={fileActions(file)}
+                        disabled={working}
+                        onOpen={openEntry}
+                        onMenu={fileMenu}
+                      />
+                    )}
+                  />
+                )}
               </div>
             )
           })}
