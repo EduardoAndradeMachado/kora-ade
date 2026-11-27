@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '@/brand/icons'
-import { EDITOR_OPTIONS, languageForPath, languageLabel, monaco, themeForDocument } from '@/lib/monaco'
+import { addEditorAction, disposeDiffEditor, EDITOR_OPTIONS, languageForPath, languageLabel, monaco, themeForDocument } from '@/lib/monaco'
 import { ipcErrorMessage, isNotFound } from '@/lib/ipc-error'
 import { cn } from '@/lib/utils'
 import { acquireProjectNavigation, claimModelUri, registerEditorHost, releaseModelUri, takeJumpColumn } from '@/lib/code-nav'
@@ -190,7 +190,7 @@ export function CodeView({
   const disposeCompare = (): void => {
     const diff = diffRef.current
     diffRef.current = null
-    diff?.editor.dispose()
+    if (diff) disposeDiffEditor(diff.editor)
     diff?.original.dispose()
   }
 
@@ -271,13 +271,13 @@ export function CodeView({
         }
         // addAction em vez de addCommand: o atalho de addCommand vale para o último editor
         // criado, não para o que tem foco, e salvaria o arquivo de outra aba.
-        editor.addAction({
+        addEditorAction(editor, {
           id: 'kora.save',
           label: 'Salvar',
           keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
           run: () => void saveRef.current()
         })
-        editor.addAction({
+        addEditorAction(editor, {
           id: 'kora.wordWrap',
           label: 'Quebra de linha',
           keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyZ],
@@ -492,7 +492,7 @@ export function CodeView({
       originalEditable: false
     })
     editor.setModel({ original, modified: model })
-    editor.getModifiedEditor().addAction({
+    addEditorAction(editor.getModifiedEditor(), {
       id: 'kora.save',
       label: 'Salvar',
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],

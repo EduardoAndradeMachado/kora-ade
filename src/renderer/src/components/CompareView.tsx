@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icon } from '@/brand/icons'
-import { EDITOR_OPTIONS, languageForPath, monaco, themeForDocument } from '@/lib/monaco'
+import { addEditorAction, disposeDiffEditor, EDITOR_OPTIONS, languageForPath, monaco, themeForDocument } from '@/lib/monaco'
 import { ipcErrorMessage, isNotFound } from '@/lib/ipc-error'
 import { changeMayRemove } from '@/lib/file-tabs'
 import { cn } from '@/lib/utils'
@@ -132,7 +132,7 @@ export function CompareView(props: Props): React.JSX.Element {
         modified.onDidChangeContent(() => refreshDirty(modified))
         // addAction no editor da direita: o atalho de addCommand vale para o último editor criado, não para o que
         // tem foco, e salvaria o arquivo de outra aba.
-        editor.getModifiedEditor().addAction({
+        addEditorAction(editor.getModifiedEditor(), {
           id: 'kora.save',
           label: 'Salvar',
           keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
@@ -149,7 +149,7 @@ export function CompareView(props: Props): React.JSX.Element {
       cancelled = true
       editorRef.current = null
       modelsRef.current = null
-      editor?.dispose()
+      if (editor) disposeDiffEditor(editor)
       models?.original.dispose()
       models?.modified.dispose()
       publishDirty(false)

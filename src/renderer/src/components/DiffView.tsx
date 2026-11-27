@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icon, type IconName } from '@/brand/icons'
-import { EDITOR_OPTIONS, monaco, themeForDocument } from '@/lib/monaco'
+import { disposeDiffEditor, EDITOR_OPTIONS, monaco, themeForDocument } from '@/lib/monaco'
 import { ipcErrorMessage } from '@/lib/ipc-error'
 import { cn } from '@/lib/utils'
 import { touchesFile } from '@shared/file-change'
@@ -160,7 +160,7 @@ export function DiffView({ projectId, projectPath, path, target, visible, fontSi
       editorRef.current = null
       modelsRef.current = null
       glyphsRef.current = null
-      editor.dispose()
+      disposeDiffEditor(editor)
       original.dispose()
       modified.dispose()
     }

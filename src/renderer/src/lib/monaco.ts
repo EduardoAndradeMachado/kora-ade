@@ -150,3 +150,24 @@ export const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions 
 registerConflictSupport()
 
 export { monaco }
+
+// O editor não descarta as ações do addAction: comando e atalho ficam nos registros globais do Monaco segurando o
+// editor (e o DOM da aba inteira) depois do dispose. Aqui a ação morre junto com o editor.
+export function addEditorAction(editor: monaco.editor.IStandaloneCodeEditor, action: monaco.editor.IActionDescriptor): monaco.IDisposable {
+  const added = editor.addAction(action)
+  const onDispose = editor.onDidDispose(() => added.dispose())
+  return {
+    dispose: () => {
+      onDispose.dispose()
+      added.dispose()
+    }
+  }
+}
+
+// No Monaco 0.56 a régua lateral do diff (OverviewRulerFeature) observa o layout que depende dela mesma: o ciclo a
+// mantém viva depois do dispose, presa à assinatura global de troca de tema, com o diff e o DOM da aba junto.
+// Desligar a régua antes faz o Monaco descartar a feature.
+export function disposeDiffEditor(editor: monaco.editor.IStandaloneDiffEditor): void {
+  editor.updateOptions({ renderOverviewRuler: false })
+  editor.dispose()
+}
