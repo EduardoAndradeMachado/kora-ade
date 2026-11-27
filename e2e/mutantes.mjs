@@ -881,8 +881,8 @@ const MUTANTS = [
     grep: 'R32 ',
     file: 'src/renderer/src/lib/use-git.ts',
     bug: 'atualização automática apaga o erro da última ação do usuário',
-    find: '      () => !cancelled && setLoadError(null),',
-    replace: '      () => !cancelled && (setLoadError(null), setActionError(null)),'
+    find: '        () => current() && setLoadError(null),',
+    replace: '        () => current() && (setLoadError(null), setActionError(null)),'
   },
   {
     id: 'M83',
