@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GitBranch, GitStatus, GitWorktree } from '@shared/git-types'
 import { ipcErrorMessage } from '@/lib/ipc-error'
 import { notifyGitChanged } from '@/lib/git-refresh'
@@ -7,6 +7,14 @@ const POLL_MS = 5000
 // Salvar em sequência (agente editando vários arquivos) gera um aviso atrás do outro; um status por segundo basta.
 const CHANGE_THROTTLE_MS = 1000
 const PENDING_HEAD = '(aguardando o status)'
+
+// Atualização automática (polling, foco, watcher) é silenciosa: não gira o botão nem desabilita as linhas, e só
+// toca o estado se o git respondeu algo diferente. Com milhares de arquivos alterados, um render à toa do painel
+// (e da árvore de arquivos ao lado) custa caro.
+function keepIfSame<T, P extends T | null>(next: T): (prev: P) => T | P {
+  const text = JSON.stringify(next)
+  return (prev) => (JSON.stringify(prev) === text ? prev : next)
+}
 
 export interface GitState {
   status: GitStatus | null
@@ -37,29 +45,46 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
   const [loadError, setLoadError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [tick, setTick] = useState(0)
+  // Só a leitura mais recente vale: troca de projeto ou leitura nova descarta a resposta das anteriores.
+  const latestLoad = useRef(0)
+  // Depois de um erro de ação o próximo status precisa chegar como objeto novo, mesmo igual: é ele que vira a
+  // referência do PENDING_HEAD.
+  const forceStatus = useRef(false)
 
-  const refresh = useCallback(() => setTick((t) => t + 1), [])
+  // Fora do estado do React de propósito: um contador em estado renderizava o painel a cada 5 s mesmo sem mudança.
+  const load = useCallback(
+    (quiet: boolean): void => {
+      const id = ++latestLoad.current
+      const current = (): boolean => id === latestLoad.current
+      if (!quiet) setLoading(true)
+      const jobs: Promise<unknown>[] = [
+        window.kora.gitStatus(projectId).then((s) => current() && setStatus(forceStatus.current ? s : keepIfSame(s))),
+        window.kora.gitRemoteUrl(projectId).then((r) => current() && setRemote(r))
+      ]
+      if (withBranches) {
+        jobs.push(window.kora.gitBranches(projectId).then((b) => current() && setBranches(keepIfSame(b))))
+        jobs.push(window.kora.gitWorktrees(projectId).then((w) => current() && setWorktrees(keepIfSame(w))))
+      }
+      Promise.all(jobs).then(
+        () => current() && setLoadError(null),
+        (err: unknown) => current() && setLoadError(ipcErrorMessage(err))
+      ).finally(() => current() && setLoading(false))
+    },
+    [projectId, withBranches]
+  )
+  const refresh = useCallback(() => load(true), [load])
+  // As ações terminam depois de um await: se o projeto trocou no meio, a leitura é a do projeto atual.
+  const loadRef = useRef(load)
+  useEffect(() => {
+    loadRef.current = load
+  }, [load])
 
   useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    const jobs: Promise<unknown>[] = [
-      window.kora.gitStatus(projectId).then((s) => !cancelled && setStatus(s)),
-      window.kora.gitRemoteUrl(projectId).then((r) => !cancelled && setRemote(r))
-    ]
-    if (withBranches) {
-      jobs.push(window.kora.gitBranches(projectId).then((b) => !cancelled && setBranches(b)))
-      jobs.push(window.kora.gitWorktrees(projectId).then((w) => !cancelled && setWorktrees(w)))
-    }
-    Promise.all(jobs).then(
-      () => !cancelled && setLoadError(null),
-      (err: unknown) => !cancelled && setLoadError(ipcErrorMessage(err))
-    ).finally(() => !cancelled && setLoading(false))
+    load(false)
     return () => {
-      cancelled = true
+      latestLoad.current++
     }
-  }, [projectId, reloadKey, tick, withBranches])
+  }, [load, reloadKey])
 
   useEffect(() => {
     let last = 0
@@ -99,7 +124,10 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
   const [errorHead, setErrorHead] = useState<string | null>(null)
   const head = status?.isRepo ? `${status.branch}\0${status.oid}\0${status.operation?.kind ?? ''}` : ''
   useEffect(() => {
-    if (errorHead === PENDING_HEAD) setErrorHead(head)
+    if (errorHead === PENDING_HEAD) {
+      forceStatus.current = false
+      setErrorHead(head)
+    }
     else if (errorHead !== null && head !== errorHead) {
       setErrorHead(null)
       setActionError(null)
@@ -114,13 +142,14 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
     setActionError(null)
     try {
       await action()
-      refresh()
+      loadRef.current(false)
       notifyGitChanged(projectId)
       return true
     } catch (err) {
       setActionError(ipcErrorMessage(err))
       setErrorHead(PENDING_HEAD)
-      refresh()
+      forceStatus.current = true
+      loadRef.current(false)
       return false
     } finally {
       setBusy(null)
@@ -129,7 +158,7 @@ export function useGit(projectId: string, reloadKey: number, withBranches: boole
 
   const userRefresh = (): void => {
     setActionError(null)
-    refresh()
+    load(false)
   }
 
   return { status, branches, worktrees, remote, loading, busy, error: actionError ?? loadError, refresh: userRefresh, run }
