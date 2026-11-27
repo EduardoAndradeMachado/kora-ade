@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { visibleRange } from '../src/renderer/src/lib/virtual-range'
+import { keepMounted, visibleRange } from '../src/renderer/src/lib/virtual-range'
 
 const ROW = 24
 
@@ -50,5 +50,17 @@ describe('visibleRange', () => {
     expect(visibleRange(0, 600, 0, 10, ROW, 20)).toEqual({ start: 0, end: 10 })
     expect(visibleRange(0, 600, 5000, 3000, ROW, 20)).toEqual({ start: 0, end: 0 })
     expect(visibleRange(10_000, 600, 0, 100, ROW, 20)).toEqual({ start: 100, end: 100 })
+  })
+})
+
+describe('keepMounted', () => {
+  it('estica a faixa até a linha em edição, acima ou abaixo, sem tirar nada do que já estava montado', () => {
+    expect(keepMounted({ start: 100, end: 160 }, 5, 3000)).toEqual({ start: 5, end: 160 })
+    expect(keepMounted({ start: 100, end: 160 }, 2000, 3000)).toEqual({ start: 100, end: 2001 })
+    expect(keepMounted({ start: 100, end: 160 }, 120, 3000)).toEqual({ start: 100, end: 160 })
+  })
+
+  it('ignora índice ausente ou fora da lista', () => {
+    for (const keep of [undefined, -1, 3000]) expect(keepMounted({ start: 100, end: 160 }, keep, 3000)).toEqual({ start: 100, end: 160 })
   })
 })

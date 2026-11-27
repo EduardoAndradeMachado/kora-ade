@@ -335,6 +335,15 @@ export function FileTree({
   const rowsRef = useRef(rows)
   rowsRef.current = rows
   const listApi = useRef<VirtualRowsApi | null>(null)
+  // O campo de criar ou renomear não pode sumir ao rolar (perderia o que foi digitado).
+  const editingIndex = rows.findIndex((row) => (row.kind === 'create' ? true : renaming !== null && row.entry.path === renaming))
+
+  // O campo de criar nasce no topo da pasta, que pode estar fora da área visível: rola até ele.
+  useEffect(() => {
+    if (!creating) return
+    const index = rowsRef.current.findIndex((row) => row.kind === 'create')
+    if (index >= 0) listApi.current?.scrollToIndex(index)
+  }, [creating])
 
   // A linha pode não existir no DOM (fora da área visível): rola pelo índice dela na lista.
   const scrollTo = (rel: string): void => {
@@ -1053,7 +1062,7 @@ export function FileTree({
       {message && (
         <p className={cn('px-2 py-1 text-xs', message.tone === 'error' ? 'text-destructive' : 'text-muted-foreground')}>{message.text}</p>
       )}
-      <VirtualRows items={rows} rowHeight={ROW_HEIGHT} render={renderRow} apiRef={listApi} />
+      <VirtualRows items={rows} rowHeight={ROW_HEIGHT} render={renderRow} apiRef={listApi} keepIndex={editingIndex} />
       <div className="min-h-8 flex-1" onClick={() => selectOnly(null)} />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.target)} onClose={() => setMenu(null)} />}
     </div>

@@ -20,3 +20,10 @@ export function visibleRange(
   const start = Math.min(Math.max(first, 0), count)
   return { start, end: Math.min(Math.max(last, start), count) }
 }
+
+// Linha que não pode desmontar (campo de nome sendo editado): a faixa estica até ela em vez de montá-la à parte,
+// para o React não recriar o campo e perder o que foi digitado.
+export function keepMounted(range: RowRange, keep: number | undefined, count: number): RowRange {
+  if (keep === undefined || keep < 0 || keep >= count) return range
+  return { start: Math.min(range.start, keep), end: Math.max(range.end, keep + 1) }
+}

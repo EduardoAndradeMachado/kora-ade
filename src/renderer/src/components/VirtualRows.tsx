@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { visibleRange, type RowRange } from '@/lib/virtual-range'
+import { keepMounted, visibleRange, type RowRange } from '@/lib/virtual-range'
 
 const OVERSCAN = 20
 const STEP = 10
@@ -25,12 +25,15 @@ export function VirtualRows<T>({
   items,
   rowHeight,
   render,
-  apiRef
+  apiRef,
+  keepIndex
 }: {
   items: T[]
   rowHeight: number
   render(item: T): React.ReactNode
   apiRef?: React.RefObject<VirtualRowsApi | null>
+  // Índice que fica montado mesmo fora da área visível.
+  keepIndex?: number
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const [range, setRange] = useState<RowRange>(() => ({ start: 0, end: Math.min(items.length, OVERSCAN * 2) }))
@@ -55,15 +58,20 @@ export function VirtualRows<T>({
     }
     updateRef.current = update
     update()
-    // Captura: o evento de rolagem não sobe, e não importa qual ancestral rolou.
-    document.addEventListener('scroll', update, { capture: true, passive: true })
+    // Captura: o evento de rolagem não sobe, e não importa qual ancestral rolou. Rolagem de outra coisa (um terminal
+    // despejando saída rola a cada linha) não mexe na lista e não deve medir layout.
+    const onScroll = (e: Event): void => {
+      if (e.target instanceof Node && e.target !== document && !e.target.contains(list)) return
+      update()
+    }
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true })
     window.addEventListener('resize', update)
     const resize = new ResizeObserver(update)
     clips.forEach((clip) => resize.observe(clip))
     if (apiRef) {
       apiRef.current = {
         scrollToIndex: (index) => {
-          const scroller = clips.find((clip) => clip.scrollHeight > clip.clientHeight + 1)
+          const scroller = clips.find((clip) => /auto|scroll/.test(getComputedStyle(clip).overflowY) && clip.scrollHeight > clip.clientHeight + 1)
           if (!scroller || index < 0 || index >= count) return
           const box = scroller.getBoundingClientRect()
           const rowTop = list.getBoundingClientRect().top + index * rowHeight
@@ -74,7 +82,7 @@ export function VirtualRows<T>({
       }
     }
     return () => {
-      document.removeEventListener('scroll', update, { capture: true })
+      document.removeEventListener('scroll', onScroll, { capture: true })
       window.removeEventListener('resize', update)
       resize.disconnect()
       updateRef.current = () => {}
@@ -85,9 +93,10 @@ export function VirtualRows<T>({
   // Seção de cima abrindo ou fechando (branches, stash) muda onde a lista começa sem rolar nada.
   useLayoutEffect(() => updateRef.current())
 
+  const mounted = keepMounted(range, keepIndex, count)
   return (
     <div ref={ref} style={{ height: count * rowHeight }} className="relative">
-      <div style={{ transform: `translateY(${range.start * rowHeight}px)` }}>{items.slice(range.start, range.end).map(render)}</div>
+      <div style={{ transform: `translateY(${mounted.start * rowHeight}px)` }}>{items.slice(mounted.start, mounted.end).map(render)}</div>
     </div>
   )
 }
